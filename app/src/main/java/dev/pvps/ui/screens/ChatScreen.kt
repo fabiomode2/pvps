@@ -1791,8 +1791,10 @@ private fun SessionRow(
                 Text(
                     buildString {
                         append(session.agent ?: "agent")
-                        append(" · ")
-                        append(formatCost(session.cost))
+                        if (session.cost > 0.0) {
+                            append(" · ")
+                            append(formatCost(session.cost))
+                        }
                         append(" · ")
                         append(relativeTime(session.time.updated))
                         if (session.isRunning) append(" · busy")
