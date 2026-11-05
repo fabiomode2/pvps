@@ -33,16 +33,27 @@ jobs:
           cache: gradle
 
       - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        continue-on-error: true
+
+      - name: Install Android SDK packages
         run: |
           set -euo pipefail
-          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          export ANDROID_HOME="${SDK}"
-          export ANDROID_SDK_ROOT="${SDK}"
-          echo "ANDROID_HOME=${SDK}" >> "${GITHUB_ENV}"
-          echo "ANDROID_SDK_ROOT=${SDK}" >> "${GITHUB_ENV}"
-          SDKM="$(find "${SDK}/cmdline-tools" -name sdkmanager -type f 2>/dev/null | sort | tail -1)"
-          test -n "${SDKM}"
-          echo "Using ${SDKM}"
+          if command -v sdkmanager > /dev/null 2>&1; then
+            SDKM="$(command -v sdkmanager)"
+          else
+            SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+            export ANDROID_HOME="${SDK}"
+            export ANDROID_SDK_ROOT="${SDK}"
+            echo "ANDROID_HOME=${SDK}" >> "${GITHUB_ENV}"
+            echo "ANDROID_SDK_ROOT=${SDK}" >> "${GITHUB_ENV}"
+            SDKM="$(find "${SDK}/cmdline-tools" -name sdkmanager -type f 2>/dev/null | sort | tail -1)"
+            if [[ -z "${SDKM}" ]]; then
+              echo "::error::sdkmanager not found after setup-android"
+              exit 1
+            fi
+            echo "Using ${SDKM}"
+          fi
           yes | "${SDKM}" --licenses > /dev/null || true
           "${SDKM}" --install "platforms;android-36" "build-tools;36.0.0"
 
@@ -67,6 +78,9 @@ jobs:
           core="${version%%-*}"
           core="${core%%+*}"
           IFS=. read -r major minor patch <<< "${core}"
+          major="${major//[^0-9]/}"
+          minor="${minor//[^0-9]/}"
+          patch="${patch//[^0-9]/}"
           version_code=$((10#${major:-0} * 10000 + 10#${minor:-0} * 100 + 10#${patch:-0}))
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "version_code=${version_code}" >> "${GITHUB_OUTPUT}"
