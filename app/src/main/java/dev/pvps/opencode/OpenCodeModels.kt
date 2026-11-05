@@ -68,10 +68,43 @@ data class SessionsResponse(val data: List<SessionInfo> = emptyList())
 data class SessionResponse(val data: SessionInfo = SessionInfo())
 
 @Serializable
-data class MessagesResponse(val data: List<MessageDto> = emptyList())
+data class MessagesCursor(
+    val previous: String? = null,
+    val next: String? = null
+)
+
+@Serializable
+data class MessagesResponse(
+    val data: List<MessageDto> = emptyList(),
+    val cursor: MessagesCursor? = null
+)
 
 @Serializable
 data class PermissionsResponse(val data: List<PermissionRequest> = emptyList())
+
+@Serializable
+data class PromptPayload(
+    val text: String = "",
+    val files: List<FileAttachment> = emptyList(),
+    val agents: List<AgentAttachment> = emptyList(),
+    val skills: List<SkillAttachment> = emptyList()
+)
+
+@Serializable
+data class PromptInboxUser(
+    val id: String = "",
+    val sessionID: String = "",
+    val time: MessageTime = MessageTime(),
+    val type: String = "user",
+    val payload: PromptPayload = PromptPayload(),
+    val delivery: String = "steer"
+)
+
+@Serializable
+data class PromptResponse(val data: PromptInboxUser = PromptInboxUser())
+
+@Serializable
+data class InboxResponse(val data: List<PromptInboxUser> = emptyList())
 
 @Serializable
 data class ModelsResponse(val data: List<ModelInfo> = emptyList())
@@ -119,12 +152,29 @@ data class MessageDto(
 )
 
 @Serializable
+data class PromptFileSource(
+    val type: String = "",
+    val uri: String? = null
+)
+
+@Serializable
 data class FileAttachment(
     val uri: String = "",
+    val data: String? = null,
     val name: String? = null,
     val description: String? = null,
-    val mime: String? = null
-)
+    val mime: String? = null,
+    val source: PromptFileSource? = null,
+    val mention: JsonObject? = null
+) {
+    /** The v2 prompt payload nests inline/URI sources; the UI wants one URI. */
+    val resolvedUri: String
+        get() = when {
+            source?.uri?.isNotBlank() == true -> source?.uri.orEmpty()
+            !data.isNullOrBlank() && !mime.isNullOrBlank() -> "data:$mime;base64,$data"
+            else -> uri
+        }
+}
 
 @Serializable
 data class AgentAttachment(val name: String = "")
@@ -162,7 +212,11 @@ data class PermissionRequest(
 data class ModelVariant(val id: String = "")
 
 @Serializable
-data class ModelLimit(val context: Long = 0, val output: Long = 0)
+data class ModelLimit(
+    val context: Long = 0,
+    val input: Long = 0,
+    val output: Long = 0
+)
 
 @Serializable
 data class ModelInfo(
@@ -208,7 +262,8 @@ data class ToolPart(
     val status: String,
     val input: String,
     val content: List<ToolContent>,
-    val error: String? = null
+    val error: String? = null,
+    val metadata: JsonObject? = null
 )
 
 sealed interface ToolContent {
@@ -220,6 +275,8 @@ data class UiMessage(
     val id: String,
     val type: String,
     val created: Long,
+    val streamed: Long? = null,
+    val completed: Long? = null,
     val text: String,
     val files: List<FileAttachment>,
     val parts: List<UiPart>,
@@ -261,6 +318,8 @@ fun MessageDto.toUi(): UiMessage {
         id = id,
         type = type,
         created = time.created,
+        streamed = time.streamed,
+        completed = time.completed,
         text = displayText,
         files = files,
         parts = parsed,
@@ -300,7 +359,8 @@ private fun parsePart(element: JsonElement): UiPart? {
                     status = status,
                     input = input,
                     content = content,
-                    error = error
+                    error = error,
+                    metadata = state?.get("metadata") as? JsonObject
                 )
             )
         }

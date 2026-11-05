@@ -5,69 +5,70 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.view.WindowManager
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.ContentPaste
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import dev.pvps.ui.theme.TextSecondary
-import dev.pvps.ui.theme.TextPrimary
-import dev.pvps.ui.theme.SurfaceDark
-import dev.pvps.ui.theme.SurfaceRaised
-import dev.pvps.ui.theme.Success
-import dev.pvps.ui.theme.Danger
-import dev.pvps.ui.theme.Accent
-import dev.pvps.ui.components.StatusDot
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
@@ -87,8 +88,18 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.pvps.ui.components.StatusDot
+import dev.pvps.ui.theme.Accent
+import dev.pvps.ui.theme.Danger
+import dev.pvps.ui.theme.OutlineSoft
+import dev.pvps.ui.theme.Success
+import dev.pvps.ui.theme.SurfaceDark
+import dev.pvps.ui.theme.SurfaceRaised
+import dev.pvps.ui.theme.TextPrimary
+import dev.pvps.ui.theme.TextSecondary
 import com.termux.terminal.TextStyle
 import com.termux.terminal.WcWidth
 import dev.pvps.data.model.AppSettings
@@ -128,6 +139,8 @@ fun TerminalScreen(
     var input by remember { mutableStateOf("") }
     var ctrlActive by remember { mutableStateOf(false) }
     var altActive by remember { mutableStateOf(false) }
+    var symbolsExpanded by remember { mutableStateOf(false) }
+    var isFocused by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
     var retry by remember { mutableIntStateOf(0) }
     val focusRequester = remember { FocusRequester() }
@@ -169,6 +182,18 @@ fun TerminalScreen(
         }
     }
 
+    // Raise the keyboard when the terminal becomes available. Wait one frame so
+    // the hidden input is attached before requesting focus, then another frame
+    // before asking the IME to show.
+    LaunchedEffect(controller != null) {
+        if (controller != null) {
+            withFrameNanos { }
+            runCatching { focusRequester.requestFocus() }
+            withFrameNanos { }
+            keyboard?.show()
+        }
+    }
+
     DisposableEffect(host.id) {
         onDispose {
             controller?.close()
@@ -206,45 +231,89 @@ fun TerminalScreen(
         controller?.sendText(text)
     }
 
+    val statusColor = when (connection.status) {
+        ConnectionState.Status.CONNECTED -> Success
+        ConnectionState.Status.CONNECTING -> Accent
+        ConnectionState.Status.ERROR -> Danger
+        else -> TextSecondary
+    }
+    val statusText = when (connection.status) {
+        ConnectionState.Status.CONNECTED ->
+            controller?.title?.takeIf { it.isNotBlank() } ?: "connected"
+        ConnectionState.Status.CONNECTING -> "connecting…"
+        ConnectionState.Status.ERROR -> error ?: "connection error"
+        ConnectionState.Status.NEEDS_HOST_KEY -> "host key not verified"
+        ConnectionState.Status.DISCONNECTED -> "disconnected"
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(palette.background))
+            .imePadding()
+            // Keyboard insets usually cover the navigation bar; only add the
+            // remainder so the shortcut row never hides behind either.
+            .windowInsetsPadding(WindowInsets.navigationBars.exclude(WindowInsets.ime))
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(SurfaceDark)
-                .padding(horizontal = 4.dp, vertical = 2.dp),
+                .padding(start = 4.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextSecondary)
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(MaterialTheme.shapes.small)
+                    .clickable(onClick = onBack),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = TextSecondary,
+                    modifier = Modifier.size(18.dp)
+                )
             }
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(vertical = 3.dp)
+            ) {
                 Text(
                     text = host.name,
                     color = TextPrimary,
-                    style = MaterialTheme.typography.titleSmall
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
-                Text(
-                    text = controller?.title?.takeIf { it.isNotBlank() } ?: connection.status.name.lowercase(),
-                    color = TextSecondary,
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1
-                )
-            }
-            StatusDot(
-                when (connection.status) {
-                    ConnectionState.Status.CONNECTED -> Success
-                    ConnectionState.Status.ERROR -> Danger
-                    else -> TextSecondary
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StatusDot(statusColor, 6)
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        text = statusText,
+                        color = TextSecondary,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
-            )
-            Spacer(Modifier.width(6.dp))
+            }
             Box {
-                IconButton(onClick = { menuExpanded = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "Terminal menu", tint = TextSecondary)
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(MaterialTheme.shapes.small)
+                        .clickable { menuExpanded = true },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.MoreVert,
+                        contentDescription = "Terminal menu",
+                        tint = TextSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
                 DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                     DropdownMenuItem(
@@ -290,6 +359,7 @@ fun TerminalScreen(
                 }
             }
         }
+        HorizontalDivider(color = OutlineSoft, thickness = 1.dp)
 
         Box(
             modifier = Modifier
@@ -334,10 +404,15 @@ fun TerminalScreen(
                                 terminal.resize(newCols, newRows, cellWidth, cellHeight)
                             }
                         }
-                        .pointerInput(Unit) {
+                        .pointerInput(isFocused) {
                             detectTapGestures {
-                                focusRequester.requestFocus()
-                                keyboard?.show()
+                                if (!isFocused) {
+                                    runCatching { focusRequester.requestFocus() }
+                                }
+                                scope.launch {
+                                    withFrameNanos { }
+                                    keyboard?.show()
+                                }
                             }
                         }
                         .pointerInput(cellHeight) {
@@ -365,7 +440,10 @@ fun TerminalScreen(
                     value = input,
                     onValueChange = { value ->
                         if (value.isNotEmpty()) {
-                            sendWithModifiers(value)
+                            // Soft keyboards commit newlines as \n; a PTY expects
+                            // carriage return for the Enter key.
+                            val normalized = value.replace("\r\n", "\r").replace('\n', '\r')
+                            sendWithModifiers(normalized)
                             input = ""
                         }
                     },
@@ -373,6 +451,7 @@ fun TerminalScreen(
                         .size(1.dp)
                         .alpha(0.01f)
                         .focusRequester(focusRequester)
+                        .onFocusChanged { isFocused = it.isFocused }
                         .onPreviewKeyEvent { event ->
                             if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                             val ctrl = event.isCtrlPressed || ctrlActive
@@ -420,78 +499,80 @@ fun TerminalScreen(
             }
         }
 
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(SurfaceDark)
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 6.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically
         ) {
-            TerminalKey("CTRL", active = ctrlActive) { ctrlActive = !ctrlActive }
-            TerminalKey("ALT", active = altActive) { altActive = !altActive }
-            TerminalKey("ESC") { sendSequence("\u001B") }
-            TerminalKey("TAB") { sendSequence("\t") }
-            TerminalKey("↑") { sendSequence("\u001B[A") }
-            TerminalKey("↓") { sendSequence("\u001B[B") }
-            TerminalKey("←") { sendSequence("\u001B[D") }
-            TerminalKey("→") { sendSequence("\u001B[C") }
-            TerminalKey("C-c") { sendSequence("\u0003") }
-            TerminalKey("C-d") { sendSequence("\u0004") }
-            TerminalKey("C-z") { sendSequence("\u001A") }
-            TerminalKey("C-l") { sendSequence("\u000C") }
-            TerminalKey("/") { sendWithModifiers("/") }
-            TerminalKey("-") { sendWithModifiers("-") }
-            TerminalKey("|") { sendWithModifiers("|") }
-            TerminalKey("~") { sendWithModifiers("~") }
-            TerminalKey("`") { sendWithModifiers("`") }
-            TerminalKey(":") { sendWithModifiers(":") }
-            TerminalKey(";") { sendWithModifiers(";") }
-            TerminalKey("=") { sendWithModifiers("=") }
-            TerminalKey("+") { sendWithModifiers("+") }
-            TerminalKey("_") { sendWithModifiers("_") }
-            TerminalKey("*") { sendWithModifiers("*") }
-            TerminalKey("\"") { sendWithModifiers("\"") }
-            TerminalKey("'") { sendWithModifiers("'") }
-            TerminalKey("(") { sendWithModifiers("(") }
-            TerminalKey(")") { sendWithModifiers(")") }
-            TerminalKey("[") { sendWithModifiers("[") }
-            TerminalKey("]") { sendWithModifiers("]") }
-            TerminalKey("{") { sendWithModifiers("{") }
-            TerminalKey("}") { sendWithModifiers("}") }
-            TerminalKey("<") { sendWithModifiers("<") }
-            TerminalKey(">") { sendWithModifiers(">") }
-            TerminalKey("?") { sendWithModifiers("?") }
-            TerminalKey("&") { sendWithModifiers("&") }
-            TerminalKey("%") { sendWithModifiers("%") }
-            TerminalKey("$") { sendWithModifiers("$") }
-            TerminalKey("#") { sendWithModifiers("#") }
-            TerminalKey("@") { sendWithModifiers("@") }
-            TerminalKey("!") { sendWithModifiers("!") }
-            TerminalKey("^") { sendWithModifiers("^") }
-            TerminalKey("\\") { sendWithModifiers("\\") }
+            HorizontalDivider(color = OutlineSoft, thickness = 1.dp)
+            if (symbolsExpanded) {
+                SymbolKeys(onSymbol = { sendWithModifiers(it) })
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TerminalKey("SYM", active = symbolsExpanded) { symbolsExpanded = !symbolsExpanded }
+                TerminalKey("CTRL", active = ctrlActive) { ctrlActive = !ctrlActive }
+                TerminalKey("ALT", active = altActive) { altActive = !altActive }
+                TerminalKey("ESC") { sendSequence("\u001B") }
+                TerminalKey("TAB") { sendSequence("\t") }
+                TerminalKey("↑") { sendSequence("\u001B[A") }
+                TerminalKey("↓") { sendSequence("\u001B[B") }
+                TerminalKey("←") { sendSequence("\u001B[D") }
+                TerminalKey("→") { sendSequence("\u001B[C") }
+                TerminalKey("^C") { sendSequence("\u0003") }
+                TerminalKey("^D") { sendSequence("\u0004") }
+                TerminalKey("^L") { sendSequence("\u000C") }
+            }
+        }
+    }
+}
+
+private val terminalSymbols = listOf(
+    "/", "-", "|", "~", ":", ";", "=", "_", "*", "\"", "'",
+    "(", ")", "[", "]", "{", "}", "<", ">", "?", "&", "%",
+    "$", "#", "@", "!", "^", "\\", "`"
+)
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SymbolKeys(onSymbol: (String) -> Unit) {
+    FlowRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        terminalSymbols.forEach { symbol ->
+            TerminalKey(symbol) { onSymbol(symbol) }
         }
     }
 }
 
 @Composable
 private fun TerminalKey(label: String, active: Boolean = false, onClick: () -> Unit) {
-    TextButton(
-        onClick = onClick,
+    Box(
         modifier = Modifier
-            .height(34.dp)
-            .background(
-                color = if (active) Accent.copy(alpha = 0.25f) else SurfaceRaised,
-                shape = MaterialTheme.shapes.small
-            )
-            .padding(horizontal = 2.dp)
+            .height(32.dp)
+            .defaultMinSize(minWidth = 32.dp)
+            .clip(MaterialTheme.shapes.small)
+            .background(if (active) Accent.copy(alpha = 0.22f) else SurfaceRaised)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp),
+        contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
             color = if (active) Accent else TextPrimary,
             fontFamily = FontFamily.Monospace,
-            fontSize = 12.sp
+            fontSize = 11.sp,
+            maxLines = 1
         )
     }
 }

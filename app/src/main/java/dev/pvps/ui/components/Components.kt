@@ -100,33 +100,18 @@ import java.util.concurrent.TimeUnit
 fun PvpsBackdrop(modifier: Modifier = Modifier) {
     Canvas(modifier = modifier.fillMaxSize()) {
         drawRect(color = DeepBackground)
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(Accent.copy(alpha = 0.12f), Color.Transparent),
-                center = Offset(size.width * 0.88f, -size.height * 0.06f),
-                radius = size.width * 0.95f
-            ),
-            radius = size.width * 0.95f,
-            center = Offset(size.width * 0.88f, -size.height * 0.06f)
-        )
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(Violet.copy(alpha = 0.09f), Color.Transparent),
-                center = Offset(-size.width * 0.08f, size.height * 0.92f),
-                radius = size.width * 0.85f
-            ),
-            radius = size.width * 0.85f,
-            center = Offset(-size.width * 0.08f, size.height * 0.92f)
-        )
-        val step = 26.dp.toPx()
-        val dotColor = Color.White.copy(alpha = 0.035f)
-        var y = step / 2f
-        while (y < size.height) {
-            var x = step / 2f
-            while (x < size.width) {
-                drawCircle(color = dotColor, radius = 1.1f, center = Offset(x, y))
-                x += step
-            }
+        // A quiet engineering grid, not decoration: it gives the translucent
+        // instrument panels a stable optical baseline without gradients.
+        val step = 40.dp.toPx()
+        val line = OutlineSoft.copy(alpha = 0.22f)
+        var x = 0f
+        while (x <= size.width) {
+            drawLine(line, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
+            x += step
+        }
+        var y = 0f
+        while (y <= size.height) {
+            drawLine(line, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
             y += step
         }
     }
@@ -167,25 +152,26 @@ fun ScreenHeader(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .padding(start = 10.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (onBack != null) {
-                    GlassIconButton(onClick = onBack) {
+                    GlassIconButton(onClick = onBack, size = 38.dp) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
-                            tint = TextPrimary
+                            tint = TextPrimary,
+                            modifier = Modifier.size(19.dp)
                         )
                     }
                 } else {
-                    PvpsMark(38.dp)
+                    PvpsMark(34.dp)
                 }
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = title,
-                        style = MaterialTheme.typography.headlineSmall,
+                        style = MaterialTheme.typography.titleLarge,
                         color = TextPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -206,11 +192,7 @@ fun ScreenHeader(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(1.dp)
-                    .background(
-                        Brush.horizontalGradient(
-                            listOf(Color.Transparent, OutlineDark.copy(alpha = 0.9f), Color.Transparent)
-                        )
-                    )
+                    .background(OutlineDark.copy(alpha = 0.55f))
             )
         }
     }
@@ -768,32 +750,28 @@ fun ConfirmDialog(
 fun MonospaceBox(text: String, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = Color(0xFF040705),
-        shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(1.dp, OutlineDark)
+        color = DeepBackground.copy(alpha = 0.72f),
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.65f))
     ) {
         Column {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                StatusDot(Danger, 6)
-                Spacer(Modifier.width(5.dp))
-                StatusDot(Warning, 6)
-                Spacer(Modifier.width(5.dp))
-                StatusDot(Success, 6)
+                Text("CODE", style = MaterialTheme.typography.labelSmall, color = TextFaint)
                 Spacer(Modifier.weight(1f))
-                Text("OUTPUT", style = MaterialTheme.typography.labelSmall, color = TextFaint)
+                Text("MONO", style = MaterialTheme.typography.labelSmall, color = TextFaint)
             }
-            HorizontalDivider(color = OutlineSoft)
+            HorizontalDivider(color = OutlineSoft.copy(alpha = 0.7f))
             Text(
                 text = text.ifBlank { "(no output)" },
-                modifier = Modifier.padding(14.dp),
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = MonoFont,
-                color = Color(0xFFB8C9BE)
+                color = Color(0xFFC3D1CC)
             )
         }
     }

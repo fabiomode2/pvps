@@ -5,14 +5,19 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -23,32 +28,35 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Archive
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Unarchive
+import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -61,28 +69,38 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import dev.pvps.data.model.ConnectionState
-import dev.pvps.data.model.Host
 import dev.pvps.ssh.RemoteFile
 import dev.pvps.ssh.SftpClient
 import dev.pvps.ui.AppViewModel
 import dev.pvps.ui.components.ConfirmDialog
-import dev.pvps.ui.components.EmptyState
 import dev.pvps.ui.components.ErrorBanner
 import dev.pvps.ui.components.MonospaceBox
-import dev.pvps.ui.components.ScreenHeader
+import dev.pvps.ui.components.PvpsTextField
 import dev.pvps.ui.components.collectAsStateValue
 import dev.pvps.ui.components.formatBytes
 import dev.pvps.ui.components.formatDate
 import dev.pvps.ui.theme.Accent
 import dev.pvps.ui.theme.Danger
+import dev.pvps.ui.theme.MonoFont
+import dev.pvps.ui.theme.OutlineDark
+import dev.pvps.ui.theme.OutlineSoft
+import dev.pvps.ui.theme.SurfaceDark
+import dev.pvps.ui.theme.SurfaceHigh
+import dev.pvps.ui.theme.SurfaceRaised
+import dev.pvps.ui.theme.TextFaint
+import dev.pvps.ui.theme.TextPrimary
 import dev.pvps.ui.theme.TextSecondary
 import dev.pvps.ui.theme.Warning
 import kotlinx.coroutines.Dispatchers
@@ -209,32 +227,26 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
 
     Scaffold(
         containerColor = Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onBackground,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            ScreenHeader(
-                title = "Files",
-                subtitle = currentPath,
+            FilesTopBar(
+                currentPath = currentPath,
+                connected = connected,
+                busy = loading,
                 onBack = onBack,
-                actions = {
-                    IconButton(onClick = { uploadLauncher.launch(arrayOf("*/*")) }, enabled = connected) {
-                        Icon(Icons.Default.CloudUpload, contentDescription = "Upload", tint = Accent)
-                    }
-                    IconButton(onClick = { showNewFolder = true }, enabled = connected) {
-                        Icon(Icons.Default.Add, contentDescription = "New folder", tint = Accent)
-                    }
-                    IconButton(onClick = { refresh++ }, enabled = connected && !loading) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Accent)
-                    }
-                }
+                onUpload = { uploadLauncher.launch(arrayOf("*/*")) },
+                onNewFolder = { showNewFolder = true },
+                onRefresh = { refresh++ }
             )
         }
     ) { padding ->
         if (host == null || !connected) {
-            EmptyState(
-                title = "SSH not connected",
-                message = "Connect to the host from the dashboard first.",
-                actionLabel = "Connect",
-                onAction = { host?.let { viewModel.connect(it.id) } }
+            DisconnectedState(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                onConnect = { host?.let { viewModel.connect(it.id) } }
             )
             return@Scaffold
         }
@@ -243,55 +255,58 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            Breadcrumbs(currentPath) { path -> currentPath = path }
-            if (error != null) ErrorBanner(error!!) { error = null }
+            PathStrip(currentPath) { path -> currentPath = path }
             if (loading) {
-                CircularProgressIndicator(color = Accent, modifier = Modifier.padding(16.dp))
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(2.dp),
+                    color = Accent,
+                    trackColor = OutlineSoft
+                )
             }
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(1.dp)
+            if (error != null) ErrorBanner(error!!) { error = null }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
             ) {
-                if (currentPath != "/") {
-                    item {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { currentPath = parentOf(currentPath) }
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = null, tint = TextSecondary)
-                            Spacer(Modifier.width(10.dp))
-                            Text("..", color = TextSecondary, fontFamily = FontFamily.Monospace)
-                        }
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 88.dp)
+                ) {
+                    items(entries, key = { it.path }) { file ->
+                        FileRow(
+                            file = file,
+                            onOpen = {
+                                if (file.isDirectory) {
+                                    currentPath = file.path
+                                } else {
+                                    openPreview(file)
+                                }
+                            },
+                            onAction = { action ->
+                                when (action) {
+                                    FileAction.DOWNLOAD -> {
+                                        pendingDownload = file
+                                        downloadLauncher.launch(file.name)
+                                    }
+                                    FileAction.RENAME -> renameTarget = file
+                                    FileAction.DELETE -> deleteTarget = file
+                                    FileAction.TAR -> tarTarget = file
+                                    FileAction.EXTRACT -> extractTarget = file
+                                }
+                            }
+                        )
                     }
                 }
-                items(entries, key = { it.path }) { file ->
-                    FileRow(
-                        file = file,
-                        onOpen = {
-                            if (file.isDirectory) {
-                                currentPath = file.path
-                            } else {
-                                openPreview(file)
-                            }
-                        },
-                        onAction = { action ->
-                            when (action) {
-                                FileAction.DOWNLOAD -> {
-                                    pendingDownload = file
-                                    downloadLauncher.launch(file.name)
-                                }
-                                FileAction.RENAME -> renameTarget = file
-                                FileAction.DELETE -> deleteTarget = file
-                                FileAction.TAR -> tarTarget = file
-                                FileAction.EXTRACT -> extractTarget = file
-                            }
-                        }
+                if (entries.isEmpty() && !loading && error == null) {
+                    DirectoryEmpty(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(horizontal = 28.dp)
                     )
                 }
-                item { Spacer(Modifier.height(80.dp)) }
             }
         }
     }
@@ -393,7 +408,18 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     preview?.let { file ->
         AlertDialog(
             onDismissRequest = { preview = null; previewImage?.delete() },
-            title = { Text(file.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            containerColor = SurfaceHigh,
+            shape = RoundedCornerShape(20.dp),
+            titleContentColor = TextPrimary,
+            textContentColor = TextSecondary,
+            title = {
+                Text(
+                    file.name,
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            },
             text = {
                 Column(
                     modifier = Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())
@@ -419,11 +445,232 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             confirmButton = {
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (file.name.endsWith(".tar.gz") || file.name.endsWith(".tgz")) {
-                        TextButton(onClick = { extractTarget = file; preview = null }) { Text("Extract") }
+                        TextButton(onClick = { extractTarget = file; preview = null }) {
+                            Text("Extract", color = Accent)
+                        }
                     }
-                    TextButton(onClick = { preview = null; previewImage?.delete() }) { Text("Close") }
+                    TextButton(onClick = { preview = null; previewImage?.delete() }) {
+                        Text("Close", color = Accent)
+                    }
                 }
             }
+        )
+    }
+}
+
+@Composable
+private fun FilesTopBar(
+    currentPath: String,
+    connected: Boolean,
+    busy: Boolean,
+    onBack: () -> Unit,
+    onUpload: () -> Unit,
+    onNewFolder: () -> Unit,
+    onRefresh: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .padding(start = 6.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CompactIconButton(
+                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+                tint = TextPrimary,
+                onClick = onBack
+            )
+            Spacer(Modifier.width(8.dp))
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 8.dp)
+            ) {
+                Text(
+                    "FILES",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 1.4.sp
+                    ),
+                    color = Accent,
+                    maxLines = 1
+                )
+                Text(
+                    currentPath.ifBlank { "/" },
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontSize = 11.5.sp,
+                        lineHeight = 16.sp,
+                        letterSpacing = 0.1.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onBackground,
+                    fontFamily = MonoFont,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                CompactIconButton(
+                    icon = Icons.Default.CloudUpload,
+                    contentDescription = "Upload",
+                    enabled = connected,
+                    onClick = onUpload
+                )
+                CompactIconButton(
+                    icon = Icons.Default.CreateNewFolder,
+                    contentDescription = "New folder",
+                    enabled = connected,
+                    onClick = onNewFolder
+                )
+                CompactIconButton(
+                    icon = Icons.Default.Refresh,
+                    contentDescription = "Refresh",
+                    enabled = connected && !busy,
+                    onClick = onRefresh
+                )
+            }
+        }
+        HorizontalDivider(
+            thickness = 0.5.dp,
+            color = OutlineDark.copy(alpha = 0.9f)
+        )
+    }
+}
+
+@Composable
+private fun CompactIconButton(
+    icon: ImageVector,
+    contentDescription: String,
+    enabled: Boolean = true,
+    tint: Color = Accent,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (enabled) SurfaceRaised.copy(alpha = 0.55f) else Color.Transparent)
+            .border(0.5.dp, OutlineDark, RoundedCornerShape(10.dp))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = if (enabled) tint else TextFaint,
+            modifier = Modifier.size(18.dp)
+        )
+    }
+}
+
+@Composable
+private fun PathStrip(path: String, onNavigate: (String) -> Unit) {
+    val scroll = rememberScrollState()
+    val parts = path.split('/').filter { it.isNotBlank() }
+    Surface(
+        color = SurfaceDark.copy(alpha = 0.72f),
+        contentColor = TextPrimary
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (path != "/") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onNavigate(parentOf(path)) }
+                            .padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.ArrowUpward,
+                            contentDescription = "Parent folder",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "..",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontSize = 11.5.sp,
+                                letterSpacing = 0.2.sp
+                            ),
+                            color = TextSecondary,
+                            fontFamily = MonoFont
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 6.dp)
+                            .width(1.dp)
+                            .height(16.dp)
+                            .background(OutlineDark)
+                    )
+                }
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(scroll),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CrumbSegment(
+                        label = "/",
+                        selected = path == "/",
+                        onClick = { onNavigate("/") }
+                    )
+                    var accumulated = ""
+                    parts.forEach { part ->
+                        accumulated += "/$part"
+                        val target = accumulated
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            contentDescription = null,
+                            tint = TextFaint,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        CrumbSegment(
+                            label = part,
+                            selected = target.trimEnd('/') == path.trimEnd('/'),
+                            onClick = { onNavigate(target) }
+                        )
+                    }
+                }
+            }
+            HorizontalDivider(
+                thickness = 0.5.dp,
+                color = OutlineDark.copy(alpha = 0.8f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun CrumbSegment(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(7.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontSize = 11.5.sp,
+                letterSpacing = 0.2.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
+            ),
+            color = if (selected) Accent else TextSecondary,
+            fontFamily = MonoFont,
+            maxLines = 1
         )
     }
 }
@@ -435,95 +682,233 @@ private fun FileRow(
     onAction: (FileAction) -> Unit
 ) {
     var menu by remember { mutableStateOf(false) }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onOpen() }
-            .padding(horizontal = 14.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = if (file.isDirectory) Icons.Default.Folder else Icons.Default.Description,
-            contentDescription = null,
-            tint = if (file.isDirectory) Warning else TextSecondary,
-            modifier = Modifier.size(22.dp)
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 68.dp)
+                .clickable(onClick = onOpen)
+                .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            FileGlyph(isDirectory = file.isDirectory)
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = file.name,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = fileMetadata(file),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 10.5.sp,
+                        lineHeight = 14.sp,
+                        letterSpacing = 0.2.sp
+                    ),
+                    color = TextSecondary,
+                    fontFamily = MonoFont,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (file.isDirectory) {
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = TextFaint,
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .clickable { menu = true },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.MoreVert,
+                    contentDescription = "Actions for ${file.name}",
+                    tint = TextSecondary,
+                    modifier = Modifier.size(19.dp)
+                )
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    if (!file.isDirectory) {
+                        DropdownMenuItem(
+                            text = { Text("Download", color = TextPrimary) },
+                            leadingIcon = {
+                                Icon(Icons.Default.Download, contentDescription = null, tint = TextSecondary)
+                            },
+                            onClick = { menu = false; onAction(FileAction.DOWNLOAD) }
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("Rename", color = TextPrimary) },
+                        leadingIcon = {
+                            Icon(Icons.Default.Edit, contentDescription = null, tint = TextSecondary)
+                        },
+                        onClick = { menu = false; onAction(FileAction.RENAME) }
+                    )
+                    if (file.isDirectory) {
+                        DropdownMenuItem(
+                            text = { Text("Create tar.gz", color = TextPrimary) },
+                            leadingIcon = {
+                                Icon(Icons.Default.Archive, contentDescription = null, tint = TextSecondary)
+                            },
+                            onClick = { menu = false; onAction(FileAction.TAR) }
+                        )
+                    }
+                    if (file.name.endsWith(".tar.gz") || file.name.endsWith(".tgz")) {
+                        DropdownMenuItem(
+                            text = { Text("Extract", color = TextPrimary) },
+                            leadingIcon = {
+                                Icon(Icons.Default.Unarchive, contentDescription = null, tint = TextSecondary)
+                            },
+                            onClick = { menu = false; onAction(FileAction.EXTRACT) }
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("Delete", color = Danger) },
+                        leadingIcon = {
+                            Icon(Icons.Default.Delete, contentDescription = null, tint = Danger)
+                        },
+                        onClick = { menu = false; onAction(FileAction.DELETE) }
+                    )
+                }
+            }
+        }
+        HorizontalDivider(
+            modifier = Modifier.padding(start = 64.dp, end = 16.dp),
+            thickness = 0.5.dp,
+            color = OutlineDark.copy(alpha = 0.55f)
         )
-        Spacer(Modifier.width(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                file.name,
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                buildString {
-                    if (!file.isDirectory) append(formatBytes(file.size)).append(" · ")
-                    append(formatDate(file.modified))
-                    if (file.permissions.isNotBlank()) append(" · ").append(file.permissions)
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary,
-                maxLines = 1
-            )
-        }
-        Box {
-            IconButton(onClick = { menu = true }) {
-                Icon(Icons.Default.MoreVert, contentDescription = "Actions", tint = TextSecondary)
-            }
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                if (!file.isDirectory) {
-                    DropdownMenuItem(
-                        text = { Text("Download") },
-                        leadingIcon = { Icon(Icons.Default.Download, contentDescription = null) },
-                        onClick = { menu = false; onAction(FileAction.DOWNLOAD) }
-                    )
-                }
-                DropdownMenuItem(
-                    text = { Text("Rename") },
-                    onClick = { menu = false; onAction(FileAction.RENAME) }
-                )
-                if (file.isDirectory) {
-                    DropdownMenuItem(
-                        text = { Text("Create tar.gz") },
-                        leadingIcon = { Icon(Icons.Default.Archive, contentDescription = null) },
-                        onClick = { menu = false; onAction(FileAction.TAR) }
-                    )
-                }
-                if (file.name.endsWith(".tar.gz") || file.name.endsWith(".tgz")) {
-                    DropdownMenuItem(
-                        text = { Text("Extract") },
-                        leadingIcon = { Icon(Icons.Default.Unarchive, contentDescription = null) },
-                        onClick = { menu = false; onAction(FileAction.EXTRACT) }
-                    )
-                }
-                DropdownMenuItem(
-                    text = { Text("Delete", color = Danger) },
-                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = Danger) },
-                    onClick = { menu = false; onAction(FileAction.DELETE) }
-                )
-            }
-        }
     }
 }
 
 @Composable
-private fun Breadcrumbs(path: String, onNavigate: (String) -> Unit) {
-    val parts = path.split('/').filter { it.isNotBlank() }
-    Row(
+private fun FileGlyph(isDirectory: Boolean) {
+    val tint = if (isDirectory) Warning else TextSecondary
+    val container = if (isDirectory) Warning.copy(alpha = 0.10f) else SurfaceRaised.copy(alpha = 0.7f)
+    val border = if (isDirectory) Warning.copy(alpha = 0.20f) else OutlineDark
+    Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .size(36.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(container)
+            .border(0.5.dp, border, RoundedCornerShape(10.dp)),
+        contentAlignment = Alignment.Center
     ) {
-        TextButton(onClick = { onNavigate("/") }) { Text("/", fontFamily = FontFamily.Monospace) }
-        var accumulated = ""
-        parts.forEach { part ->
-            accumulated += "/$part"
-            val target = accumulated
-            TextButton(onClick = { onNavigate(target) }) {
-                Text(part, fontFamily = FontFamily.Monospace, maxLines = 1)
+        Icon(
+            imageVector = if (isDirectory) Icons.Outlined.Folder else Icons.Outlined.Description,
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(18.dp)
+        )
+    }
+}
+
+@Composable
+private fun DirectoryEmpty(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(SurfaceRaised.copy(alpha = 0.55f))
+                .border(0.5.dp, OutlineDark, RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Outlined.Folder,
+                contentDescription = null,
+                tint = TextFaint,
+                modifier = Modifier.size(21.dp)
+            )
+        }
+        Spacer(Modifier.height(14.dp))
+        Text(
+            "Empty directory",
+            style = MaterialTheme.typography.titleMedium,
+            color = TextPrimary,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Upload a file or create a folder to get started.",
+            style = MaterialTheme.typography.bodySmall,
+            color = TextSecondary,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
+private fun DisconnectedState(modifier: Modifier = Modifier, onConnect: () -> Unit) {
+    Column(
+        modifier = modifier.padding(horizontal = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(46.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(SurfaceRaised.copy(alpha = 0.55f))
+                .border(0.5.dp, OutlineDark, RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Outlined.CloudOff,
+                contentDescription = null,
+                tint = TextFaint,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "SSH not connected",
+            style = MaterialTheme.typography.titleLarge,
+            color = TextPrimary,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Connect to the host from the dashboard to browse its filesystem.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextSecondary,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(18.dp))
+        val shape = RoundedCornerShape(10.dp)
+        Surface(
+            modifier = Modifier
+                .clip(shape)
+                .heightIn(min = 48.dp)
+                .clickable(onClick = onConnect),
+            color = Accent.copy(alpha = 0.10f),
+            shape = shape,
+            border = BorderStroke(1.dp, Accent.copy(alpha = 0.34f))
+        ) {
+            Box(
+                modifier = Modifier.padding(horizontal = 18.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "CONNECT",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Accent
+                )
             }
         }
     }
@@ -539,28 +924,48 @@ private fun NameDialog(
     onConfirm: (String) -> Unit
 ) {
     var value by remember { mutableStateOf(initial) }
+    val trimmed = value.trim()
+    val valid = trimmed.isNotEmpty() &&
+        !trimmed.contains('/') &&
+        trimmed != "." &&
+        trimmed != ".."
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title) },
+        containerColor = SurfaceHigh,
+        shape = RoundedCornerShape(20.dp),
+        titleContentColor = TextPrimary,
+        textContentColor = TextSecondary,
+        title = { Text(title, color = TextPrimary) },
         text = {
-            OutlinedTextField(
+            PvpsTextField(
                 value = value,
                 onValueChange = { value = it },
-                label = { Text(label) },
-                singleLine = true
+                label = label
             )
         },
         confirmButton = {
             TextButton(
-                onClick = {
-                    if (value.isNotBlank() && !value.contains('/') && value != "." && value != "..") {
-                        onConfirm(value.trim())
-                    }
-                }
-            ) { Text(confirmLabel) }
+                enabled = valid,
+                onClick = { if (valid) onConfirm(value.trim()) }
+            ) {
+                Text(
+                    confirmLabel,
+                    color = if (valid) Accent else TextFaint
+                )
+            }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = TextSecondary)
+            }
+        }
     )
+}
+
+private fun fileMetadata(file: RemoteFile): String = buildString {
+    if (!file.isDirectory) append(formatBytes(file.size)).append(" · ")
+    append(formatDate(file.modified))
+    if (file.permissions.isNotBlank()) append(" · ").append(file.permissions)
 }
 
 private fun join(base: String, name: String): String =

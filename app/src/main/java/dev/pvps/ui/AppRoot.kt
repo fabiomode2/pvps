@@ -1,11 +1,5 @@
 package dev.pvps.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.expandHorizontally
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,7 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -32,6 +26,9 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -45,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -76,6 +74,7 @@ import dev.pvps.terminal.TerminalScreen
 import dev.pvps.ui.theme.Accent
 import dev.pvps.ui.theme.OutlineDark
 import dev.pvps.ui.theme.SurfaceHigh
+import dev.pvps.ui.theme.TextFaint
 import dev.pvps.ui.theme.TextSecondary
 import dev.pvps.ui.theme.Warning
 
@@ -97,7 +96,10 @@ fun AppRoot(viewModel: AppViewModel) {
     val hosts = viewModel.hosts.collectAsStateValue()
     val selectedHost = viewModel.selectedHost.collectAsStateValue()
     val states = viewModel.connectionStates.collectAsStateValue()
-    val showBottomBar = hosts.isNotEmpty() && route in setOf("home", "chat", "files", "more")
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val showBottomBar = hosts.isNotEmpty() &&
+        route in setOf("home", "chat", "files", "more") &&
+        !imeVisible
     val settings = viewModel.settings.collectAsStateValue()
     val updateState = viewModel.updateState.collectAsStateValue()
     val needsUnknownSources = viewModel.needsUnknownSources.collectAsStateValue()
@@ -115,6 +117,7 @@ fun AppRoot(viewModel: AppViewModel) {
         PvpsBackdrop()
         Scaffold(
             containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onBackground,
             contentWindowInsets = WindowInsets.statusBars,
             bottomBar = {
                 if (showBottomBar) {
@@ -301,65 +304,37 @@ fun AppRoot(viewModel: AppViewModel) {
 
 @Composable
 private fun PvpsDock(route: String, onSelect: (String) -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 14.dp, vertical = 8.dp)
+    NavigationBar(
+        containerColor = SurfaceHigh.copy(alpha = 0.98f),
+        tonalElevation = 0.dp
     ) {
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = SurfaceHigh.copy(alpha = 0.96f),
-            shape = RoundedCornerShape(26.dp),
-            border = BorderStroke(1.dp, OutlineDark),
-            shadowElevation = 18.dp
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(6.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                bottomItems.forEach { item ->
-                    val selected = route == item.route
-                    val tint by animateColorAsState(
-                        targetValue = if (selected) Accent else TextSecondary,
-                        label = "dockTint"
+        bottomItems.forEach { item ->
+            val selected = route == item.route
+            NavigationBarItem(
+                selected = selected,
+                onClick = { onSelect(item.route) },
+                icon = {
+                    Icon(
+                        imageVector = item.icon,
+                        contentDescription = item.label,
+                        modifier = Modifier.size(21.dp)
                     )
-                    Row(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(if (selected) Accent.copy(alpha = 0.11f) else Color.Transparent)
-                            .clickable { onSelect(item.route) }
-                            .padding(vertical = 10.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = item.icon,
-                            contentDescription = item.label,
-                            tint = tint,
-                            modifier = Modifier.size(19.dp)
-                        )
-                        AnimatedVisibility(
-                            visible = selected,
-                            enter = fadeIn() + expandHorizontally(),
-                            exit = fadeOut() + shrinkHorizontally()
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    item.label.uppercase(),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Accent
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+                },
+                label = {
+                    Text(
+                        item.label.uppercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1
+                    )
+                },
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = Accent,
+                    selectedTextColor = Accent,
+                    indicatorColor = Accent.copy(alpha = 0.10f),
+                    unselectedIconColor = TextSecondary,
+                    unselectedTextColor = TextFaint
+                )
+            )
         }
     }
 }

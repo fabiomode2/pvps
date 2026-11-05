@@ -59,7 +59,7 @@ class OpenCodeClient(
         withTimeout(30_000) {
             json.decodeFromJsonElement(
                 SessionsResponse.serializer(),
-                get("/api/session", listOf("limit" to "100", "order" to "desc"))
+                get("/api/session", listOf("limit" to "200", "order" to "desc"))
             ).data
         }
     }
@@ -78,23 +78,57 @@ class OpenCodeClient(
         }
     }
 
-    suspend fun messages(sessionId: String): List<MessageDto> = withContext(Dispatchers.IO) {
-        withTimeout(30_000) {
+    /**
+     * OpenCode v2 pages messages in chronological order. Asking for `asc`
+     * returns the OLDEST page, which hides every new user message in a long
+     * session. Request the newest page and put it back in display order.
+     */
+    suspend fun messages(sessionId: String, limit: Int = 200): List<MessageDto> =
+        withContext(Dispatchers.IO) {
+            withTimeout(30_000) {
+                json.decodeFromJsonElement(
+                    MessagesResponse.serializer(),
+                    get(
+                        "/api/session/$sessionId/message",
+                        listOf("limit" to "$limit", "order" to "desc")
+                    )
+                ).data.asReversed()
+            }
+        }
+
+    suspend fun prompt(
+        sessionId: String,
+        text: String,
+        delivery: String? = null
+    ): PromptInboxUser = withContext(Dispatchers.IO) {
+        withTimeout(60_000) {
+            val body = buildJsonObject {
+                put("text", text)
+                if (delivery != null) put("delivery", delivery)
+            }
             json.decodeFromJsonElement(
-                MessagesResponse.serializer(),
-                get(
-                    "/api/session/$sessionId/message",
-                    listOf("limit" to "200", "order" to "asc")
-                )
+                PromptResponse.serializer(),
+                post("/api/session/$sessionId/prompt", body)
             ).data
         }
     }
 
-    suspend fun prompt(sessionId: String, text: String) = withContext(Dispatchers.IO) {
-        withTimeout(60_000) {
-            post(
-                "/api/session/$sessionId/prompt",
-                buildJsonObject { put("text", text) }
+    suspend fun inbox(sessionId: String): List<PromptInboxUser> = withContext(Dispatchers.IO) {
+        withTimeout(30_000) {
+            json.decodeFromJsonElement(
+                InboxResponse.serializer(),
+                get("/api/session/$sessionId/inbox")
+            ).data
+        }
+    }
+
+    suspend fun cancelInbox(sessionId: String, inboxId: String) = withContext(Dispatchers.IO) {
+        withTimeout(30_000) {
+            request(
+                "DELETE",
+                "/api/session/$sessionId/inbox/$inboxId",
+                emptyList(),
+                null
             )
         }
         Unit

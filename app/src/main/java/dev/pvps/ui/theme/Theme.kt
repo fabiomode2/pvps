@@ -14,27 +14,28 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 
-// PVPS visual system: near-black green ink, mint signal, iris for AI.
-val Void = Color(0xFF050807)
+// PVPS visual system: graphite instrument panels, phosphor-lime signal,
+// iris for agent/subagent work, warm amber for execution states.
+val Void = Color(0xFF07090B)
 val DeepBackground = Void
-val SurfaceDark = Color(0xFF0A100D)
-val SurfaceRaised = Color(0xFF111A15)
-val SurfaceHigh = Color(0xFF17231C)
-val OutlineDark = Color(0xFF22332A)
-val OutlineSoft = Color(0xFF18241D)
+val SurfaceDark = Color(0xFF0C1013)
+val SurfaceRaised = Color(0xFF12181C)
+val SurfaceHigh = Color(0xFF192227)
+val OutlineDark = Color(0xFF283238)
+val OutlineSoft = Color(0xFF1B242A)
 
-val Accent = Color(0xFFA6FFD9)
-val AccentDim = Color(0xFF48D6A6)
-val SignalDeep = Color(0xFF0E3B2D)
-val Violet = Color(0xFFC0B0FF)
-val IrisDeep = Color(0xFF241C45)
-val Ember = Color(0xFFFFC46B)
-val Danger = Color(0xFFFF8095)
-val Warning = Color(0xFFFFC46B)
-val Success = Color(0xFF7CFFB2)
-val TextPrimary = Color(0xFFF1F6F2)
-val TextSecondary = Color(0xFF8C9B92)
-val TextFaint = Color(0xFF5E6D64)
+val Accent = Color(0xFFD1FA76)
+val AccentDim = Color(0xFF90B94D)
+val SignalDeep = Color(0xFF28350E)
+val Violet = Color(0xFFB8A8FF)
+val IrisDeep = Color(0xFF241E3E)
+val Ember = Color(0xFFF4C77A)
+val Danger = Color(0xFFFF7B8A)
+val Warning = Color(0xFFF4C77A)
+val Success = Color(0xFF79E7B5)
+val TextPrimary = Color(0xFFEDF2F1)
+val TextSecondary = Color(0xFF96A4A6)
+val TextFaint = Color(0xFF647276)
 
 private val DarkColors = darkColorScheme(
     primary = Accent,

@@ -43,9 +43,14 @@ class TerminalController(
 
     val emulator: TerminalEmulator = TerminalEmulator(this, 80, 24, 2000, this)
 
+    // JSch's getInputStream() creates and installs a new pipe on every call.
+    // Capture the stream once; re-reading shell.input would drop buffered bytes.
+    private val shellInput = shell.input
+
     private var readerJob: Job? = null
     private var writerJob: Job? = null
     private var blinkJob: Job? = null
+    private var resizeJob: Job? = null
 
     init {
         applyPalette(emulator, palette)
@@ -60,7 +65,7 @@ class TerminalController(
             val buffer = ByteArray(16 * 1024)
             try {
                 while (isActive && !closed.get()) {
-                    val read = shell.input.read(buffer)
+                    val read = shellInput.read(buffer)
                     if (read < 0) break
                     val copy = buffer.copyOf(read)
                     withContext(Dispatchers.Main) {
@@ -145,14 +150,18 @@ class TerminalController(
     fun resize(cols: Int, rows: Int, cellWidthPx: Float, cellHeightPx: Float) {
         if (cols < 2 || rows < 2) return
         if (cols == emulator.mColumns && rows == emulator.mRows) return
+
+        // Emulator dimensions must change on the UI thread; the PTY packet can
+        // wait. Debounce so IME animations and drag-resizes do not spam the wire.
         emulator.resize(cols, rows)
-        shell.resize(
-            cols,
-            rows,
-            (cols * cellWidthPx).toInt().coerceAtLeast(1),
-            (rows * cellHeightPx).toInt().coerceAtLeast(1)
-        )
         revision++
+        val widthPx = (cols * cellWidthPx).toInt().coerceAtLeast(1)
+        val heightPx = (rows * cellHeightPx).toInt().coerceAtLeast(1)
+        resizeJob?.cancel()
+        resizeJob = scope.launch(Dispatchers.IO) {
+            delay(80)
+            if (!closed.get()) shell.resize(cols, rows, widthPx, heightPx)
+        }
     }
 
     fun close() {
@@ -160,6 +169,7 @@ class TerminalController(
         readerJob?.cancel()
         writerJob?.cancel()
         blinkJob?.cancel()
+        resizeJob?.cancel()
         writeQueue.close()
         shell.close()
     }

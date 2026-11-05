@@ -147,8 +147,19 @@ class SshConnection(
         channel.setPtySize(cols, rows, cellWidthPx, cellHeightPx)
         channel.setEnv("TERM", "xterm-256color")
         channel.setEnv("LANG", "C.UTF-8")
-        channel.connect(15_000)
-        return ShellChannel(channel)
+        // JSch creates a fresh pipe every time getInputStream() is called and
+        // installs it as the channel's output sink. Calling it after connect (or
+        // more than once) can silently discard buffered bytes, so acquire the
+        // streams exactly once, before the channel starts receiving data.
+        val input = channel.inputStream
+        val output = channel.outputStream
+        try {
+            channel.connect(15_000)
+        } catch (e: Exception) {
+            runCatching { channel.disconnect() }
+            throw e
+        }
+        return ShellChannel(channel, input, output)
     }
 
     fun openSftp(): ChannelSftp {

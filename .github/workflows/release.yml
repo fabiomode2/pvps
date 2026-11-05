@@ -148,20 +148,26 @@ jobs:
             curl -fsSL https://github.com/fabiomode2/pvps/releases/latest/download/install.sh | bash
             ```
 
-            **Fixes in this release:**
-            - Setup codes use the public IPv4 by default; a Tailscale `100.x`
-              address is only used with `--tailscale`/`PVPS_HOST`.
-            - SSH port is detected instead of always using 22.
-            - First connection to a new host now reaches the fingerprint trust prompt.
-            - Android 9 no longer crashes on startup.
-            - Cancelling the system installer no longer relaunches it on every resume.
-            - Failed/closed SSH sessions stop the foreground service notification.
-            - SSH commands now time out even after the channel opens.
-            - Corrupt vaults are quarantined instead of being silently overwritten.
-            - Update APKs are always checked against SHA-256 (asset digest or
-              release SHA256SUMS); missing checksums are refused.
-            - Deleting a host now tears down its tunnel, OpenCode client and
-              foreground service notification.
+            **What's new in 1.0.3:**
+            - Redesigned the whole app: compact graphite/phosphor interface,
+              Material 3 navigation, denser dashboard, real file names, and a
+              focused terminal chrome.
+            - OpenCode chat is now compact and informative: session context,
+              spend, tokens/s, model/agent, subagent sessions, queued prompts,
+              and expandable reasoning/tool cards.
+            - Fixed missing chat messages by loading the newest message page
+              instead of the oldest, and by showing optimistic user messages.
+            - You can now queue prompts while OpenCode is working. Stop and
+              send are separate actions, so you no longer have to interrupt a
+              run to send the next message.
+            - The composer stays above the keyboard and the Enter/Send key works.
+            - Fixed terminal input: JSch buffered streams are now captured once,
+              so keystrokes, paste, Ctrl and shortcut keys actually reach the PTY.
+            - Added session context %, spend, tokens/s and subagent status to chat.
+            - Setup: first connection reaches the fingerprint trust prompt;
+              setup codes prefer public IPv4; SSH port is detected.
+            - Update APKs are always verified against SHA-256, and corrupt vaults
+              are quarantined instead of silently overwritten.
           files: |
             dist/pvps-${{ steps.meta.outputs.version }}.apk
             dist/SHA256SUMS
