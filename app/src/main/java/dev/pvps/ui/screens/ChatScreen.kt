@@ -95,6 +95,18 @@ import dev.pvps.ui.components.ScreenHeader
 import dev.pvps.ui.components.collectAsStateValue
 import dev.pvps.ui.components.formatBytes
 import dev.pvps.ui.components.relativeTime
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import dev.pvps.ui.components.TinyAction
+import dev.pvps.ui.theme.DeepBackground
+import dev.pvps.ui.theme.OutlineDark
+import dev.pvps.ui.theme.SurfaceRaised
+import dev.pvps.ui.theme.TextFaint
+import dev.pvps.ui.theme.TextPrimary
+import dev.pvps.ui.theme.Void
 import dev.pvps.ui.theme.Accent
 import dev.pvps.ui.theme.Danger
 import dev.pvps.ui.theme.Success
@@ -138,6 +150,7 @@ fun ChatScreen(
     }
 
     Scaffold(
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             ScreenHeader(
@@ -327,16 +340,18 @@ private fun MessageBubble(
     when {
         message.isUser -> {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                    modifier = Modifier.fillMaxWidth(0.88f)
+                Surface(
+                    modifier = Modifier.fillMaxWidth(0.90f),
+                    color = Accent.copy(alpha = 0.085f),
+                    shape = RoundedCornerShape(20.dp, 20.dp, 6.dp, 20.dp),
+                    border = BorderStroke(1.dp, Accent.copy(alpha = 0.16f))
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
+                    Column(modifier = Modifier.padding(14.dp)) {
                         SelectionContainer {
                             Text(
                                 message.text.ifBlank { "(empty message)" },
                                 style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = TextPrimary
                             )
                         }
                         message.files.forEach { file ->
@@ -347,66 +362,66 @@ private fun MessageBubble(
             }
         }
         message.isAssistant -> {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        (message.agent ?: "assistant").uppercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Accent
+                    )
+                    message.model?.let {
                         Text(
-                            message.agent ?: "assistant",
+                            "  $it",
                             style = MaterialTheme.typography.labelSmall,
-                            color = Accent
+                            color = TextFaint
                         )
-                        message.model?.let {
-                            Text(" · $it", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    if (message.cost > 0) {
+                        Text(
+                            "$" + "%.4f".format(message.cost),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextFaint
+                        )
+                    }
+                }
+                Spacer(Modifier.height(5.dp))
+                if (message.error != null) {
+                    ErrorBanner(message.error)
+                }
+                message.parts.forEachIndexed { index, part ->
+                    when (part) {
+                        is UiPart.Text -> MarkdownText(part.text)
+                        is UiPart.Reasoning -> {
+                            val key = "${message.id}-reasoning-$index"
+                            ReasoningBlock(
+                                text = part.text,
+                                expanded = key in expanded,
+                                onToggle = { onToggle(key) }
+                            )
                         }
-                        Spacer(Modifier.weight(1f))
-                        if (message.cost > 0) {
-                            Text(
-                                "$" + "%.4f".format(message.cost),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = TextSecondary
+                        is UiPart.Tool -> {
+                            val key = "${message.id}-tool-${part.tool.id}"
+                            ToolCard(
+                                tool = part.tool,
+                                expanded = key in expanded,
+                                onToggle = { onToggle(key) },
+                                openCode = openCode
                             )
                         }
                     }
-                    if (message.error != null) {
-                        ErrorBanner(message.error)
-                    }
-                    message.parts.forEachIndexed { index, part ->
-                        when (part) {
-                            is UiPart.Text -> MarkdownText(part.text)
-                            is UiPart.Reasoning -> {
-                                val key = "${message.id}-reasoning-$index"
-                                ReasoningBlock(
-                                    text = part.text,
-                                    expanded = key in expanded,
-                                    onToggle = { onToggle(key) }
-                                )
-                            }
-                            is UiPart.Tool -> {
-                                val key = "${message.id}-tool-${part.tool.id}"
-                                ToolCard(
-                                    tool = part.tool,
-                                    expanded = key in expanded,
-                                    onToggle = { onToggle(key) },
-                                    openCode = openCode
-                                )
-                            }
-                        }
-                    }
-                    if (message.parts.isEmpty() && message.text.isNotBlank()) {
-                        MarkdownText(message.text)
-                    }
+                }
+                if (message.parts.isEmpty() && message.text.isNotBlank()) {
+                    MarkdownText(message.text)
                 }
             }
         }
         else -> {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                 Text(
-                    message.text.ifBlank { message.type },
+                    message.text.ifBlank { message.type }.uppercase(),
                     style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary,
+                    color = TextFaint,
                     modifier = Modifier.padding(vertical = 2.dp)
                 )
             }
@@ -624,20 +639,11 @@ private fun Composer(
     onSend: () -> Unit,
     onStop: () -> Unit
 ) {
-    Surface(color = MaterialTheme.colorScheme.surface) {
-        Column(modifier = Modifier.padding(8.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    Surface(color = DeepBackground.copy(alpha = 0.94f)) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box {
-                    AssistChip(
-                        onClick = onShowModels,
-                        label = {
-                            Text(
-                                model?.id ?: "model",
-                                style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1
-                            )
-                        }
-                    )
+                    TinyAction(model?.id ?: "model", onShowModels)
                     DropdownMenu(expanded = showModels, onDismissRequest = onDismissModels) {
                         models.take(30).forEach { item ->
                             DropdownMenuItem(
@@ -648,10 +654,7 @@ private fun Composer(
                     }
                 }
                 Box {
-                    AssistChip(
-                        onClick = onShowAgents,
-                        label = { Text(agent ?: "agent", style = MaterialTheme.typography.labelSmall) }
-                    )
+                    TinyAction(agent ?: "agent", onShowAgents)
                     DropdownMenu(expanded = showAgents, onDismissRequest = onDismissAgents) {
                         agents.filterNot { it.hidden }.forEach { item ->
                             DropdownMenuItem(
@@ -661,25 +664,60 @@ private fun Composer(
                         }
                     }
                 }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    if (busy) "WORKING" else if (connected) "READY" else "OFFLINE",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (busy) Warning else if (connected) Success else TextFaint
+                )
             }
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.Bottom) {
                 OutlinedTextField(
                     value = value,
                     onValueChange = onValueChange,
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("Ask OpenCode…") },
+                    placeholder = { Text("Ask OpenCode…", color = TextFaint) },
                     maxLines = 6,
-                    enabled = connected
+                    enabled = connected,
+                    shape = RoundedCornerShape(20.dp),
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Accent.copy(alpha = 0.72f),
+                        unfocusedBorderColor = OutlineDark,
+                        focusedContainerColor = SurfaceRaised.copy(alpha = 0.42f),
+                        unfocusedContainerColor = SurfaceRaised.copy(alpha = 0.28f),
+                        cursorColor = Accent,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary
+                    )
                 )
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(8.dp))
                 if (busy) {
-                    IconButton(onClick = onStop) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(Danger.copy(alpha = 0.14f))
+                            .clickable(onClick = onStop),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Icon(Icons.Default.Stop, contentDescription = "Stop", tint = Danger)
                     }
                 } else {
-                    IconButton(onClick = onSend, enabled = connected && value.isNotBlank()) {
-                        Icon(Icons.Default.Send, contentDescription = "Send", tint = Accent)
+                    val sendEnabled = connected && value.isNotBlank()
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(if (sendEnabled) Accent else OutlineDark)
+                            .clickable(enabled = sendEnabled, onClick = onSend),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Send,
+                            contentDescription = "Send",
+                            tint = if (sendEnabled) Void else TextFaint
+                        )
                     }
                 }
             }

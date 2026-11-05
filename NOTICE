@@ -11,3 +11,9 @@ PVPS is built with these third-party components:
 - **kotlinx.serialization** — Apache License 2.0.
 
 Full license texts are available in the respective upstream repositories and dependency artifacts.
+
+## Bundled fonts
+
+- **Space Grotesk** — SIL Open Font License 1.1. https://github.com/floriankarsten/space-grotesk
+- **Manrope** — SIL Open Font License 1.1. https://github.com/sharanda/manrope
+- **JetBrains Mono** — SIL Open Font License 1.1. https://github.com/JetBrains/JetBrainsMono

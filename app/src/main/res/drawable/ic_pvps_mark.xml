@@ -8,7 +8,7 @@
     <!-- Hexagonal node / server shell -->
     <path
         android:pathData="M22,12L17,20.6603L7,20.6603L2,12L7,3.3397L17,3.3397Z"
-        android:strokeColor="#5EEAD4"
+        android:strokeColor="#A6FFD9"
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
@@ -17,7 +17,7 @@
     <!-- Violet live-link edge -->
     <path
         android:pathData="M17,3.3397L22,12"
-        android:strokeColor="#A78BFA"
+        android:strokeColor="#C0B0FF"
         android:strokeWidth="2.35"
         android:strokeLineCap="round"
         android:fillColor="#00000000" />
@@ -25,7 +25,7 @@
     <!-- Terminal prompt -->
     <path
         android:pathData="M8.1,8.4L11.1,12L8.1,15.6"
-        android:strokeColor="#E6FFFB"
+        android:strokeColor="#F1F6F2"
         android:strokeWidth="1.8"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
@@ -34,5 +34,5 @@
     <!-- Cursor -->
     <path
         android:pathData="M13.6,14.5L15.8,14.5A1,1 0 0 1 16.8,15.5A1,1 0 0 1 15.8,16.5L13.6,16.5A1,1 0 0 1 12.6,15.5A1,1 0 0 1 13.6,14.5Z"
-        android:fillColor="#E6FFFB" />
+        android:fillColor="#F1F6F2" />
 </vector>

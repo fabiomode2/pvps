@@ -73,6 +73,17 @@ import dev.pvps.ui.components.collectAsStateValue
 import dev.pvps.ui.components.ErrorBanner
 import dev.pvps.ui.components.ScreenHeader
 import dev.pvps.ui.components.StatusDot
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.material3.Surface
+import dev.pvps.ui.components.GhostButton
+import dev.pvps.ui.components.SignalButton
+import dev.pvps.ui.components.StatusPill
+import dev.pvps.ui.theme.OutlineDark
+import dev.pvps.ui.theme.SurfaceRaised
+import dev.pvps.ui.theme.TextFaint
+import dev.pvps.ui.theme.TextPrimary
 import dev.pvps.ui.theme.Accent
 import dev.pvps.ui.theme.Danger
 import dev.pvps.ui.theme.Success
@@ -95,6 +106,7 @@ fun HostsScreen(
     var deleteHost by remember { mutableStateOf<Host?>(null) }
 
     Scaffold(
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             ScreenHeader(
@@ -166,57 +178,83 @@ private fun HostCard(
     onDelete: () -> Unit
 ) {
     val connected = state?.status == ConnectionState.Status.CONNECTED
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = if (selected) Accent.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surface
-        ),
-        modifier = Modifier.fillMaxWidth()
+    val statusColor = when (state?.status) {
+        ConnectionState.Status.CONNECTED -> Success
+        ConnectionState.Status.CONNECTING -> Warning
+        ConnectionState.Status.NEEDS_HOST_KEY -> Warning
+        ConnectionState.Status.ERROR -> Danger
+        else -> TextFaint
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = if (selected) Accent.copy(alpha = 0.055f) else SurfaceRaised.copy(alpha = 0.58f),
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.dp, if (selected) Accent.copy(alpha = 0.26f) else OutlineDark)
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                StatusDot(
-                    when (state?.status) {
-                        ConnectionState.Status.CONNECTED -> Success
-                        ConnectionState.Status.CONNECTING -> Warning
-                        ConnectionState.Status.NEEDS_HOST_KEY -> Warning
-                        ConnectionState.Status.ERROR -> Danger
-                        else -> TextSecondary
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(statusColor.copy(alpha = 0.10f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    StatusDot(statusColor, 8)
+                }
+                Spacer(Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            host.name,
+                            style = MaterialTheme.typography.titleLarge,
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                        if (selected) {
+                            Spacer(Modifier.width(8.dp))
+                            Text("ACTIVE", style = MaterialTheme.typography.labelSmall, color = Accent)
+                        }
                     }
+                    Text(
+                        "${host.sshUser}@${host.sshHost}:${host.sshPort}",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = TextSecondary
+                    )
+                }
+                StatusPill(
+                    text = when (state?.status) {
+                        ConnectionState.Status.CONNECTED -> "LIVE"
+                        ConnectionState.Status.CONNECTING -> "LINKING"
+                        ConnectionState.Status.NEEDS_HOST_KEY -> "VERIFY"
+                        ConnectionState.Status.ERROR -> "ERROR"
+                        else -> "IDLE"
+                    },
+                    color = statusColor
                 )
-                Spacer(Modifier.width(8.dp))
-                Text(host.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                IconButton(onClick = onEdit) {
-                    Icon(Icons.Default.Edit, contentDescription = "Edit", tint = TextSecondary)
-                }
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = TextSecondary)
-                }
             }
-            Text(
-                "${host.sshUser}@${host.sshHost}:${host.sshPort}",
-                style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
-                color = TextSecondary
-            )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(14.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     when (host.openCodeMode) {
-                        OpenCodeMode.SSH_TUNNEL -> "OpenCode · SSH tunnel :${host.openCodePort}"
-                        OpenCodeMode.DIRECT -> "OpenCode · direct ${host.effectiveOpenCodeHost}:${host.openCodePort}"
+                        OpenCodeMode.SSH_TUNNEL -> "OPENCODE · TUNNEL :${host.openCodePort}"
+                        OpenCodeMode.DIRECT -> "OPENCODE · DIRECT ${host.effectiveOpenCodeHost}:${host.openCodePort}"
                     },
                     style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary,
+                    color = TextFaint,
                     modifier = Modifier.weight(1f)
                 )
-                Text(
-                    state?.status?.name?.lowercase()?.replace('_', ' ') ?: "offline",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (connected) Success else TextSecondary
-                )
+                IconButton(onClick = onEdit, modifier = Modifier.size(34.dp)) {
+                    Icon(Icons.Default.Edit, contentDescription = "Edit", tint = TextSecondary, modifier = Modifier.size(17.dp))
+                }
+                IconButton(onClick = onDelete, modifier = Modifier.size(34.dp)) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = TextSecondary, modifier = Modifier.size(17.dp))
+                }
             }
             if (state?.status == ConnectionState.Status.ERROR) {
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(8.dp))
                 ErrorBanner(state.message)
             }
             if (state?.status == ConnectionState.Status.NEEDS_HOST_KEY) {
@@ -224,28 +262,19 @@ private fun HostCard(
                 Text(
                     "Host key pending: ${state.hostKeySha256}",
                     style = MaterialTheme.typography.labelSmall,
-                    color = Warning
+                    color = Warning,
+                    maxLines = 2
                 )
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (!selected) {
-                    TextButton(onClick = onSelect) { Text("Use", color = Accent) }
-                } else {
-                    Text("ACTIVE", style = MaterialTheme.typography.labelSmall, color = Accent)
+                    GhostButton("Use", onSelect)
                 }
                 if (connected) {
-                    Button(onClick = onDisconnect) {
-                        Icon(Icons.Default.LinkOff, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Disconnect")
-                    }
+                    GhostButton("Disconnect", onDisconnect, icon = Icons.Default.LinkOff, color = Danger)
                 } else {
-                    Button(onClick = onConnect) {
-                        Icon(Icons.Default.Link, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Connect")
-                    }
+                    SignalButton("Connect", onConnect, icon = Icons.Default.Link)
                 }
             }
         }
@@ -324,6 +353,7 @@ fun HostEditScreen(
     }
 
     Scaffold(
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             ScreenHeader(
@@ -518,6 +548,7 @@ fun KeysScreen(
     val clipboard = LocalClipboardManager.current
 
     Scaffold(
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = { ScreenHeader(title = "SSH keys", subtitle = "${keys.size} keys", onBack = onBack) },
         floatingActionButton = {

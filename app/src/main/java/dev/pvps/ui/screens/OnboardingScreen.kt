@@ -1,8 +1,8 @@
 package dev.pvps.ui.screens
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,24 +10,24 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -37,18 +37,27 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.pvps.data.model.SetupCode
 import dev.pvps.ui.AppViewModel
+import dev.pvps.ui.components.GhostButton
 import dev.pvps.ui.components.PvpsMark
+import dev.pvps.ui.components.PvpsTextField
+import dev.pvps.ui.components.SectionLabel
+import dev.pvps.ui.components.SignalButton
+import dev.pvps.ui.components.TerminalWindow
 import dev.pvps.ui.theme.Accent
 import dev.pvps.ui.theme.Danger
+import dev.pvps.ui.theme.MonoFont
 import dev.pvps.ui.theme.OutlineDark
-import dev.pvps.ui.theme.SurfaceDark
+import dev.pvps.ui.theme.SurfaceHigh
+import dev.pvps.ui.theme.TextFaint
+import dev.pvps.ui.theme.TextPrimary
 import dev.pvps.ui.theme.TextSecondary
 import dev.pvps.ui.theme.Violet
 
@@ -70,75 +79,124 @@ fun OnboardingScreen(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(20.dp),
-        verticalArrangement = Arrangement.Center
+            .padding(horizontal = 20.dp, vertical = 16.dp)
     ) {
-        PvpsMark(58.dp)
-        Spacer(Modifier.height(18.dp))
-        Text("PVPS", style = MaterialTheme.typography.displaySmall, color = MaterialTheme.colorScheme.onSurface)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            PvpsMark(46.dp)
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text("PVPS", style = MaterialTheme.typography.headlineSmall, color = TextPrimary)
+                Text(
+                    "PORTABLE VPS CONTROL",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Accent
+                )
+            }
+        }
+        Spacer(Modifier.height(34.dp))
         Text(
-            "Portable VPS control. SSH-only, OpenCode v2 and a real terminal.",
+            "Your server,\nin your pocket.",
+            style = MaterialTheme.typography.displayLarge,
+            color = TextPrimary
+        )
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "A native SSH control plane for OpenCode, terminals, files, Docker and systemd. No cloud middleman. No public OpenCode port.",
             style = MaterialTheme.typography.bodyLarge,
             color = TextSecondary
         )
-        Spacer(Modifier.height(26.dp))
-
-        StepCard("1", "Create a phone SSH key", "Ed25519, passphrase, stored in Android Keystore.") {
-            OutlinedButton(onClick = onKeys, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.width(20.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Open SSH keys")
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-        StepCard("2", "Install the VPS agent", "One command sets up OpenCode v2 on loopback, tmux and a systemd unit.") {
-            Text(
-                INSTALL_COMMAND,
-                style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace,
-                color = Accent,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF05090F), RoundedCornerShape(10.dp))
-                    .padding(10.dp)
+        Spacer(Modifier.height(24.dp))
+        TerminalWindow(
+            title = "pvps / setup",
+            lines = listOf(
+                "$ curl -fsSL …/install.sh | bash",
+                "# installing OpenCode v2 on 127.0.0.1:49374",
+                "# done. paste the pvps-setup code into the app."
             )
-            Spacer(Modifier.height(6.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                TextButton(onClick = { clipboard.setText(AnnotatedString(INSTALL_COMMAND)) }) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.width(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Copy")
-                }
-                Text("Then paste the pvps-setup code it prints.", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-        StepCard("3", "Add the host", "Paste the setup code or enter the SSH details manually.") {
-            Button(onClick = { showSetup = true; setupError = null }, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.width(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Paste setup code")
-            }
-            Spacer(Modifier.height(6.dp))
-            OutlinedButton(onClick = onAddHost, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.width(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Add host manually")
-            }
-        }
-        Spacer(Modifier.height(18.dp))
-        Text(
-            "The app pins the SSH host key on first connect. OpenCode stays on 127.0.0.1 and is reached through an SSH tunnel; it is never exposed publicly.",
-            style = MaterialTheme.typography.labelSmall,
-            color = TextSecondary
         )
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GhostButton(
+                text = "Copy command",
+                onClick = { clipboard.setText(AnnotatedString(INSTALL_COMMAND)) },
+                icon = Icons.Default.ContentCopy
+            )
+            GhostButton(
+                text = "Add manually",
+                onClick = onAddHost,
+                icon = Icons.Default.Add
+            )
+        }
+        Spacer(Modifier.height(34.dp))
+        SectionLabel("Three steps")
+        Spacer(Modifier.height(8.dp))
+        StepRow(
+            number = "01",
+            title = "Create a phone key",
+            body = "Ed25519, stored in the Android Keystore. The private key never leaves the device.",
+            action = "Open SSH keys",
+            icon = Icons.Default.Key,
+            onClick = onKeys
+        )
+        StepDivider()
+        StepRow(
+            number = "02",
+            title = "Install on the server",
+            body = "One command sets up OpenCode v2, tmux and a loopback-only systemd unit.",
+            action = "Copy install command",
+            icon = Icons.Default.ContentCopy,
+            onClick = { clipboard.setText(AnnotatedString(INSTALL_COMMAND)) }
+        )
+        StepDivider()
+        StepRow(
+            number = "03",
+            title = "Paste the setup code",
+            body = "The installer prints a pvps-setup line with the host, user and OpenCode password.",
+            action = "Paste setup code",
+            icon = Icons.Default.ContentPaste,
+            onClick = { showSetup = true; setupError = null },
+            primary = true
+        )
+        Spacer(Modifier.height(30.dp))
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = Accent.copy(alpha = 0.05f),
+            shape = RoundedCornerShape(20.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Accent.copy(alpha = 0.16f))
+        ) {
+            Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(Accent.copy(alpha = 0.10f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Lock, contentDescription = null, tint = Accent, modifier = Modifier.size(16.dp))
+                }
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text("Private by default", style = MaterialTheme.typography.titleSmall, color = TextPrimary)
+                    Text(
+                        "The app pins the SSH host key on first connect. OpenCode listens only on 127.0.0.1 and is reached through an SSH tunnel.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(24.dp))
     }
 
     if (showSetup) {
         var value by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { showSetup = false },
-            title = { Text("Paste setup code") },
+            containerColor = SurfaceHigh,
+            shape = RoundedCornerShape(28.dp),
+            title = {
+                Text("Paste setup code", style = MaterialTheme.typography.headlineSmall, color = TextPrimary)
+            },
             text = {
                 Column {
                     Text(
@@ -146,75 +204,107 @@ fun OnboardingScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = TextSecondary
                     )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
+                    Spacer(Modifier.height(12.dp))
+                    PvpsTextField(
                         value = value,
                         onValueChange = { value = it; setupError = null },
-                        label = { Text("pvps-setup:…") },
+                        label = "pvps-setup:…",
+                        singleLine = false,
                         minLines = 3,
-                        maxLines = 6,
-                        modifier = Modifier.fillMaxWidth()
+                        maxLines = 6
                     )
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(8.dp))
                     TextButton(onClick = {
                         clipboard.getText()?.text?.let { value = it; setupError = null }
                     }) {
-                        Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.width(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Paste from clipboard")
+                        Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("PASTE FROM CLIPBOARD", style = MaterialTheme.typography.labelSmall)
                     }
                     if (setupError != null) {
-                        Text(setupError!!, color = Danger, style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            setupError!!,
+                            color = Danger,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = MonoFont
+                        )
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    val parsed = SetupCode.parse(value)
-                    parsed.onSuccess { payload ->
-                        val firstKey = viewModel.keys.value.firstOrNull()
-                        val host = SetupCode.toHost(payload).copy(keyId = firstKey?.id)
-                        viewModel.saveHost(host)
-                        viewModel.selectHost(host.id)
-                        showSetup = false
-                        onHostCreated()
-                    }.onFailure { setupError = it.message ?: "Invalid setup code" }
-                }) { Text("Add host") }
+                SignalButton(
+                    text = "Add host",
+                    onClick = {
+                        val parsed = SetupCode.parse(value)
+                        parsed.onSuccess { payload ->
+                            val firstKey = viewModel.keys.value.firstOrNull()
+                            val host = SetupCode.toHost(payload).copy(keyId = firstKey?.id)
+                            viewModel.saveHost(host)
+                            viewModel.selectHost(host.id)
+                            showSetup = false
+                            onHostCreated()
+                        }.onFailure { setupError = it.message ?: "Invalid setup code" }
+                    }
+                )
             },
-            dismissButton = { TextButton(onClick = { showSetup = false }) { Text("Cancel") } }
+            dismissButton = {
+                TextButton(onClick = { showSetup = false }) {
+                    Text("CANCEL", color = TextSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+            }
         )
     }
 }
 
 @Composable
-private fun StepCard(
+private fun StepRow(
     number: String,
     title: String,
-    subtitle: String,
-    content: @Composable () -> Unit
+    body: String,
+    action: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit,
+    primary: Boolean = false
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, OutlineDark)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.Top
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    number,
-                    style = MaterialTheme.typography.titleLarge,
-                    color = Accent,
-                    fontFamily = FontFamily.Monospace
-                )
-                Spacer(Modifier.width(10.dp))
-                Column {
-                    Text(title, style = MaterialTheme.typography.titleMedium)
-                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+        Text(
+            number,
+            style = MaterialTheme.typography.labelSmall,
+            color = Accent,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.width(30.dp)
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+            Spacer(Modifier.height(2.dp))
+            Text(body, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+            Spacer(Modifier.height(9.dp))
+            if (primary) {
+                SignalButton(text = action, onClick = onClick, icon = icon)
+            } else {
+                TextButton(onClick = onClick, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                    Icon(icon, contentDescription = null, tint = Accent, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(action.uppercase(), color = Accent, style = MaterialTheme.typography.labelSmall)
+                    Spacer(Modifier.width(4.dp))
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = null,
+                        tint = Accent,
+                        modifier = Modifier.size(14.dp)
+                    )
                 }
             }
-            Spacer(Modifier.height(10.dp))
-            content()
         }
     }
+}
+
+@Composable
+private fun StepDivider() {
+    HorizontalDivider(color = OutlineDark.copy(alpha = 0.7f))
 }

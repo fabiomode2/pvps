@@ -2,48 +2,83 @@ package dev.pvps.ui.theme
 
 import android.app.Activity
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 
-val DeepBackground = Color(0xFF070B12)
-val SurfaceDark = Color(0xFF0D141E)
-val SurfaceRaised = Color(0xFF141E2A)
-val OutlineDark = Color(0xFF223044)
-val Accent = Color(0xFF5EEAD4)
-val AccentDim = Color(0xFF2DD4BF)
-val Violet = Color(0xFFA78BFA)
-val TextPrimary = Color(0xFFEAF2F8)
-val TextSecondary = Color(0xFF8FA3B8)
-val Danger = Color(0xFFFB7185)
-val Warning = Color(0xFFFBBF24)
-val Success = Color(0xFF34D399)
+// PVPS visual system: near-black green ink, mint signal, iris for AI.
+val Void = Color(0xFF050807)
+val DeepBackground = Void
+val SurfaceDark = Color(0xFF0A100D)
+val SurfaceRaised = Color(0xFF111A15)
+val SurfaceHigh = Color(0xFF17231C)
+val OutlineDark = Color(0xFF22332A)
+val OutlineSoft = Color(0xFF18241D)
+
+val Accent = Color(0xFFA6FFD9)
+val AccentDim = Color(0xFF48D6A6)
+val SignalDeep = Color(0xFF0E3B2D)
+val Violet = Color(0xFFC0B0FF)
+val IrisDeep = Color(0xFF241C45)
+val Ember = Color(0xFFFFC46B)
+val Danger = Color(0xFFFF8095)
+val Warning = Color(0xFFFFC46B)
+val Success = Color(0xFF7CFFB2)
+val TextPrimary = Color(0xFFF1F6F2)
+val TextSecondary = Color(0xFF8C9B92)
+val TextFaint = Color(0xFF5E6D64)
 
 private val DarkColors = darkColorScheme(
     primary = Accent,
-    onPrimary = Color(0xFF00201D),
-    primaryContainer = Color(0xFF103B37),
-    onPrimaryContainer = Color(0xFFB8FFF6),
+    onPrimary = Color(0xFF00251A),
+    primaryContainer = SignalDeep,
+    onPrimaryContainer = Color(0xFFC9FFE8),
     secondary = Violet,
-    onSecondary = Color(0xFF1B103A),
-    secondaryContainer = Color(0xFF2B2150),
-    onSecondaryContainer = Color(0xFFEDE6FF),
-    tertiary = Warning,
-    onTertiary = Color(0xFF2A1A00),
-    background = DeepBackground,
+    onSecondary = Color(0xFF1A1235),
+    secondaryContainer = IrisDeep,
+    onSecondaryContainer = Color(0xFFEAE3FF),
+    tertiary = Ember,
+    onTertiary = Color(0xFF2B1900),
+    tertiaryContainer = Color(0xFF3A2A10),
+    onTertiaryContainer = Color(0xFFFFE2B8),
+    background = Void,
     onBackground = TextPrimary,
     surface = SurfaceDark,
     onSurface = TextPrimary,
     surfaceVariant = SurfaceRaised,
     onSurfaceVariant = TextSecondary,
+    surfaceTint = Accent,
+    inverseSurface = TextPrimary,
+    inverseOnSurface = Void,
     outline = OutlineDark,
-    outlineVariant = Color(0xFF182433),
+    outlineVariant = OutlineSoft,
     error = Danger,
-    onError = Color(0xFF2B0008)
+    onError = Color(0xFF2B0008),
+    errorContainer = Color(0xFF3D1420),
+    onErrorContainer = Color(0xFFFFD9DF),
+    scrim = Color(0xCC000000),
+    surfaceBright = SurfaceHigh,
+    surfaceDim = Color(0xFF070C09),
+    surfaceContainerLowest = Color(0xFF040705),
+    surfaceContainerLow = SurfaceDark,
+    surfaceContainer = Color(0xFF0D1410),
+    surfaceContainerHigh = SurfaceRaised,
+    surfaceContainerHighest = SurfaceHigh
+)
+
+private val PvpsShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(24.dp),
+    extraLarge = RoundedCornerShape(32.dp)
 )
 
 @Composable
@@ -57,6 +92,7 @@ fun PvpsTheme(
             val window = (view.context as Activity).window
             window.statusBarColor = Color.Transparent.toArgb()
             window.navigationBarColor = Color.Transparent.toArgb()
+            window.isNavigationBarContrastEnforced = false
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
             WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = false
         }
@@ -64,6 +100,7 @@ fun PvpsTheme(
     MaterialTheme(
         colorScheme = DarkColors,
         typography = PvpsTypography,
+        shapes = PvpsShapes,
         content = content
     )
 }

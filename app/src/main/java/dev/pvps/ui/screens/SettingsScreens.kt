@@ -1,9 +1,13 @@
 package dev.pvps.ui.screens
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Dns
@@ -32,6 +37,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -42,6 +48,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
@@ -54,12 +61,18 @@ import dev.pvps.ui.AppViewModel
 import dev.pvps.ui.components.ConfirmDialog
 import dev.pvps.ui.components.ScreenHeader
 import dev.pvps.ui.components.SectionCard
+import dev.pvps.ui.components.SectionLabel
 import dev.pvps.ui.components.collectAsStateValue
 import dev.pvps.ui.components.formatDate
 import dev.pvps.ui.theme.Accent
 import dev.pvps.ui.theme.Danger
+import dev.pvps.ui.theme.OutlineDark
 import dev.pvps.ui.theme.Success
+import dev.pvps.ui.theme.SurfaceRaised
+import dev.pvps.ui.theme.TextFaint
+import dev.pvps.ui.theme.TextPrimary
 import dev.pvps.ui.theme.TextSecondary
+import dev.pvps.ui.theme.Violet
 import dev.pvps.ui.theme.Warning
 
 @Composable
@@ -78,48 +91,117 @@ fun MoreScreen(
 ) {
     val host = viewModel.selectedHost.collectAsStateValue()
     Scaffold(
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = { ScreenHeader(title = "More", subtitle = host?.let { "${it.name} · ${it.sshHost}" } ?: "No host") }
+        topBar = {
+            ScreenHeader(
+                title = "Control",
+                subtitle = host?.let { "${it.name} · ${it.sshHost}" } ?: "No host selected"
+            )
+        }
     ) { padding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(horizontal = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            item { Spacer(Modifier.height(4.dp)) }
             item {
-                SectionCard(title = "Host") {
-                    MoreRow("Hosts", "Add, edit and connect SSH hosts", Icons.Default.Terminal, onHosts)
+                Spacer(Modifier.height(4.dp))
+                SectionLabel("Server")
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                    MoreTile("Docker", "Containers", Icons.Default.Storage, Violet, onDocker, Modifier.weight(1f))
+                    MoreTile("Services", "systemd", Icons.Default.Dns, Warning, onServices, Modifier.weight(1f))
+                }
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                    MoreTile("Processes", "CPU / RAM", Icons.Default.Memory, Danger, onProcesses, Modifier.weight(1f))
+                    MoreTile("Files", "SFTP / tar", Icons.Default.Folder, Accent, onOpenFiles, Modifier.weight(1f))
+                }
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                    MoreTile("Terminal", "xterm-256", Icons.Default.Terminal, Accent, onOpenTerminal, Modifier.weight(1f))
+                    MoreTile("Hosts", "SSH targets", Icons.Default.Dns, Violet, onHosts, Modifier.weight(1f))
+                }
+            }
+            item {
+                Spacer(Modifier.height(4.dp))
+                SectionLabel("Access")
+            }
+            item {
+                SectionCard(title = "Security") {
                     MoreRow("SSH keys", "Generate ed25519 or import existing keys", Icons.Default.Key, onKeys)
+                    MoreRow("Audit log", "Connections and destructive actions", Icons.Default.Archive, onAudit)
+                    MoreRow("Hosts", "Add, edit and switch SSH targets", Icons.Default.Terminal, onHosts)
                 }
             }
             item {
-                SectionCard(title = "Server") {
-                    MoreRow("Docker", "Containers, actions and logs", Icons.Default.Storage, onDocker)
-                    MoreRow("Services", "systemd units and journal", Icons.Default.Dns, onServices)
-                    MoreRow("Processes", "CPU/RAM and kill", Icons.Default.Memory, onProcesses)
-                    MoreRow("Files", "SFTP, tar and previews", Icons.Default.Folder, onOpenFiles)
-                    MoreRow("Terminal", "Full xterm-256color shell", Icons.Default.Terminal, onOpenTerminal)
-                }
+                Spacer(Modifier.height(4.dp))
+                SectionLabel("App")
             }
             item {
-                SectionCard(title = "App") {
-                    MoreRow("Audit log", "Destructive actions and connections", Icons.Default.Archive, onAudit)
-                    MoreRow("Settings", "Security, terminal and appearance", Icons.Default.Settings, onSettings)
-                    MoreRow("Check for updates", "Current ${BuildConfig.VERSION_NAME}", Icons.Default.Refresh, onCheckUpdates)
+                SectionCard(title = "PVPS") {
+                    MoreRow("Settings", "Security, terminal and chat", Icons.Default.Settings, onSettings)
+                    MoreRow(
+                        "Check for updates",
+                        "Installed ${BuildConfig.VERSION_NAME}",
+                        Icons.Default.Refresh,
+                        onCheckUpdates
+                    )
                 }
             }
             item {
                 Text(
-                    "PVPS ${BuildConfig.VERSION_NAME} · OpenCode v2 · SSH only",
+                    "PVPS ${BuildConfig.VERSION_NAME}  ·  OpenCode v2  ·  SSH only",
                     style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary,
-                    modifier = Modifier.padding(8.dp)
+                    color = TextFaint,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp)
                 )
             }
-            item { Spacer(Modifier.height(80.dp)) }
+            item { Spacer(Modifier.height(96.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun MoreTile(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    tint: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .clip(RoundedCornerShape(22.dp))
+            .clickable(onClick = onClick),
+        color = SurfaceRaised.copy(alpha = 0.58f),
+        shape = RoundedCornerShape(22.dp),
+        border = BorderStroke(1.dp, OutlineDark)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(tint.copy(alpha = 0.10f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+                }
+                Spacer(Modifier.weight(1f))
+                Text("↗", color = TextFaint, style = MaterialTheme.typography.titleMedium)
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(title, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+            Text(subtitle.uppercase(), style = MaterialTheme.typography.labelSmall, color = TextSecondary)
         }
     }
 }
@@ -129,16 +211,26 @@ private fun MoreRow(title: String, subtitle: String, icon: ImageVector, onClick:
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
             .clickable { onClick() }
-            .padding(vertical = 10.dp),
+            .padding(vertical = 10.dp, horizontal = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, contentDescription = null, tint = Accent, modifier = Modifier.width(30.dp))
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Accent.copy(alpha = 0.08f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = Accent, modifier = Modifier.size(17.dp))
+        }
+        Spacer(Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(title, style = MaterialTheme.typography.bodyLarge, color = TextPrimary)
             Text(subtitle, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
         }
-        Text("›", color = TextSecondary, style = MaterialTheme.typography.titleLarge)
+        Text("›", color = TextFaint, style = MaterialTheme.typography.titleLarge)
     }
 }
 
@@ -155,6 +247,7 @@ fun SettingsScreen(
     var showThemeMenu by remember { mutableStateOf(false) }
 
     Scaffold(
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = { ScreenHeader(title = "Settings", onBack = onBack) }
     ) { padding ->
@@ -314,7 +407,7 @@ private fun SettingSwitch(
             Text(title, style = MaterialTheme.typography.bodyLarge)
             Text(subtitle, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
         }
-        Switch(checked = checked, onCheckedChange = onChecked)
+        dev.pvps.ui.components.PvpsSwitch(checked = checked, onCheckedChange = onChecked)
     }
 }
 
@@ -323,6 +416,7 @@ fun AuditScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     val entries = viewModel.audit.collectAsStateValue()
     var showClear by remember { mutableStateOf(false) }
     Scaffold(
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             ScreenHeader(

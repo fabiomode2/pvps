@@ -208,6 +208,7 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     }
 
     Scaffold(
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             ScreenHeader(
