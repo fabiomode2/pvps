@@ -472,10 +472,10 @@ detect_host() {
     fi
   fi
   if [[ -z "${host}" ]]; then
-    host="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+    host="$(curl -fsS --max-time 8 https://api.ipify.org 2>/dev/null || true)"
   fi
   if [[ -z "${host}" ]]; then
-    host="$(curl -fsS --max-time 8 https://ifconfig.me 2>/dev/null || true)"
+    host="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
   fi
   printf '%s' "${host}"
 }
