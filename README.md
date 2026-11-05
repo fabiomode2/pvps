@@ -15,5 +15,6 @@ Paste the `pvps-setup:` code it prints into the app. Add your phone SSH key sepa
 - SSH-only, no cloud backend; keys stay on the phone.
 - OpenCode v2 sessions, streaming, tools and permissions.
 - Native terminal, SFTP, Docker, systemd and processes.
+- Auto-updates from GitHub Releases.
 
 Termux terminal-emulator is GPLv3; see [NOTICE](NOTICE).
