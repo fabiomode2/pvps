@@ -418,6 +418,17 @@ class OpenCodeRepository(
             Log.i("PVPSQueue", "ack id=$ackId delivery=${ack.delivery} files=${ack.payload.files.size}")
             addOptimisticUserMessage(ackId, created, prompt, ack.payload.files)
             scheduleRefresh()
+            // If the app had a stale "busy" flag, the queue drain can think the
+            // turn is still running and never promote this item. Re-check the
+            // session shortly after admission and force delivery when idle.
+            scope.launch {
+                delay(1_500)
+                runCatching {
+                    refreshSessions()
+                    refreshInbox()
+                    if (_state.value.activeSession?.isRunning != true) promoteQueued()
+                }.onFailure { Log.w("PVPSQueue", "post-send promote failed: ${it.message}") }
+            }
             true
         }.getOrElse {
             _state.value = _state.value.copy(
@@ -519,13 +530,14 @@ class OpenCodeRepository(
         refreshSessions()
         if (_state.value.sessions.firstOrNull { it.id == id }?.isRunning == true) return
         refreshInbox()
-        val pending = _state.value.queued.filter { it.delivery == "queue" }
+        val pending = _state.value.queued
         if (pending.isEmpty()) return
+        Log.i("PVPSQueue", "promote ${pending.size} pending inbox item(s)")
         pending.forEach { item ->
             val promoted = runCatching { c.updateInboxDelivery(id, item.id, "steer") }
                 .onFailure { Log.w("PVPSQueue", "promote ${item.id} failed: ${it.message}") }
                 .isSuccess
-            Log.i("PVPSQueue", "promote ${item.id} -> steer success=$promoted")
+            Log.i("PVPSQueue", "promote ${item.id} (${item.delivery}) -> steer success=$promoted")
             // If the PATCH failed, leave the item in place and retry on the
             // next 3s drain tick. Re-sending here risks duplicate prompts when
             // the server actually accepted the original admission.
@@ -540,9 +552,23 @@ class OpenCodeRepository(
             while (isActive) {
                 delay(3_000)
                 if (client == null || !_state.value.connected) continue
-                if (_state.value.queued.isEmpty()) continue
-                runCatching { promoteQueued() }
-                    .onFailure { Log.w("PVPSQueue", "drain failed: ${it.message}") }
+                val before = _state.value
+                // Poll even when the local queue list is empty: a missed idle
+                // event used to leave busy=true forever and hide the fact that
+                // the server had already finished the turn.
+                if (before.busy || before.queued.isNotEmpty()) {
+                    runCatching {
+                        refreshSessions()
+                        refreshInbox()
+                    }.onFailure { Log.w("PVPSQueue", "poll failed: ${it.message}") }
+                }
+                val after = _state.value
+                if (after.queued.isNotEmpty() &&
+                    after.activeSession?.isRunning != true
+                ) {
+                    runCatching { promoteQueued() }
+                        .onFailure { Log.w("PVPSQueue", "drain failed: ${it.message}") }
+                }
             }
         }
     }
@@ -714,6 +740,12 @@ class OpenCodeRepository(
                 scheduleRefresh()
             }
             "message.updated", "message.part.updated", "message.part.removed" -> scheduleRefresh()
+            "session.execution.started", "session.step.started" -> {
+                if (eventSession == null || eventSession == active) {
+                    _state.value = _state.value.copy(busy = true)
+                    scheduleRefresh()
+                }
+            }
             "session.model.selected", "session.agent.selected" -> refreshSessions()
             "session.created", "session.deleted", "session.renamed", "session.moved",
             "session.archived", "session.unarchived" -> refreshSessions()

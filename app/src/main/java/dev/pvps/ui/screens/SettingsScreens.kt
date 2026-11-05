@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.pvps.BuildConfig
 import dev.pvps.data.model.AppSettings
 import dev.pvps.terminal.TerminalPalettes
@@ -174,9 +175,9 @@ private fun MoreTile(
         modifier = modifier
             .clip(RoundedCornerShape(22.dp))
             .clickable(onClick = onClick),
-        color = SurfaceRaised.copy(alpha = 0.58f),
-        shape = RoundedCornerShape(22.dp),
-        border = BorderStroke(1.dp, OutlineDark)
+        color = SurfaceRaised.copy(alpha = 0.42f),
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.72f))
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -194,7 +195,13 @@ private fun MoreTile(
             }
             Spacer(Modifier.height(12.dp))
             Text(title, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-            Text(subtitle.uppercase(), style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                subtitle.uppercase(),
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary,
+                letterSpacing = 0.7.sp
+            )
         }
     }
 }

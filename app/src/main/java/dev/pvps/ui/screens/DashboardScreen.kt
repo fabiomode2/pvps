@@ -422,9 +422,9 @@ private fun ConnectionPanel(
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = SurfaceRaised.copy(alpha = 0.50f),
-        shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(1.dp, OutlineDark)
+        color = SurfaceRaised.copy(alpha = 0.44f),
+        shape = RoundedCornerShape(22.dp),
+        border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.72f))
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -642,9 +642,9 @@ private fun TelemetryHeader(loading: Boolean, lastRefresh: Long) {
 private fun TelemetryGrid(snapshot: SystemRepository.Snapshot) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = SurfaceRaised.copy(alpha = 0.46f),
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, OutlineDark)
+        color = SurfaceRaised.copy(alpha = 0.42f),
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.72f))
     ) {
         Column {
             Row(
@@ -778,9 +778,9 @@ private fun QuickAccess(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = SurfaceRaised.copy(alpha = 0.46f),
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, OutlineDark)
+        color = SurfaceRaised.copy(alpha = 0.42f),
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.72f))
     ) {
         Column {
             QuickRow(

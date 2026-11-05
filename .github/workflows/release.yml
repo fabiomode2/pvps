@@ -149,22 +149,23 @@ jobs:
             ```
 
             **What's new in ${{ steps.meta.outputs.version }}:**
-            - Attach multiple files and photos to a prompt. Files are sent as
-              inline data parts that OpenCode can read directly.
-            - Message drafts are kept per session when switching tabs.
-            - Slash-command autocomplete in the composer: /init, /compact and
-              the project commands exposed by OpenCode.
-            - Compact inline model/effort panel inside the composer instead of
-              a full-screen picker. The agent/READY row no longer overlaps or
-              grows over the conversation.
-            - Context now shows exact used/limit tokens, with a note explaining
-              that it is measured from the latest assistant request.
-            - Spend uses the real OpenCode Console request log for the active
-              session, with a marked estimate and the Go plan allowance as
-              fallback when Console credentials are unavailable.
-            - Queued prompts stay visible and are promoted on idle, with a
-              bounded queue panel so it cannot cover the chat.
-            - Forms/questions remain inline with background notifications.
+            - Photo quick menu: tap the clip and choose Photos or Files. Photos
+              use the Android photo picker, with multi-select and thumbnails.
+            - Full markdown rendering: headings, lists, quotes, links, tables
+              and fenced code with a language label, copy button and light
+              syntax colouring. User messages render markdown too.
+            - One header button collapses every thinking block and tool call.
+            - A floating "Latest" pill jumps to the bottom of long chats and
+              only appears when you are reading older messages.
+            - Questions now take over the chat one at a time, with progress,
+              Back/Next, required-field validation and "Type your own answer"
+              for option fields.
+            - Images in messages render with downsampling and a full-screen
+              viewer; outgoing photos show thumbnails in the composer.
+            - Queue watchdog: queued prompts are re-checked after sending and
+              promoted on idle, with a bounded queue status panel.
+            - App-wide editorial polish: calmer cards, consistent section
+              headers, softer dock and dashboard surfaces.
           files: |
             dist/pvps-${{ steps.meta.outputs.version }}.apk
             dist/SHA256SUMS

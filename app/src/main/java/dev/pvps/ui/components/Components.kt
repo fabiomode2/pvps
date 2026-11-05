@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Power
@@ -62,7 +63,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -199,7 +202,10 @@ fun ScreenHeader(
                     )
                 }
             }
-            actions()
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) { actions() }
         }
     }
 }
@@ -384,9 +390,9 @@ fun StatCard(
 ) {
     Surface(
         modifier = modifier,
-        color = SurfaceRaised.copy(alpha = 0.62f),
-        shape = RoundedCornerShape(22.dp),
-        border = BorderStroke(1.dp, OutlineDark)
+        color = SurfaceRaised.copy(alpha = 0.48f),
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.72f))
     ) {
         Column(modifier = Modifier.padding(15.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -528,29 +534,30 @@ fun SectionCard(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = SurfaceRaised.copy(alpha = 0.58f),
-        shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.dp, OutlineDark)
+        color = SurfaceRaised.copy(alpha = 0.44f),
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.72f))
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(15.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
-                        .width(3.dp)
-                        .height(15.dp)
+                        .width(2.dp)
+                        .height(13.dp)
                         .clip(RoundedCornerShape(50))
                         .background(Accent)
                 )
-                Spacer(Modifier.width(9.dp))
+                Spacer(Modifier.width(8.dp))
                 Text(
-                    title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = TextPrimary,
+                    title.uppercase(),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = TextSecondary,
+                    letterSpacing = 1.1.sp,
                     modifier = Modifier.weight(1f)
                 )
                 actions()
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(11.dp))
             content()
         }
     }
@@ -754,6 +761,7 @@ fun ConfirmDialog(
 
 @Composable
 fun MonospaceBox(text: String, modifier: Modifier = Modifier) {
+    val clipboard = LocalClipboardManager.current
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = DeepBackground.copy(alpha = 0.72f),
@@ -769,7 +777,17 @@ fun MonospaceBox(text: String, modifier: Modifier = Modifier) {
             ) {
                 Text("CODE", style = MaterialTheme.typography.labelSmall, color = TextFaint)
                 Spacer(Modifier.weight(1f))
-                Text("MONO", style = MaterialTheme.typography.labelSmall, color = TextFaint)
+                IconButton(
+                    onClick = { clipboard.setText(AnnotatedString(text)) },
+                    modifier = Modifier.size(26.dp)
+                ) {
+                    Icon(
+                        Icons.Default.ContentCopy,
+                        contentDescription = "Copy",
+                        tint = TextFaint,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
             }
             HorizontalDivider(color = OutlineSoft.copy(alpha = 0.7f))
             Text(

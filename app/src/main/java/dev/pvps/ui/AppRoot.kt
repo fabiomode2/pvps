@@ -347,6 +347,14 @@ private fun PvpsDock(route: String, onSelect: (String) -> Unit) {
                             color = if (selected) Accent else TextFaint,
                             maxLines = 1
                         )
+                        Spacer(Modifier.height(3.dp))
+                        Box(
+                            modifier = Modifier
+                                .width(if (selected) 14.dp else 4.dp)
+                                .height(2.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(if (selected) Accent else Color.Transparent)
+                        )
                     }
                 }
             }

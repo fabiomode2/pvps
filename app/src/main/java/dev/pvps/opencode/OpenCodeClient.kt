@@ -106,6 +106,7 @@ class OpenCodeClient(
         withTimeout(60_000) {
             val body = buildJsonObject {
                 put("text", text)
+                put("resume", true)
                 if (delivery != null) put("delivery", delivery)
                 filesJson(files)?.let { put("files", it) }
             }

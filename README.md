@@ -23,8 +23,9 @@ Tailscale address), that port 22 is open in the cloud firewall, and that the
 phone's public key is in `~/.ssh/authorized_keys`.
 
 - SSH-only, no cloud backend; keys stay on the phone.
-- OpenCode v2 sessions, streaming, tools, permissions, inline questions,
-  file attachments, slash commands and per-session drafts.
+- OpenCode v2 sessions, streaming, tools, permissions, step-by-step inline
+  questions, photo/file attachments, slash commands, markdown/tables/code
+  rendering and per-session drafts.
 - Native terminal, SFTP, Docker, systemd and processes.
 - Auto-updates from GitHub Releases.
 

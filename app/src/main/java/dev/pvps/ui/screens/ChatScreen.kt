@@ -37,6 +37,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
@@ -44,14 +45,18 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.UnfoldLess
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -73,6 +78,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -85,6 +91,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewModelScope
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -99,6 +106,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -132,6 +140,7 @@ import dev.pvps.ui.AppViewModel
 import dev.pvps.ui.components.EmptyState
 import dev.pvps.ui.components.ErrorBanner
 import dev.pvps.ui.components.InfoRow
+import dev.pvps.ui.components.MarkdownText
 import dev.pvps.ui.components.MonospaceBox
 import dev.pvps.ui.components.ScreenHeader
 import dev.pvps.ui.components.StatusDot
@@ -153,6 +162,7 @@ import dev.pvps.ui.theme.TextSecondary
 import dev.pvps.ui.theme.Violet
 import dev.pvps.ui.theme.Void
 import dev.pvps.ui.theme.Warning
+import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -196,38 +206,44 @@ fun ChatScreen(
     var showStats by remember { mutableStateOf(false) }
     var expanded by remember { mutableStateOf<Set<String>>(emptySet()) }
 
-    val filePicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris ->
-        if (uris.isEmpty()) return@rememberLauncherForActivityResult
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                val picked = mutableListOf<ChatAttachment>()
-                val errors = mutableListOf<String>()
-                uris.forEach { uri ->
-                    runCatching { readChatAttachment(context, uri) }
-                        .onSuccess { picked += it }
-                        .onFailure { errors += (it.message ?: "Could not read attachment") }
+    val importUris: (List<Uri>) -> Unit = { uris ->
+        if (uris.isNotEmpty()) {
+            scope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    val picked = mutableListOf<ChatAttachment>()
+                    val errors = mutableListOf<String>()
+                    uris.forEach { uri ->
+                        runCatching { readChatAttachment(context, uri) }
+                            .onSuccess { picked += it }
+                            .onFailure { errors += (it.message ?: "Could not read attachment") }
+                    }
+                    picked to errors
                 }
-                picked to errors
+                val room = (MAX_ATTACHMENTS - attachments.size).coerceAtLeast(0)
+                var totalBytes = attachments.sumOf { it.size }
+                val added = mutableListOf<ChatAttachment>()
+                for (candidate in result.first) {
+                    if (added.size >= room) break
+                    if (totalBytes + candidate.size > MAX_TOTAL_ATTACHMENT_BYTES) break
+                    totalBytes += candidate.size
+                    added += candidate
+                }
+                attachmentError = when {
+                    result.first.size > room -> "Max $MAX_ATTACHMENTS attachments"
+                    added.size < result.first.size -> "Total attachment size must stay under 24 MB"
+                    result.second.isNotEmpty() -> result.second.first()
+                    else -> null
+                }
+                attachments = (attachments + added).distinctBy { it.uri }
             }
-            val room = (MAX_ATTACHMENTS - attachments.size).coerceAtLeast(0)
-            var totalBytes = attachments.sumOf { it.size }
-            val added = mutableListOf<ChatAttachment>()
-            for (candidate in result.first.take(room)) {
-                if (totalBytes + candidate.size > MAX_TOTAL_ATTACHMENT_BYTES) break
-                totalBytes += candidate.size
-                added += candidate
-            }
-            attachmentError = when {
-                result.first.size > room -> "Max $MAX_ATTACHMENTS attachments"
-                added.size < result.first.size -> "Total attachment size must stay under 24 MB"
-                result.second.isNotEmpty() -> result.second.first()
-                else -> null
-            }
-            attachments = (attachments + added)
         }
     }
+    val filePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris -> importUris(uris) }
+    val photoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(MAX_ATTACHMENTS)
+    ) { uris -> importUris(uris) }
 
     LaunchedEffect(host?.id, connection?.status) {
         if (host != null && connection?.status == ConnectionState.Status.CONNECTED) {
@@ -292,6 +308,7 @@ fun ChatScreen(
         estimatedSpend > 0.0 -> "SPENT · EST"
         else -> "GO PLAN"
     }
+    val activeForm = chat.forms.firstOrNull()
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -314,6 +331,16 @@ fun ChatScreen(
                 },
                 onBack = onBack,
                 actions = {
+                    IconButton(
+                        onClick = { expanded = emptySet() },
+                        enabled = expanded.isNotEmpty()
+                    ) {
+                        Icon(
+                            Icons.Default.UnfoldLess,
+                            contentDescription = "Collapse all thinking and tools",
+                            tint = if (expanded.isNotEmpty()) TextSecondary else TextFaint
+                        )
+                    }
                     IconButton(onClick = { showSessions = true }, enabled = chat.connected) {
                         Icon(Icons.Default.List, contentDescription = "Sessions", tint = TextSecondary)
                     }
@@ -430,7 +457,17 @@ fun ChatScreen(
             }
 
             Box(modifier = Modifier.weight(1f)) {
-                if (chat.messages.isEmpty()) {
+                if (activeForm != null) {
+                    FormWizard(
+                        form = activeForm,
+                        onSubmit = { answer ->
+                            scope.launch { viewModel.container.openCode.replyForm(activeForm, answer) }
+                        },
+                        onCancel = {
+                            scope.launch { viewModel.container.openCode.cancelForm(activeForm) }
+                        }
+                    )
+                } else if (chat.messages.isEmpty()) {
                     EmptyState(
                         title = session?.displayTitle ?: "No session",
                         message = if (session == null) {
@@ -498,18 +535,39 @@ fun ChatScreen(
                         }
                     }
                 }
-            }
-
-            chat.forms.firstOrNull()?.let { form ->
-                FormCard(
-                    form = form,
-                    onSubmit = { answer ->
-                        scope.launch { viewModel.container.openCode.replyForm(form, answer) }
-                    },
-                    onCancel = {
-                        scope.launch { viewModel.container.openCode.cancelForm(form) }
+                if (activeForm == null && conversation.isNotEmpty() && !atBottom) {
+                    Surface(
+                        onClick = {
+                            scope.launch {
+                                runCatching { listState.animateScrollToItem(conversation.lastIndex) }
+                            }
+                        },
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(14.dp),
+                        color = SurfaceHigh.copy(alpha = 0.94f),
+                        shape = RoundedCornerShape(50),
+                        border = BorderStroke(1.dp, Accent.copy(alpha = 0.30f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Go to latest message",
+                                tint = Accent,
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Text(
+                                "Latest",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextPrimary
+                            )
+                        }
                     }
-                )
+                }
             }
 
             if (chat.permissions.isNotEmpty()) {
@@ -523,6 +581,7 @@ fun ChatScreen(
                 )
             }
 
+            if (activeForm == null) {
             Composer(
                 value = composer,
                 onValueChange = {
@@ -542,7 +601,12 @@ fun ChatScreen(
                 queued = chat.queued,
                 attachments = attachments,
                 attachmentError = attachmentError,
-                onAttach = { filePicker.launch(arrayOf("*/*")) },
+                onAttachFiles = { filePicker.launch(arrayOf("*/*")) },
+                onAttachPhotos = {
+                    photoPicker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                },
                 onRemoveAttachment = { uri ->
                     attachments = attachments.filterNot { it.uri == uri }
                     attachmentError = null
@@ -608,6 +672,7 @@ fun ChatScreen(
                 },
                 onStop = { scope.launch { viewModel.container.openCode.interrupt() } }
             )
+            }
         }
     }
 
@@ -899,13 +964,10 @@ private fun MessageBubble(
                     shape = RoundedCornerShape(20.dp, 20.dp, 5.dp, 20.dp)
                 ) {
                     Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)) {
-                        SelectionContainer {
-                            Text(
-                                message.text.ifBlank { "(empty message)" },
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = TextPrimary
-                            )
-                        }
+                        MarkdownText(
+                            message.text.ifBlank { "(empty message)" },
+                            compact = true
+                        )
                         message.files.forEach { file ->
                             AttachmentChip(file, openCode)
                         }
@@ -1284,26 +1346,108 @@ private fun AttachmentChip(file: FileAttachment, openCode: OpenCodeRepository) {
 
 @Composable
 private fun RemoteMedia(uri: String, openCode: OpenCodeRepository) {
+    var zoom by remember { mutableStateOf(false) }
     val result by produceState<Pair<Boolean, ImageBitmap?>>(initialValue = false to null, uri) {
-        val bytes = openCode.loadMedia(uri)
-        value = true to bytes?.let { data ->
-            runCatching { BitmapFactory.decodeByteArray(data, 0, data.size)?.asImageBitmap() }.getOrNull()
+        val bitmap = withContext(Dispatchers.IO) {
+            openCode.loadMedia(uri)?.let { data ->
+                runCatching { decodeSampledBitmap(data) }.getOrNull()
+            }
         }
+        value = true to bitmap
     }
-    if (!result.first) {
-        Text("Loading image…", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-    } else if (result.second != null) {
-        Image(
-            bitmap = result.second!!,
-            contentDescription = "Image attachment",
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 360.dp)
-                .padding(top = 6.dp)
+    when {
+        !result.first -> Text(
+            "Loading image…",
+            style = MaterialTheme.typography.labelSmall,
+            color = TextSecondary,
+            modifier = Modifier.padding(top = 6.dp)
         )
-    } else {
-        Text("Image unavailable", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+        result.second != null -> {
+            val bitmap = result.second!!
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(DeepBackground.copy(alpha = 0.5f))
+                    .clickable { zoom = true }
+            ) {
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = "Image attachment",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                )
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(8.dp),
+                    color = DeepBackground.copy(alpha = 0.72f),
+                    shape = RoundedCornerShape(50)
+                ) {
+                    Text(
+                        "TAP TO OPEN",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary,
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                    )
+                }
+            }
+            if (zoom) {
+                Dialog(
+                    onDismissRequest = { zoom = false },
+                    properties = DialogProperties(usePlatformDefaultWidth = false)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.96f))
+                    ) {
+                        Image(
+                            bitmap = bitmap,
+                            contentDescription = "Full image",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(12.dp)
+                        )
+                        IconButton(
+                            onClick = { zoom = false },
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .statusBarsPadding()
+                                .padding(10.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Close image",
+                                tint = Color.White
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        else -> Text(
+            "Image unavailable",
+            style = MaterialTheme.typography.labelSmall,
+            color = TextSecondary,
+            modifier = Modifier.padding(top = 6.dp)
+        )
     }
+}
+
+private fun decodeSampledBitmap(data: ByteArray, maxDimension: Int = 1600): ImageBitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
+    var sample = 1
+    while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxDimension) {
+        sample *= 2
+    }
+    val options = BitmapFactory.Options().apply { inSampleSize = sample }
+    return BitmapFactory.decodeByteArray(data, 0, data.size, options)?.asImageBitmap()
 }
 
 @Composable
@@ -1362,7 +1506,8 @@ private fun Composer(
     queued: List<OpenCodeRepository.QueuedPrompt>,
     attachments: List<ChatAttachment>,
     attachmentError: String?,
-    onAttach: () -> Unit,
+    onAttachFiles: () -> Unit,
+    onAttachPhotos: () -> Unit,
     onRemoveAttachment: (Uri) -> Unit,
     onSelectModel: (ModelInfo) -> Unit,
     onSelectVariant: (ModelInfo, ModelVariant) -> Unit,
@@ -1374,6 +1519,7 @@ private fun Composer(
     onStop: () -> Unit
 ) {
     var panel by remember { mutableStateOf(ComposerPanel.None) }
+    var showAttachMenu by remember { mutableStateOf(false) }
     var modelQuery by remember { mutableStateOf("") }
     var pendingModel by remember { mutableStateOf<ModelInfo?>(null) }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -1478,9 +1624,20 @@ private fun Composer(
                                 border = BorderStroke(1.dp, OutlineDark)
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(start = 10.dp, end = 2.dp),
+                                    modifier = Modifier.padding(start = if (item.mime.startsWith("image/")) 4.dp else 10.dp, end = 2.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    if (item.mime.startsWith("image/")) {
+                                        AsyncImage(
+                                            model = item.uri,
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .clip(RoundedCornerShape(6.dp))
+                                        )
+                                        Spacer(Modifier.width(7.dp))
+                                    }
                                     Text(
                                         item.name,
                                         style = MaterialTheme.typography.labelSmall,
@@ -1734,10 +1891,16 @@ private fun Composer(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 112.dp)
+                        .heightIn(max = 126.dp)
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    Text(
+                        "QUEUED · ${queued.size} · sends automatically when the turn ends",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Warning,
+                        modifier = Modifier.padding(start = 2.dp, bottom = 1.dp)
+                    )
                     queued.forEach { item ->
                         Surface(
                             color = Warning.copy(alpha = 0.07f),
@@ -1814,13 +1977,43 @@ private fun Composer(
                         }
                     ),
                     leadingIcon = {
-                        IconButton(onClick = onAttach, enabled = connected) {
-                            Icon(
-                                Icons.Default.AttachFile,
-                                contentDescription = "Attach files",
-                                tint = if (connected) TextSecondary else TextFaint,
-                                modifier = Modifier.size(19.dp)
-                            )
+                        Box {
+                            IconButton(
+                                onClick = { showAttachMenu = true },
+                                enabled = connected
+                            ) {
+                                Icon(
+                                    Icons.Default.AttachFile,
+                                    contentDescription = "Attach photos or files",
+                                    tint = if (connected) TextSecondary else TextFaint,
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showAttachMenu,
+                                onDismissRequest = { showAttachMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Photos", color = TextPrimary) },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Image, contentDescription = null, tint = Accent)
+                                    },
+                                    onClick = {
+                                        showAttachMenu = false
+                                        onAttachPhotos()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Files", color = TextPrimary) },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Folder, contentDescription = null, tint = TextSecondary)
+                                    },
+                                    onClick = {
+                                        showAttachMenu = false
+                                        onAttachFiles()
+                                    }
+                                )
+                            }
                         }
                     },
                     shape = RoundedCornerShape(18.dp),
@@ -1964,146 +2157,320 @@ private fun CircleAction(
 }
 
 @Composable
-private fun FormCard(
+private fun FormWizard(
     form: FormInfo,
     onSubmit: (Map<String, JsonElement>) -> Unit,
     onCancel: () -> Unit
 ) {
     var answers by remember(form.id) { mutableStateOf(defaultFormAnswers(form.fields)) }
+    var extra by remember(form.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var step by remember(form.id) { mutableIntStateOf(0) }
     var error by remember(form.id) { mutableStateOf<String?>(null) }
-    Surface(
-        color = Violet.copy(alpha = 0.09f),
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, Violet.copy(alpha = 0.28f)),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp)
+    val visible = form.fields.filter { fieldVisible(it, answers) }
+    val total = visible.size
+    LaunchedEffect(total) {
+        if (step > total - 1) step = (total - 1).coerceAtLeast(0)
+    }
+    val field = visible.getOrNull(step)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 18.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .heightIn(max = 430.dp)
-                .verticalScroll(rememberScrollState())
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text("OPENCODE ASKS", style = MaterialTheme.typography.labelSmall, color = Violet)
-            Text(
-                form.title.ifBlank { "Question" },
-                style = MaterialTheme.typography.titleMedium,
-                color = TextPrimary
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("OPENCODE ASKS", style = MaterialTheme.typography.labelSmall, color = Violet)
+                Text(
+                    form.title.ifBlank { "Question" },
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = TextPrimary,
+                    fontFamily = dev.pvps.ui.theme.DisplayFont
+                )
+            }
+            TextButton(onClick = onCancel) { Text("Skip", color = TextFaint) }
+        }
+        if (total > 0) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "QUESTION ${step + 1} OF $total",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextFaint
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "${((step + 1) * 100) / total}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Accent
+                )
+            }
+            LinearProgressIndicator(
+                progress = { (step + 1).toFloat() / total },
+                modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(50)),
+                color = Violet,
+                trackColor = OutlineDark
             )
-            form.fields.filter { fieldVisible(it, answers) }.forEach { field ->
-                when (field.type) {
-                    "boolean" -> Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clickable {
-                            val key = field.key
-                            val current = answers[key]?.let { (it as? JsonPrimitive)?.booleanOrNull } ?: false
-                            answers = answers + (key to JsonPrimitive(!current))
-                        }
-                    ) {
-                        Checkbox(
-                            checked = answers[field.key]?.let { (it as? JsonPrimitive)?.booleanOrNull } ?: false,
-                            onCheckedChange = { checked -> answers = answers + (field.key to JsonPrimitive(checked)) }
-                        )
-                        Text(field.label, color = TextPrimary, style = MaterialTheme.typography.bodyMedium)
-                    }
-                    "multiselect" -> {
-                        FormLabel(field)
-                        field.options.forEach { option ->
-                            val current = (answers[field.key] as? JsonArray)
-                                ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
-                                ?: emptyList()
-                            val active = option.value in current
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth().clickable {
-                                    val next = if (active) current - option.value else current + option.value
-                                    answers = answers + (field.key to JsonArray(next.map { JsonPrimitive(it) }))
-                                }
-                            ) {
-                                Checkbox(checked = active, onCheckedChange = null)
-                                Text(
-                                    option.label.ifBlank { option.value },
-                                    color = TextPrimary,
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-                        }
-                    }
-                    "external" -> {
-                        FormLabel(field)
-                        Text(field.url.orEmpty(), color = Accent, style = MaterialTheme.typography.bodySmall)
-                    }
-                    else -> {
-                        FormLabel(field)
-                        if (field.options.isNotEmpty()) {
-                            field.options.forEach { option ->
-                                val current = (answers[field.key] as? JsonPrimitive)?.contentOrNull.orEmpty()
-                                FormChoice(
-                                    option = option,
-                                    active = current == option.value,
-                                    onClick = { answers = answers + (field.key to JsonPrimitive(option.value)) }
-                                )
-                            }
-                        } else {
-                            OutlinedTextField(
-                                value = (answers[field.key] as? JsonPrimitive)?.contentOrNull.orEmpty(),
-                                onValueChange = { answers = answers + (field.key to JsonPrimitive(it)) },
-                                modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text(field.placeholder ?: field.description ?: "", color = TextFaint) },
-                                singleLine = field.type != "string",
-                                keyboardOptions = if (field.type == "number" || field.type == "integer") {
-                                    KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
-                                } else KeyboardOptions.Default,
-                                shape = RoundedCornerShape(12.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = Violet.copy(alpha = 0.55f),
-                                    unfocusedBorderColor = OutlineDark,
-                                    focusedTextColor = TextPrimary,
-                                    unfocusedTextColor = TextPrimary,
-                                    cursorColor = Violet
-                                )
-                            )
-                        }
-                    }
+        }
+
+        if (field == null) {
+            Text("No questions to answer.", color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
+            Button(onClick = { onSubmit(emptyMap()) }) { Text("Submit") }
+        } else {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = SurfaceRaised.copy(alpha = 0.52f),
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(1.dp, Violet.copy(alpha = 0.24f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(11.dp)
+                ) {
+                    FormLabel(field)
+                    FormFieldInput(
+                        field = field,
+                        answers = answers,
+                        extra = extra,
+                        onAnswers = { answers = it },
+                        onExtra = { extra = it }
+                    )
                 }
             }
-            error?.let { Text(it, color = Danger, style = MaterialTheme.typography.bodySmall) }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Button(
-                    onClick = {
-                        val visible = form.fields.filter { fieldVisible(it, answers) }
-                        val missing = visible.any { field ->
-                            field.required && when (field.type) {
-                                "boolean" -> false
-                                "multiselect" -> ((answers[field.key] as? JsonArray)?.isEmpty() ?: true)
-                                "external" -> false
-                                else -> (answers[field.key] as? JsonPrimitive)?.contentOrNull.isNullOrBlank()
-                            }
-                        }
-                        if (missing) {
-                            error = "Fill the required fields"
+            error?.let {
+                Text(it, color = Danger, style = MaterialTheme.typography.bodySmall)
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (step > 0) {
+                    TextButton(onClick = {
+                        error = null
+                        step--
+                    }) { Text("← Back", color = TextSecondary) }
+                }
+                Spacer(Modifier.weight(1f))
+                val last = step >= total - 1
+                Button(onClick = {
+                    val problem = validateFormField(field, answers, extra)
+                    if (problem != null) {
+                        error = problem
+                    } else {
+                        error = null
+                        if (last) {
+                            onSubmit(buildFormPayload(visible, answers, extra))
                         } else {
-                            val payload = visible.mapNotNull { field ->
-                                val value = answers[field.key] ?: return@mapNotNull null
-                                if (field.type == "external") return@mapNotNull null
-                                val raw = (value as? JsonPrimitive)?.contentOrNull
-                                if (value is JsonPrimitive && raw.isNullOrBlank()) return@mapNotNull null
-                                val typed: JsonElement = when (field.type) {
-                                    "number" -> raw?.toDoubleOrNull()?.let { JsonPrimitive(it) } ?: value
-                                    "integer" -> raw?.toLongOrNull()?.let { JsonPrimitive(it) } ?: value
-                                    else -> value
-                                }
-                                field.key to typed
-                            }.toMap()
-                            onSubmit(payload)
+                            step++
                         }
                     }
-                ) { Text("Submit answer") }
-                TextButton(onClick = onCancel) { Text("Skip", color = TextSecondary) }
+                }) {
+                    Text(if (last) "Submit answer" else "Next →")
+                }
             }
         }
     }
 }
+
+@Composable
+private fun FormFieldInput(
+    field: FormField,
+    answers: Map<String, JsonElement>,
+    extra: Map<String, String>,
+    onAnswers: (Map<String, JsonElement>) -> Unit,
+    onExtra: (Map<String, String>) -> Unit
+) {
+    val answer = answers[field.key]
+    when (field.type) {
+        "boolean" -> {
+            val current = (answer as? JsonPrimitive)?.booleanOrNull ?: false
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FormChoice(
+                    option = FormOption("true", "Yes"),
+                    active = current,
+                    onClick = { onAnswers(answers + (field.key to JsonPrimitive(true))) }
+                )
+                FormChoice(
+                    option = FormOption("false", "No"),
+                    active = !current,
+                    onClick = { onAnswers(answers + (field.key to JsonPrimitive(false))) }
+                )
+            }
+        }
+        "multiselect" -> {
+            val selected = (answer as? JsonArray)
+                ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                ?: emptyList()
+            field.options.forEach { option ->
+                val active = option.value in selected
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (active) Violet.copy(alpha = 0.12f) else Color.Transparent)
+                        .clickable {
+                            val next = if (active) selected - option.value else selected + option.value
+                            onAnswers(answers + (field.key to JsonArray(next.map { JsonPrimitive(it) })))
+                        }
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                ) {
+                    Checkbox(checked = active, onCheckedChange = null)
+                    Column {
+                        Text(
+                            option.label.ifBlank { option.value },
+                            color = TextPrimary,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        option.description?.takeIf { it.isNotBlank() }?.let {
+                            Text(it, color = TextFaint, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+            if (field.custom) {
+                CustomAnswerField(
+                    value = extra[field.key].orEmpty(),
+                    placeholder = "Type your own answer",
+                    onValueChange = { onExtra(extra + (field.key to it)) }
+                )
+                val custom = extra[field.key].orEmpty().trim()
+                if (custom.isNotEmpty() && custom !in selected) {
+                    TextButton(onClick = {
+                        onAnswers(
+                            answers + (field.key to JsonArray((selected + custom).map { JsonPrimitive(it) }))
+                        )
+                        onExtra(extra + (field.key to ""))
+                    }) { Text("Add “$custom”", color = Accent) }
+                }
+            }
+        }
+        "external" -> {
+            Text(
+                field.url.orEmpty().ifBlank { "External field" },
+                color = Accent,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        else -> {
+            val current = (answer as? JsonPrimitive)?.contentOrNull.orEmpty()
+            val known = field.options.any { it.value == current }
+            field.options.forEach { option ->
+                FormChoice(
+                    option = option,
+                    active = current == option.value,
+                    onClick = { onAnswers(answers + (field.key to JsonPrimitive(option.value))) }
+                )
+            }
+            if (field.options.isEmpty() || field.custom) {
+                CustomAnswerField(
+                    value = if (field.options.isNotEmpty() && known) "" else current,
+                    placeholder = when {
+                        field.custom && field.options.isNotEmpty() -> "Or type your own answer"
+                        else -> field.placeholder ?: field.description ?: "Type your answer"
+                    },
+                    numeric = field.type == "number" || field.type == "integer",
+                    onValueChange = { onAnswers(answers + (field.key to JsonPrimitive(it))) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CustomAnswerField(
+    value: String,
+    placeholder: String,
+    numeric: Boolean = false,
+    onValueChange: (String) -> Unit
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier.fillMaxWidth(),
+        placeholder = { Text(placeholder, color = TextFaint) },
+        singleLine = true,
+        keyboardOptions = if (numeric) {
+            KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
+        } else KeyboardOptions.Default,
+        shape = RoundedCornerShape(12.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = Violet.copy(alpha = 0.62f),
+            unfocusedBorderColor = OutlineDark,
+            focusedTextColor = TextPrimary,
+            unfocusedTextColor = TextPrimary,
+            cursorColor = Violet
+        )
+    )
+}
+
+private fun validateFormField(
+    field: FormField,
+    answers: Map<String, JsonElement>,
+    extra: Map<String, String>
+): String? {
+    val value = answers[field.key]
+    val raw = (value as? JsonPrimitive)?.contentOrNull.orEmpty()
+    val custom = extra[field.key].orEmpty().trim()
+    if (field.type == "boolean" || field.type == "external") return null
+    if (field.type == "multiselect") {
+        val count = (value as? JsonArray)?.size ?: 0
+        val totalCount = count + (if (custom.isBlank()) 0 else 1)
+        if (field.required && totalCount == 0) return "Select at least one option"
+        if (field.minItems != null && totalCount < field.minItems) {
+            return "Select at least ${field.minItems} options"
+        }
+        if (field.maxItems != null && totalCount > field.maxItems) {
+            return "Select at most ${field.maxItems} options"
+        }
+        return null
+    }
+    if (field.required && raw.isBlank()) return "This field is required"
+    if (raw.isNotBlank()) {
+        if (field.minLength != null && raw.length < field.minLength) {
+            return "Use at least ${field.minLength} characters"
+        }
+        if (field.maxLength != null && raw.length > field.maxLength) {
+            return "Use at most ${field.maxLength} characters"
+        }
+        if (field.type == "number" && raw.toDoubleOrNull() == null) return "Enter a valid number"
+        if (field.type == "integer" && raw.toLongOrNull() == null) return "Enter a whole number"
+        if (field.pattern != null) {
+            val matches = runCatching { Regex(field.pattern).matches(raw) }.getOrDefault(true)
+            if (!matches) return "The answer does not match the required format"
+        }
+    }
+    return null
+}
+
+private fun buildFormPayload(
+    fields: List<FormField>,
+    answers: Map<String, JsonElement>,
+    extra: Map<String, String>
+): Map<String, JsonElement> = fields.mapNotNull { field ->
+    if (field.type == "external") return@mapNotNull null
+    val value = answers[field.key] ?: return@mapNotNull null
+    val raw = (value as? JsonPrimitive)?.contentOrNull
+    if (field.type == "multiselect") {
+        val items = ((value as? JsonArray)
+            ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+            ?: emptyList()).toMutableList()
+        extra[field.key].orEmpty().trim().takeIf { it.isNotBlank() }?.let {
+            if (it !in items) items += it
+        }
+        field.key to JsonArray(items.map { JsonPrimitive(it) })
+    } else {
+        if (value is JsonPrimitive && raw.isNullOrBlank()) return@mapNotNull null
+        val typed: JsonElement = when (field.type) {
+            "number" -> raw?.toDoubleOrNull()?.let { JsonPrimitive(it) } ?: value
+            "integer" -> raw?.toLongOrNull()?.let { JsonPrimitive(it) } ?: value
+            else -> value
+        }
+        field.key to typed
+    }
+}.toMap()
 
 @Composable
 private fun FormLabel(field: FormField) {
@@ -2565,68 +2932,6 @@ private fun StatBox(label: String, value: String, modifier: Modifier = Modifier)
         Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
             Text(label, style = MaterialTheme.typography.labelSmall, color = TextFaint)
             Text(value, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-        }
-    }
-}
-
-@Composable
-private fun MarkdownText(text: String) {
-    if (text.isBlank()) return
-    val chunks = text.split("```")
-    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        chunks.forEachIndexed { index, chunk ->
-            if (index % 2 == 1) {
-                val firstLine = chunk.lineSequence().firstOrNull().orEmpty()
-                val code = if (firstLine.isNotBlank() && !firstLine.contains(' ')) {
-                    chunk.substringAfter('\n', "")
-                } else {
-                    chunk
-                }
-                MonospaceBox(code.trim())
-            } else if (chunk.isNotBlank()) {
-                SelectionContainer {
-                    Text(
-                        inlineMarkdown(chunk.trim()),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = TextPrimary
-                    )
-                }
-            }
-        }
-    }
-}
-
-private fun inlineMarkdown(text: String): AnnotatedString = buildAnnotatedString {
-    var i = 0
-    while (i < text.length) {
-        when {
-            text.startsWith("**", i) -> {
-                val end = text.indexOf("**", i + 2)
-                if (end > i) {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(text.substring(i + 2, end)) }
-                    i = end + 2
-                } else {
-                    append(text[i]); i++
-                }
-            }
-            text[i] == '`' -> {
-                val end = text.indexOf('`', i + 1)
-                if (end > i) {
-                    withStyle(
-                        SpanStyle(
-                            fontFamily = MonoFont,
-                            background = DeepBackground,
-                            color = Accent
-                        )
-                    ) { append(text.substring(i + 1, end)) }
-                    i = end + 1
-                } else {
-                    append(text[i]); i++
-                }
-            }
-            else -> {
-                append(text[i]); i++
-            }
         }
     }
 }
