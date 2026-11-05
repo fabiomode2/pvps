@@ -149,24 +149,27 @@ jobs:
             ```
 
             **What's new in ${{ steps.meta.outputs.version }}:**
-            - Fixed queued OpenCode prompts never sending. Queued prompts are
-              promoted when the session becomes idle, and can also be sent now.
-            - OpenCode questions/forms now appear inside conversations and can
-              be answered without leaving the app.
-            - Redesigned OpenCode chat: full-screen model picker with provider,
-              search, variants and reasoning effort; full-screen session picker;
-              collapsed tool/thinking activity; fixed context, spend and tok/s.
-            - Model and agent selection now persists between launches.
-            - SSH tunnels and OpenCode connections now survive backgrounding and
+            - Queued OpenCode prompts now always use queue delivery, so they
+              start when the session is idle and wait safely during a turn.
+              A background drain promotes stranded prompts.
+            - Reasoning effort is available from both the composer chip and the
+              full-screen model picker, and the last model/effort persists.
+            - Redesigned editorial chat: one collapsed activity row per turn
+              ("Working… · 12 tool calls"), cleaner composer and session list,
+              estimated spend when the provider reports no billed cost, and
+              corrected context/tok/s metrics.
+            - OpenCode questions/forms appear inline and can be answered without
+              leaving the conversation.
+            - SSH tunnels and OpenCode connections survive backgrounding and
               activity recreation, with automatic reconnect and tunnel rebuild.
             - Actionable notifications for OpenCode responses, permissions and
               questions instead of only the static SSH notification.
-            - Theme and font scale now apply correctly, with Graphite, Midnight,
-              Ember and Paper themes.
+            - Theme, font scale and interface zoom now apply at runtime, with
+              Graphite, Midnight, Ember and Paper themes.
             - Files use a grid by default, with a list toggle and hidden files
               hidden until explicitly enabled.
             - Cleaned up the More tab, kept the dock visible in the terminal, and
-              added a faster local install/build script.
+              added a faster local install/watch loop plus wireless adb support.
           files: |
             dist/pvps-${{ steps.meta.outputs.version }}.apk
             dist/SHA256SUMS

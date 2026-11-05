@@ -63,6 +63,7 @@ data class AppSettings(
     val strictHostKeys: Boolean = true,
     val uiTheme: String = "graphite",
     val fontScale: Float = 1f,
+    val uiScale: Float = 1f,
     val fileGridView: Boolean = true,
     val showHiddenFiles: Boolean = false,
     val notifyResponses: Boolean = true,

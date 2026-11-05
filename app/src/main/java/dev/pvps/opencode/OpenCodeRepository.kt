@@ -1,6 +1,7 @@
 package dev.pvps.opencode
 
 import android.util.Base64
+import android.util.Log
 import android.util.LruCache
 import dev.pvps.data.model.AuditEntry
 import dev.pvps.data.model.Host
@@ -78,6 +79,7 @@ class OpenCodeRepository(
     private var host: Host? = null
     private var eventsJob: Job? = null
     private var refreshJob: Job? = null
+    private var queueJob: Job? = null
     private var mediaCache = LruCache<String, ByteArray>(24)
     private val optimisticIds = mutableSetOf<String>()
     private val optimisticLock = Any()
@@ -126,6 +128,7 @@ class OpenCodeRepository(
             val active = sessions.firstOrNull { it.parentID == null }
             if (active != null) selectSession(active.id)
             startEvents()
+            startQueueDrain()
             audit.add(
                 AuditEntry(
                     hostName = host.name,
@@ -148,8 +151,10 @@ class OpenCodeRepository(
     fun disconnect() {
         eventsJob?.cancel()
         refreshJob?.cancel()
+        queueJob?.cancel()
         eventsJob = null
         refreshJob = null
+        queueJob = null
         client?.close()
         client = null
         host = null
@@ -357,82 +362,94 @@ class OpenCodeRepository(
             _state.value.activeSessionId
         } ?: return
 
-        // Never trust the cached busy flag: it can be stale after a missed SSE
-        // event. Ask the server for the session's real running state.
-        refreshSessions()
-        val actualBusy = _state.value.sessions
-            .firstOrNull { it.id == id }?.isRunning == true
         _state.value = _state.value.copy(error = null, busy = true)
+        Log.i("PVPSQueue", "send session=$id queued=${_state.value.queued.size}")
 
         runCatching {
-            // A prompt sent while the agent is working must be queued, not
-            // steered (steering aborts the current turn). When idle, deliver it
-            // immediately and let the server start the loop.
-            val ack = c.prompt(id, prompt, delivery = if (actualBusy) "queue" else "steer")
+            // Always use queue delivery. The server starts the loop immediately
+            // when the session is idle and parks the prompt when a turn is
+            // running. Using "steer" here aborts an in-flight turn, and choosing
+            // between the two from a cached busy flag caused prompts to be lost
+            // whenever that flag was stale.
+            val ack = c.prompt(id, prompt, delivery = "queue")
             val created = ack.time.created.takeIf { it > 0 } ?: System.currentTimeMillis()
             val ackId = ack.id.ifBlank { "local-${System.currentTimeMillis()}" }
-            if (!actualBusy) {
-                val optimistic = UiMessage(
-                    id = ackId,
-                    type = "user",
-                    created = created,
-                    text = prompt,
-                    files = ack.payload.files,
-                    parts = emptyList(),
-                    agent = null,
-                    model = null,
-                    cost = 0.0,
-                    tokens = null,
-                    finish = null,
-                    error = null,
-                    command = null,
-                    status = null,
-                    output = null,
-                    outcome = null
-                )
-                synchronized(optimisticLock) {
-                    optimisticIds += ackId
-                    _state.value = _state.value.copy(
-                        messages = (_state.value.messages + optimistic)
-                            .distinctBy { it.id }
-                            .sortedBy { it.created }
-                    )
-                }
-            } else {
+            Log.i("PVPSQueue", "ack id=$ackId delivery=${ack.delivery}")
+            val optimistic = UiMessage(
+                id = ackId,
+                type = "user",
+                created = created,
+                text = prompt,
+                files = ack.payload.files,
+                parts = emptyList(),
+                agent = null,
+                model = null,
+                cost = 0.0,
+                tokens = null,
+                finish = null,
+                error = null,
+                command = null,
+                status = null,
+                output = null,
+                outcome = null
+            )
+            synchronized(optimisticLock) {
+                optimisticIds += ackId
                 _state.value = _state.value.copy(
-                    queued = (_state.value.queued + QueuedPrompt(
-                        id = ackId,
-                        text = prompt,
-                        created = created,
-                        delivery = ack.delivery
-                    )).distinctBy { it.id }
+                    messages = (_state.value.messages + optimistic)
+                        .distinctBy { it.id }
+                        .sortedBy { it.created }
                 )
             }
             scheduleRefresh()
         }.onFailure {
             _state.value = _state.value.copy(
-                busy = actualBusy,
+                busy = false,
                 error = it.message ?: "Prompt failed"
             )
         }
     }
 
     /**
-     * A queued prompt stays in the server inbox until the current turn ends.
-     * Promote it to "steer" at the idle boundary so the agent actually resumes
-     * instead of leaving the message parked forever.
+     * A queued prompt normally sits in the server inbox until the running turn
+     * ends. The server usually delivers it automatically, but a stale busy
+     * flag or a dropped SSE connection can leave it parked forever. On every
+     * idle boundary (and while anything is queued) promote pending items to
+     * "steer", which explicitly wakes the agent loop. If the PATCH fails, leave
+     * the item parked and retry on the next drain tick.
      */
     private suspend fun promoteQueued() {
         val c = client ?: return
         val id = _state.value.activeSessionId ?: return
+        refreshSessions()
+        if (_state.value.sessions.firstOrNull { it.id == id }?.isRunning == true) return
         refreshInbox()
         val pending = _state.value.queued.filter { it.delivery == "queue" }
         if (pending.isEmpty()) return
         pending.forEach { item ->
-            runCatching { c.updateInboxDelivery(id, item.id, "steer") }
+            val promoted = runCatching { c.updateInboxDelivery(id, item.id, "steer") }
+                .onFailure { Log.w("PVPSQueue", "promote ${item.id} failed: ${it.message}") }
+                .isSuccess
+            Log.i("PVPSQueue", "promote ${item.id} -> steer success=$promoted")
+            // If the PATCH failed, leave the item in place and retry on the
+            // next 3s drain tick. Re-sending here risks duplicate prompts when
+            // the server actually accepted the original admission.
         }
         refreshInbox()
         scheduleRefresh()
+    }
+
+    private fun startQueueDrain() {
+        if (queueJob?.isActive == true) return
+        queueJob = scope.launch {
+            while (isActive) {
+                delay(3_000)
+                if (client == null || !_state.value.connected) continue
+                if (_state.value.queued.isEmpty()) continue
+                runCatching { promoteQueued() }
+                    .onFailure { Log.w("PVPSQueue", "drain failed: ${it.message}") }
+            }
+        }
     }
 
     suspend fun sendQueuedNow(item: QueuedPrompt) {
@@ -481,10 +498,16 @@ class OpenCodeRepository(
         val c = client ?: return
         val id = _state.value.activeSessionId ?: return
         val variantId = variant?.id?.takeIf { it.isNotBlank() }
+        val ref = ModelRef(id = model.modelID, providerID = model.providerID, variant = variantId)
         runCatching {
-            c.switchModel(
-                id,
-                ModelRef(id = model.modelID, providerID = model.providerID, variant = variantId)
+            c.switchModel(id, ref)
+            // Update the visible session immediately. refreshSessions() is async
+            // and used to leave the composer showing the old effort until the
+            // next event, which made effort changes look like no-ops.
+            _state.value = _state.value.copy(
+                sessions = _state.value.sessions.map {
+                    if (it.id == id) it.copy(model = ref) else it
+                }
             )
             settings.update {
                 it.copy(

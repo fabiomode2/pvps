@@ -67,7 +67,11 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val appearance = viewModel.settings.collectAsStateValue()
-            PvpsTheme(themeId = appearance.uiTheme, fontScale = appearance.fontScale) {
+            PvpsTheme(
+                themeId = appearance.uiTheme,
+                fontScale = appearance.fontScale,
+                uiScale = appearance.uiScale
+            ) {
                 AppShell(viewModel)
             }
         }

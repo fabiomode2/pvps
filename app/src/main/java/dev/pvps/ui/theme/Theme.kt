@@ -44,15 +44,15 @@ data class PvpsPalette(
 
 val Graphite = PvpsPalette(
     id = "graphite", label = "Graphite", isLight = false,
-    void = Color(0xFF07090B), surfaceDark = Color(0xFF0C1013),
-    surfaceRaised = Color(0xFF12181C), surfaceHigh = Color(0xFF192227),
-    outlineDark = Color(0xFF283238), outlineSoft = Color(0xFF1B242A),
-    accent = Color(0xFFD1FA76), onAccent = Color(0xFF17210A),
-    accentDim = Color(0xFF90B94D), signalDeep = Color(0xFF28350E),
-    violet = Color(0xFFB8A8FF), irisDeep = Color(0xFF241E3E),
-    ember = Color(0xFFF4C77A), danger = Color(0xFFFF7B8A),
-    success = Color(0xFF79E7B5), textPrimary = Color(0xFFEDF2F1),
-    textSecondary = Color(0xFF96A4A6), textFaint = Color(0xFF647276)
+    void = Color(0xFF09090A), surfaceDark = Color(0xFF101011),
+    surfaceRaised = Color(0xFF18181A), surfaceHigh = Color(0xFF212124),
+    outlineDark = Color(0xFF303035), outlineSoft = Color(0xFF1D1D20),
+    accent = Color(0xFFD8F36B), onAccent = Color(0xFF181F06),
+    accentDim = Color(0xFFA6BE4C), signalDeep = Color(0xFF2A3310),
+    violet = Color(0xFFBDB1FF), irisDeep = Color(0xFF26203F),
+    ember = Color(0xFFF5C77E), danger = Color(0xFFFF858F),
+    success = Color(0xFF7FE2B6), textPrimary = Color(0xFFF2EFE8),
+    textSecondary = Color(0xFFAAA69C), textFaint = Color(0xFF747169)
 )
 
 val Midnight = PvpsPalette(
@@ -136,6 +136,7 @@ private val PvpsShapes = Shapes(
 fun PvpsTheme(
     themeId: String = "graphite",
     fontScale: Float = 1f,
+    uiScale: Float = 1f,
     content: @Composable () -> Unit
 ) {
     val palette = paletteFor(themeId)
@@ -220,8 +221,12 @@ fun PvpsTheme(
     }
     val density = LocalDensity.current
     val safeScale = fontScale.coerceIn(0.8f, 1.35f)
+    val safeUiScale = uiScale.coerceIn(0.85f, 1.2f)
     CompositionLocalProvider(
-        LocalDensity provides Density(density.density, density.fontScale * safeScale)
+        LocalDensity provides Density(
+            density.density * safeUiScale,
+            density.fontScale * safeScale
+        )
     ) {
         MaterialTheme(
             colorScheme = scheme,

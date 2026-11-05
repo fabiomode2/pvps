@@ -123,6 +123,7 @@ import dev.pvps.ui.components.TinyAction
 import dev.pvps.ui.components.collectAsStateValue
 import dev.pvps.ui.components.relativeTime
 import dev.pvps.ui.theme.Accent
+import dev.pvps.ui.theme.AccentDim
 import dev.pvps.ui.theme.Danger
 import dev.pvps.ui.theme.DeepBackground
 import dev.pvps.ui.theme.MonoFont
@@ -171,6 +172,10 @@ fun ChatScreen(
             delay(1_000)
         }
     }
+    val compactTurns = settings.compactToolCards
+    val conversation = remember(chat.messages, compactTurns) {
+        buildConversation(chat.messages, compactTurns)
+    }
     val atBottom by remember {
         derivedStateOf {
             val info = listState.layoutInfo
@@ -178,9 +183,9 @@ fun ChatScreen(
             total == 0 || (info.visibleItemsInfo.lastOrNull()?.index ?: 0) >= total - 2
         }
     }
-    LaunchedEffect(chat.messages.size, chat.messages.lastOrNull()?.text?.length) {
-        if (chat.messages.isNotEmpty() && atBottom) {
-            runCatching { listState.animateScrollToItem(chat.messages.lastIndex) }
+    LaunchedEffect(conversation.size, chat.messages.lastOrNull()?.text?.length) {
+        if (conversation.isNotEmpty() && atBottom) {
+            runCatching { listState.animateScrollToItem(conversation.lastIndex) }
         }
     }
 
@@ -201,12 +206,23 @@ fun ChatScreen(
     val tps = tokensPerSecond(chat.messages, now)
     val runningSubagents = chat.subagents.count { it.isRunning }
     val goMeter = chat.usage?.go?.rolling
+    val actualSpend = session?.cost ?: 0.0
+    val estimatedSpend = if (actualSpend > 0.0) {
+        0.0
+    } else {
+        estimateSessionCost(session?.tokens, modelInfo, chat.messages)
+    }
     val spentValue = when {
-        (session?.cost ?: 0.0) > 0.0 -> formatCost(session?.cost ?: 0.0)
+        actualSpend > 0.0 -> formatCost(actualSpend)
+        estimatedSpend > 0.0 -> "~" + formatCost(estimatedSpend)
         goMeter != null -> "${goMeter.percent.toInt()}%"
         else -> "—"
     }
-    val spentLabel = if ((session?.cost ?: 0.0) > 0.0) "SPENT" else "GO PLAN"
+    val spentLabel = when {
+        actualSpend > 0.0 -> "SPENT"
+        estimatedSpend > 0.0 -> "SPENT · EST"
+        else -> "GO PLAN"
+    }
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -296,7 +312,13 @@ fun ChatScreen(
                 contextUsed = contextUsed,
                 spentLabel = spentLabel,
                 spentValue = spentValue,
-                spentDetail = if (spentLabel == "GO PLAN") "rolling" else session?.tokens?.let { "${compactTokens(it.input)} in" },
+                spentDetail = buildString {
+                    goMeter?.let { append("plan ").append(it.percent.toInt()).append("%") }
+                    if (actualSpend <= 0.0 && estimatedSpend > 0.0) {
+                        if (isNotEmpty()) append(" · ")
+                        append("estimated")
+                    }
+                }.ifBlank { null },
                 tps = tps,
                 subagents = chat.subagents.size,
                 runningSubagents = runningSubagents,
@@ -356,30 +378,53 @@ fun ChatScreen(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                            start = 14.dp,
-                            end = 14.dp,
-                            top = 8.dp,
-                            bottom = 12.dp
+                            start = 16.dp,
+                            end = 16.dp,
+                            top = 10.dp,
+                            bottom = 16.dp
                         ),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        items(chat.messages, key = { it.id }) { message ->
-                            MessageBubble(
-                                message = message,
-                                expanded = expanded,
-                                onToggle = { id ->
-                                    expanded = if (id in expanded) expanded - id else expanded + id
-                                },
-                                openCode = viewModel.container.openCode,
-                                showReasoning = settings.showReasoning,
-                                compactTools = settings.compactToolCards,
-                                onOpenSubagent = { childId ->
-                                    scope.launch { viewModel.container.openCode.selectSession(childId) }
+                        items(conversation, key = { it.key }) { item ->
+                            val turn = item.turn
+                            if (turn != null) {
+                                AssistantTurnBlock(
+                                    turn = turn,
+                                    expanded = expanded,
+                                    onToggle = { id ->
+                                        expanded = if (id in expanded) expanded - id else expanded + id
+                                    },
+                                    openCode = viewModel.container.openCode,
+                                    showReasoning = settings.showReasoning,
+                                    onOpenSubagent = { childId ->
+                                        scope.launch { viewModel.container.openCode.selectSession(childId) }
+                                    }
+                                )
+                            } else {
+                                item.message?.let { message ->
+                                    MessageBubble(
+                                        message = message,
+                                        expanded = expanded,
+                                        onToggle = { id ->
+                                            expanded = if (id in expanded) expanded - id else expanded + id
+                                        },
+                                        openCode = viewModel.container.openCode,
+                                        showReasoning = settings.showReasoning,
+                                        compactTools = settings.compactToolCards,
+                                        onOpenSubagent = { childId ->
+                                            scope.launch { viewModel.container.openCode.selectSession(childId) }
+                                        }
+                                    )
                                 }
-                            )
+                            }
                         }
-                        if (chat.busy) {
-                            item { WorkingIndicator() }
+                        val liveActivity = conversation.lastOrNull()?.turn?.any { message ->
+                            message.parts.any {
+                                it is UiPart.Tool && (it.tool.status == "running" || it.tool.status == "streaming")
+                            }
+                        } == true
+                        if (chat.busy && !liveActivity) {
+                            item(key = "working-indicator") { WorkingIndicator() }
                         }
                     }
                 }
@@ -414,11 +459,16 @@ fun ChatScreen(
                 busy = chat.busy,
                 connected = chat.connected,
                 modelLabel = modelLabel(session?.model, chat.models),
+                model = modelInfo,
+                variant = session?.model?.variant,
                 agent = session?.agent,
                 agents = chat.agents,
                 queued = chat.queued,
                 showAgents = showAgents,
                 onShowModels = { showModels = true },
+                onSelectVariant = { model, variant ->
+                    scope.launch { viewModel.container.openCode.switchModel(model, variant) }
+                },
                 onShowAgents = { showAgents = true },
                 onDismissAgents = { showAgents = false },
                 onSelectAgent = { agent ->
@@ -463,8 +513,16 @@ fun ChatScreen(
         ModelPickerDialog(
             models = chat.models,
             selected = session?.model,
-            onSelect = { model, variant ->
-                showModels = false
+            onSelectModel = { model ->
+                val current = session?.model
+                val keepVariant = if (
+                    current != null && current.id == model.modelID && current.providerID == model.providerID
+                ) {
+                    model.variants.firstOrNull { it.id == current.variant }
+                } else null
+                scope.launch { viewModel.container.openCode.switchModel(model, keepVariant) }
+            },
+            onSelectVariant = { model, variant ->
                 scope.launch { viewModel.container.openCode.switchModel(model, variant) }
             },
             onDismiss = { showModels = false }
@@ -482,6 +540,7 @@ fun ChatScreen(
             contextLimit = contextLimit,
             contextFraction = contextFraction,
             tps = tps,
+            estimatedCost = if (actualSpend > 0.0) 0.0 else estimatedSpend,
             onOpenSubagent = { id ->
                 showStats = false
                 scope.launch { viewModel.container.openCode.selectSession(id) }
@@ -509,61 +568,50 @@ private fun SessionPulse(
     busy: Boolean,
     onClick: () -> Unit
 ) {
-    Surface(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick),
-        color = SurfaceRaised.copy(alpha = 0.52f),
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.8f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().height(54.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            PulseCell(
-                label = "CONTEXT",
-                value = contextFraction?.let { "${(it * 100).toInt()}%" } ?: "—",
-                detail = contextUsed?.let { compactTokens(it) },
-                color = when {
-                    contextFraction == null -> TextSecondary
-                    contextFraction > 0.85 -> Danger
-                    contextFraction > 0.65 -> Warning
-                    else -> Accent
-                },
-                modifier = Modifier.weight(1f)
-            )
-            PulseDivider()
-            PulseCell(
-                label = spentLabel,
-                value = spentValue,
-                detail = spentDetail,
-                color = TextPrimary,
-                modifier = Modifier.weight(1f)
-            )
-            PulseDivider()
-            PulseCell(
-                label = "TOK/S",
-                value = tps?.let { if (it >= 100) "${it.toInt()}" else String.format(Locale.US, "%.1f", it) } ?: "—",
-                detail = if (busy) "live" else "last turn",
-                color = if (busy) Warning else TextPrimary,
-                modifier = Modifier.weight(1f)
-            )
-            PulseDivider()
-            PulseCell(
-                label = "AGENTS",
-                value = if (subagents == 0) "0" else "$runningSubagents/$subagents",
-                detail = if (runningSubagents > 0) "running" else "idle",
-                color = when {
-                    runningSubagents > 0 -> Warning
-                    subagents > 0 -> Violet
-                    else -> TextSecondary
-                },
-                modifier = Modifier.weight(1f)
-            )
-        }
+        PulseCell(
+            label = "CTX",
+            value = contextFraction?.let { "${(it * 100).toInt()}%" } ?: "—",
+            detail = contextUsed?.let { compactTokens(it) },
+            color = when {
+                contextFraction == null -> TextSecondary
+                contextFraction > 0.85 -> Danger
+                contextFraction > 0.65 -> Warning
+                else -> TextPrimary
+            },
+            modifier = Modifier.weight(1.05f)
+        )
+        PulseCell(
+            label = spentLabel,
+            value = spentValue,
+            detail = spentDetail,
+            color = TextPrimary,
+            modifier = Modifier.weight(1.25f)
+        )
+        PulseCell(
+            label = "TOK/S",
+            value = tps?.let { if (it >= 100) "${it.toInt()}" else String.format(Locale.US, "%.1f", it) } ?: "—",
+            detail = if (busy) "live" else null,
+            color = if (busy) Warning else TextPrimary,
+            modifier = Modifier.weight(1f)
+        )
+        PulseCell(
+            label = "AGENTS",
+            value = if (subagents == 0) "0" else "$runningSubagents/$subagents",
+            detail = if (runningSubagents > 0) "running" else null,
+            color = when {
+                runningSubagents > 0 -> Warning
+                subagents > 0 -> Violet
+                else -> TextSecondary
+            },
+            modifier = Modifier.weight(1f)
+        )
     }
 }
 
@@ -576,38 +624,32 @@ private fun PulseCell(
     modifier: Modifier = Modifier
 ) {
     Column(
-        modifier = modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+        modifier = modifier,
         verticalArrangement = Arrangement.Center
     ) {
         Text(label, style = MaterialTheme.typography.labelSmall, color = TextFaint, maxLines = 1)
         Spacer(Modifier.height(1.dp))
-        Text(
-            value,
-            style = MaterialTheme.typography.titleMedium,
-            color = color,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        if (detail != null) {
+        Row(verticalAlignment = Alignment.Bottom) {
             Text(
-                detail,
-                style = MaterialTheme.typography.labelSmall,
-                color = TextFaint,
+                value,
+                style = MaterialTheme.typography.titleMedium,
+                color = color,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            if (detail != null) {
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextFaint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(bottom = 1.dp)
+                )
+            }
         }
     }
-}
-
-@Composable
-private fun PulseDivider() {
-    Box(
-        modifier = Modifier
-            .width(1.dp)
-            .height(24.dp)
-            .background(OutlineDark.copy(alpha = 0.7f))
-    )
 }
 
 @Composable
@@ -619,6 +661,110 @@ private fun WorkingIndicator() {
         CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Accent, strokeWidth = 1.6.dp)
         Spacer(Modifier.width(9.dp))
         Text("OpenCode is working…", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+private data class ConversationItem(
+    val key: String,
+    val message: UiMessage? = null,
+    val turn: List<UiMessage>? = null
+)
+
+private fun buildConversation(
+    messages: List<UiMessage>,
+    compactTurns: Boolean
+): List<ConversationItem> {
+    if (!compactTurns) {
+        return messages.map { ConversationItem("msg-${it.id}", message = it) }
+    }
+    val out = mutableListOf<ConversationItem>()
+    var index = 0
+    while (index < messages.size) {
+        val message = messages[index]
+        if (message.isAssistant) {
+            val start = index
+            while (index < messages.size && messages[index].isAssistant) index++
+            val turn = messages.subList(start, index).toList()
+            out += ConversationItem("turn-${turn.first().id}", turn = turn)
+        } else {
+            out += ConversationItem("msg-${message.id}", message = message)
+            index++
+        }
+    }
+    return out
+}
+
+@Composable
+private fun AssistantTurnBlock(
+    turn: List<UiMessage>,
+    expanded: Set<String>,
+    onToggle: (String) -> Unit,
+    openCode: OpenCodeRepository,
+    showReasoning: Boolean,
+    onOpenSubagent: (String) -> Unit
+) {
+    val first = turn.first()
+    val last = turn.last()
+    val activity = turn.flatMap { it.parts }.filter {
+        (it is UiPart.Tool || (showReasoning && it is UiPart.Reasoning))
+    }
+    val totalCost = turn.sumOf { it.cost }
+    val groupKey = "turn-${first.id}"
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            StatusDot(if (last.completed == null) Warning else Accent, 6)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                (last.agent ?: "assistant").uppercase(),
+                style = MaterialTheme.typography.labelSmall,
+                color = Accent
+            )
+            last.model?.let {
+                Text(
+                    " · $it",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextFaint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            val meta = buildString {
+                last.tokens?.let { append(compactTokens(it.output + it.reasoning)).append(" tok") }
+                if (totalCost > 0) {
+                    if (isNotEmpty()) append(" · ")
+                    append(formatCost(totalCost))
+                }
+            }
+            if (meta.isNotBlank()) {
+                Text(meta, style = MaterialTheme.typography.labelSmall, color = TextFaint)
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        turn.forEach { message ->
+            message.error?.let { ErrorBanner(it) }
+            val texts = message.parts.filterIsInstance<UiPart.Text>().map { it.text }
+            if (texts.isEmpty()) {
+                if (message.parts.isEmpty() && message.text.isNotBlank()) {
+                    MarkdownText(message.text)
+                }
+            } else {
+                texts.filter { it.isNotBlank() }.forEach { text ->
+                    MarkdownText(text)
+                    Spacer(Modifier.height(8.dp))
+                }
+            }
+        }
+        if (activity.isNotEmpty()) {
+            ActivityGroup(
+                parts = activity,
+                groupKey = groupKey,
+                expanded = expanded,
+                onToggle = onToggle,
+                openCode = openCode,
+                onOpenSubagent = onOpenSubagent
+            )
+        }
     }
 }
 
@@ -646,9 +792,8 @@ private fun MessageBubble(
                 )
                 Surface(
                     modifier = Modifier.fillMaxWidth(0.92f),
-                    color = Accent.copy(alpha = 0.09f),
-                    shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp),
-                    border = BorderStroke(1.dp, Accent.copy(alpha = 0.18f))
+                    color = Accent.copy(alpha = 0.13f),
+                    shape = RoundedCornerShape(20.dp, 20.dp, 5.dp, 20.dp)
                 ) {
                     Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)) {
                         SelectionContainer {
@@ -792,86 +937,73 @@ private fun ActivityGroup(
     val running = tools.any { it.status == "running" || it.status == "streaming" }
     val failed = tools.any { it.status == "error" || it.status == "failed" }
     val summary = buildString {
-        append(
-            when {
-                running -> "Working"
-                failed -> "Failed"
-                tools.isEmpty() -> "Thought"
-                else -> "Activity"
-            }
-        )
+        val noun = if (tools.size == 1) "tool call" else "tool calls"
+        when {
+            running -> append("Working…")
+            failed -> append("Failed…")
+            tools.isEmpty() -> append("Thought")
+            else -> append("Finished")
+        }
         if (tools.isNotEmpty()) {
             append(" · ")
             append(tools.size)
-            append(if (tools.size == 1) " tool" else " tools")
+            append(" ")
+            append(noun)
         }
-        if (reasoning.isNotEmpty()) append(" · reasoning")
-        if (tools.size == 1) {
-            val name = tools.first().name
-            if (name.isNotBlank()) append(" · ").append(name)
+        if (reasoning.isNotEmpty()) {
+            if (tools.isEmpty()) append(" · reasoning") else append(" · thinking")
         }
     }
-    Surface(
-        color = SurfaceRaised.copy(alpha = 0.30f),
-        shape = RoundedCornerShape(10.dp),
-        border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.55f)),
-        modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
-    ) {
-        Column {
-            Row(
-                modifier = Modifier.fillMaxWidth().clickable { onToggle(groupKey) }
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (running) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(13.dp),
-                        color = Warning,
-                        strokeWidth = 1.5.dp
-                    )
-                } else {
-                    StatusDot(if (failed) Danger else Accent, 6)
-                }
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    summary,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (failed) Danger else TextSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp))
+                .clickable { onToggle(groupKey) }
+                .padding(horizontal = 6.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (running) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(13.dp),
+                    color = Warning,
+                    strokeWidth = 1.5.dp
                 )
-                Text(
-                    if (groupKey in expanded) "HIDE" else "DETAIL",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextFaint
-                )
-                Icon(
-                    if (groupKey in expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = null,
-                    tint = TextFaint,
-                    modifier = Modifier.size(16.dp)
-                )
+            } else {
+                StatusDot(if (failed) Danger else TextFaint, 5)
             }
-            if (groupKey in expanded) {
-                Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)) {
-                    parts.forEachIndexed { index, part ->
-                        val key = "$groupKey-$index"
-                        when (part) {
-                            is UiPart.Reasoning -> ReasoningBlock(
-                                text = part.text,
-                                expanded = key in expanded,
-                                onToggle = { onToggle(key) }
-                            )
-                            is UiPart.Tool -> ToolCard(
-                                tool = part.tool,
-                                expanded = key in expanded,
-                                onToggle = { onToggle(key) },
-                                openCode = openCode,
-                                onOpenSubagent = onOpenSubagent
-                            )
-                            is UiPart.Text -> MarkdownText(part.text)
-                        }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                summary,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (failed) Danger else TextFaint,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Icon(
+                if (groupKey in expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = if (groupKey in expanded) "Hide details" else "Show details",
+                tint = TextFaint,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+        if (groupKey in expanded) {
+            Column(modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)) {
+                parts.forEachIndexed { index, part ->
+                    val key = "$groupKey-$index"
+                    when (part) {
+                        is UiPart.Reasoning -> ReasoningBlock(
+                            text = part.text,
+                            expanded = key in expanded,
+                            onToggle = { onToggle(key) }
+                        )
+                        is UiPart.Tool -> ToolCard(
+                            tool = part.tool,
+                            expanded = key in expanded,
+                            onToggle = { onToggle(key) },
+                            openCode = openCode,
+                            onOpenSubagent = onOpenSubagent
+                        )
+                        is UiPart.Text -> MarkdownText(part.text)
                     }
                 }
             }
@@ -1115,11 +1247,14 @@ private fun Composer(
     busy: Boolean,
     connected: Boolean,
     modelLabel: String,
+    model: ModelInfo?,
+    variant: String?,
     agent: String?,
     agents: List<AgentInfo>,
     queued: List<OpenCodeRepository.QueuedPrompt>,
     showAgents: Boolean,
     onShowModels: () -> Unit,
+    onSelectVariant: (ModelInfo, ModelVariant) -> Unit,
     onShowAgents: () -> Unit,
     onDismissAgents: () -> Unit,
     onSelectAgent: (AgentInfo) -> Unit,
@@ -1128,10 +1263,36 @@ private fun Composer(
     onSend: () -> Unit,
     onStop: () -> Unit
 ) {
+    var showEfforts by remember { mutableStateOf(false) }
+    val efforts = model?.variants.orEmpty()
+    val effortLabel = efforts.firstOrNull { it.id == variant }?.label
+        ?: variant?.takeIf { it.isNotBlank() && it != "default" }
+        ?: "auto"
     Surface(color = DeepBackground.copy(alpha = 0.97f)) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 TinyAction(modelLabel, onShowModels)
+                if (efforts.isNotEmpty()) {
+                    Box {
+                        TinyAction("effort · $effortLabel", { showEfforts = true })
+                        DropdownMenu(expanded = showEfforts, onDismissRequest = { showEfforts = false }) {
+                            efforts.forEach { item ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            "effort · ${item.label}",
+                                            color = if (item.id == variant) Accent else TextPrimary
+                                        )
+                                    },
+                                    onClick = {
+                                        showEfforts = false
+                                        model?.let { onSelectVariant(it, item) }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
                 Box {
                     TinyAction(agent ?: "agent", onShowAgents)
                     DropdownMenu(expanded = showAgents, onDismissRequest = onDismissAgents) {
@@ -1180,15 +1341,17 @@ private fun Composer(
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f)
                                 )
-                                Text(
-                                    "SEND NOW",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Accent,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .clickable { onSendQueuedNow(item) }
-                                        .padding(horizontal = 7.dp, vertical = 5.dp)
-                                )
+                                if (!busy) {
+                                    Text(
+                                        "SEND NOW",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Accent,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .clickable { onSendQueuedNow(item) }
+                                            .padding(horizontal = 7.dp, vertical = 5.dp)
+                                    )
+                                }
                                 IconButton(
                                     onClick = { onCancelQueued(item.id) },
                                     modifier = Modifier.size(30.dp)
@@ -1223,12 +1386,12 @@ private fun Composer(
                             if (connected && value.isNotBlank()) onSend()
                         }
                     ),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(18.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Accent.copy(alpha = 0.52f),
-                        unfocusedBorderColor = OutlineDark,
-                        focusedContainerColor = SurfaceRaised.copy(alpha = 0.36f),
-                        unfocusedContainerColor = SurfaceRaised.copy(alpha = 0.24f),
+                        focusedBorderColor = Accent.copy(alpha = 0.30f),
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedContainerColor = SurfaceRaised.copy(alpha = 0.40f),
+                        unfocusedContainerColor = SurfaceRaised.copy(alpha = 0.34f),
                         cursorColor = Accent,
                         focusedTextColor = TextPrimary,
                         unfocusedTextColor = TextPrimary
@@ -1284,7 +1447,8 @@ private fun CircleAction(
 private fun ModelPickerDialog(
     models: List<ModelInfo>,
     selected: ModelRef?,
-    onSelect: (ModelInfo, ModelVariant?) -> Unit,
+    onSelectModel: (ModelInfo) -> Unit,
+    onSelectVariant: (ModelInfo, ModelVariant) -> Unit,
     onDismiss: () -> Unit
 ) {
     var query by remember { mutableStateOf("") }
@@ -1312,53 +1476,83 @@ private fun ModelPickerDialog(
                     .navigationBarsPadding()
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("Models", style = MaterialTheme.typography.headlineSmall, color = TextPrimary)
                         Text(
-                            "${filtered.size} available · pick provider, model and reasoning effort",
+                            "Model & effort",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = TextPrimary,
+                            fontFamily = dev.pvps.ui.theme.DisplayFont
+                        )
+                        Text(
+                            "${filtered.count { it.enabled }} models · ${grouped.size} providers",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )
                     }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
-                    }
+                    Text(
+                        "DONE",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Accent,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .clickable(onClick = onDismiss)
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                    )
                 }
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    placeholder = { Text("Search models or providers", color = TextFaint) },
+                    placeholder = { Text("Search model or provider", color = TextFaint) },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextFaint) },
                     singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(16.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Accent.copy(alpha = 0.55f),
                         unfocusedBorderColor = OutlineDark,
                         focusedTextColor = TextPrimary,
                         unfocusedTextColor = TextPrimary,
-                        cursorColor = Accent
+                        cursorColor = Accent,
+                        focusedContainerColor = SurfaceRaised.copy(alpha = 0.35f),
+                        unfocusedContainerColor = SurfaceRaised.copy(alpha = 0.25f)
                     )
                 )
                 Spacer(Modifier.height(10.dp))
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        start = 14.dp, end = 14.dp, top = 4.dp, bottom = 24.dp
+                        start = 14.dp, end = 14.dp, top = 4.dp, bottom = 32.dp
                     ),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(9.dp)
                 ) {
                     grouped.forEach { (provider, list) ->
                         item(key = "provider-$provider") {
-                            Text(
-                                provider.uppercase(),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Accent,
-                                modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 2.dp)
-                            )
+                            Row(
+                                modifier = Modifier.padding(start = 4.dp, top = 14.dp, bottom = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    provider.uppercase(),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = Accent
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Box(
+                                    Modifier
+                                        .height(1.dp)
+                                        .weight(1f)
+                                        .background(OutlineDark.copy(alpha = 0.65f))
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "${list.size}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextFaint
+                                )
+                            }
                         }
                         items(list, key = { "${it.providerID}/${it.modelID}" }) { model ->
                             val isSelected = selected?.id == model.modelID &&
@@ -1367,7 +1561,8 @@ private fun ModelPickerDialog(
                                 model = model,
                                 selected = isSelected,
                                 selectedVariant = if (isSelected) selected?.variant else null,
-                                onSelect = { variant -> onSelect(model, variant) }
+                                onSelectModel = { onSelectModel(model) },
+                                onSelectVariant = { variant -> onSelectVariant(model, variant) }
                             )
                         }
                     }
@@ -1382,25 +1577,48 @@ private fun ModelPickerRow(
     model: ModelInfo,
     selected: Boolean,
     selectedVariant: String?,
-    onSelect: (ModelVariant?) -> Unit
+    onSelectModel: () -> Unit,
+    onSelectVariant: (ModelVariant) -> Unit
 ) {
-    val variants = model.variants.ifEmpty { listOf(ModelVariant(id = "default")) }
     Surface(
-        color = if (selected) Accent.copy(alpha = 0.08f) else SurfaceRaised.copy(alpha = 0.55f),
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, if (selected) Accent.copy(alpha = 0.35f) else OutlineDark.copy(alpha = 0.7f))
+        color = if (selected) Accent.copy(alpha = 0.07f) else SurfaceRaised.copy(alpha = 0.46f),
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, if (selected) Accent.copy(alpha = 0.40f) else OutlineDark.copy(alpha = 0.65f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(onClick = onSelectModel)
     ) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(model.label, style = MaterialTheme.typography.titleSmall, color = TextPrimary)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            model.label,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Surface(
+                            color = Accent.copy(alpha = 0.10f),
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Text(
+                                model.providerID.uppercase(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AccentDim,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(3.dp))
                     Text(
                         buildString {
-                            append(model.providerID)
-                            append(" / ")
                             append(model.modelID)
                             model.limit?.context?.takeIf { it > 0 }?.let {
-                                append(" · ").append(model.contextLabel).append(" ctx")
+                                append(" · ").append(model.contextLabel).append(" context")
                             }
                             model.firstCost?.let {
                                 append(" · $").append(String.format(Locale.US, "%.2f", it.input)).append("/M in")
@@ -1416,42 +1634,36 @@ private fun ModelPickerRow(
                     Text("ACTIVE", style = MaterialTheme.typography.labelSmall, color = Accent)
                 }
             }
-            if (model.variants.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
+            if (selected && model.variants.isNotEmpty()) {
+                Spacer(Modifier.height(11.dp))
+                Text("REASONING EFFORT", style = MaterialTheme.typography.labelSmall, color = TextFaint)
+                Spacer(Modifier.height(5.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    variants.forEach { variant ->
-                        val activeVariant = selected && (
-                            selectedVariant == variant.id ||
-                                (selectedVariant.isNullOrBlank() && variant.id == "default")
-                            )
+                    model.variants.forEach { variant ->
+                        val activeVariant = selectedVariant == variant.id
                         Surface(
                             color = if (activeVariant) Accent else SurfaceHigh,
                             shape = RoundedCornerShape(50),
-                            modifier = Modifier.clip(RoundedCornerShape(50)).clickable { onSelect(variant) }
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable { onSelectVariant(variant) }
                         ) {
                             Text(
                                 variant.label,
-                                style = MaterialTheme.typography.labelSmall,
+                                style = MaterialTheme.typography.labelMedium,
                                 color = if (activeVariant) Void else TextSecondary,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp)
                             )
                         }
                     }
                 }
-            } else {
-                Spacer(Modifier.height(8.dp))
-                Surface(
-                    color = if (selected) Accent else SurfaceHigh,
-                    shape = RoundedCornerShape(50),
-                    modifier = Modifier.clip(RoundedCornerShape(50)).clickable { onSelect(null) }
-                ) {
-                    Text(
-                        "default",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (selected) Void else TextSecondary,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                    )
-                }
+            } else if (!selected && model.variants.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "${model.variants.size} effort levels · tap to select",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextFaint
+                )
             }
         }
     }
@@ -1696,9 +1908,21 @@ private fun SessionDialog(
                             color = TextSecondary
                         )
                     }
-                    IconButton(onClick = onNew) {
-                        Icon(Icons.Default.Add, contentDescription = "New session", tint = Accent)
+                    Surface(
+                        color = Accent,
+                        shape = RoundedCornerShape(50),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .clickable(onClick = onNew)
+                    ) {
+                        Text(
+                            "NEW",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Void,
+                            modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp)
+                        )
                     }
+                    Spacer(Modifier.width(8.dp))
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
                     }
@@ -1759,51 +1983,86 @@ private fun SessionRow(
     onClick: () -> Unit
 ) {
     Surface(
-        color = if (active) Accent.copy(alpha = 0.09f) else Color.Transparent,
-        shape = RoundedCornerShape(8.dp),
+        color = when {
+            active -> Accent.copy(alpha = 0.075f)
+            else -> SurfaceRaised.copy(alpha = 0.34f)
+        },
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(
+            1.dp,
+            when {
+                active -> Accent.copy(alpha = 0.34f)
+                indent -> Violet.copy(alpha = 0.18f)
+                else -> OutlineDark.copy(alpha = 0.58f)
+            }
+        ),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = if (indent) 16.dp else 0.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .padding(start = if (indent) 18.dp else 0.dp)
+            .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            StatusDot(
-                when {
-                    session.isRunning -> Warning
-                    active -> Accent
-                    else -> TextFaint
-                },
-                6
-            )
-            Spacer(Modifier.width(8.dp))
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(
+                        when {
+                            session.isRunning -> Warning.copy(alpha = 0.13f)
+                            active -> Accent.copy(alpha = 0.13f)
+                            else -> OutlineDark.copy(alpha = 0.35f)
+                        }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                StatusDot(
+                    when {
+                        session.isRunning -> Warning
+                        active -> Accent
+                        else -> TextFaint
+                    },
+                    6
+                )
+            }
+            Spacer(Modifier.width(11.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     if (indent) "↳ ${session.displayTitle}" else session.displayTitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (active) Accent else TextPrimary,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (active) TextPrimary else TextSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                Spacer(Modifier.height(2.dp))
                 Text(
                     buildString {
                         append(session.agent ?: "agent")
+                        append(" · ")
+                        append(relativeTime(session.time.updated))
                         if (session.cost > 0.0) {
                             append(" · ")
                             append(formatCost(session.cost))
                         }
-                        append(" · ")
-                        append(relativeTime(session.time.updated))
-                        if (session.isRunning) append(" · busy")
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = TextFaint,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+            if (session.isRunning) {
+                Text(
+                    "LIVE",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Warning,
+                    modifier = Modifier.padding(horizontal = 6.dp)
+                )
+            } else if (active) {
+                Text("●", color = Accent, modifier = Modifier.padding(horizontal = 7.dp))
             }
         }
     }
@@ -1821,6 +2080,7 @@ private fun StatsDialog(
     contextLimit: Long,
     contextFraction: Double?,
     tps: Double?,
+    estimatedCost: Double,
     onOpenSubagent: (String) -> Unit,
     onOpenParent: (SessionInfo) -> Unit,
     onDismiss: () -> Unit
@@ -1877,7 +2137,8 @@ private fun StatsDialog(
                 }
 
                 StatsGrid(
-                    cost = session?.cost ?: 0.0,
+                    cost = (session?.cost ?: 0.0).takeIf { it > 0.0 } ?: estimatedCost,
+                    estimated = (session?.cost ?: 0.0) <= 0.0 && estimatedCost > 0.0,
                     totalTokens = totalTokens,
                     tps = tps,
                     messages = messages.size
@@ -1947,13 +2208,14 @@ private fun StatsDialog(
 @Composable
 private fun StatsGrid(
     cost: Double,
+    estimated: Boolean,
     totalTokens: TokenUsage,
     tps: Double?,
     messages: Int
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            StatBox("SPENT", formatCost(cost), Modifier.weight(1f))
+            StatBox(if (estimated) "SPENT · EST" else "SPENT", formatCost(cost), Modifier.weight(1f))
             StatBox("TOK/S", tps?.let { String.format(Locale.US, "%.1f", it) } ?: "—", Modifier.weight(1f))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -2082,6 +2344,35 @@ private fun extractJsonString(json: String, key: String): String? {
         ?.replace("\\\\", "\\")
 }
 
+private fun estimateSessionCost(
+    sessionTokens: TokenUsage?,
+    model: ModelInfo?,
+    messages: List<UiMessage>
+): Double {
+    val usage = sessionTokens?.takeIf {
+        it.input > 0 || it.output > 0 || it.reasoning > 0 || it.cache.read > 0
+    } ?: messages.filter { it.isAssistant }
+        .mapNotNull { it.tokens }
+        .fold(TokenUsage()) { acc, item ->
+            TokenUsage(
+                input = acc.input + item.input,
+                output = acc.output + item.output,
+                reasoning = acc.reasoning + item.reasoning,
+                cache = dev.pvps.opencode.CacheUsage(
+                    acc.cache.read + item.cache.read,
+                    acc.cache.write + item.cache.write
+                )
+            )
+        }
+    val pricing = model?.firstCost ?: return 0.0
+    return (
+        usage.input / 1_000_000.0 * pricing.input +
+            (usage.output + usage.reasoning) / 1_000_000.0 * pricing.output +
+            usage.cache.read / 1_000_000.0 * pricing.cache.read +
+            usage.cache.write / 1_000_000.0 * pricing.cache.write
+        )
+}
+
 private fun tokensPerSecond(messages: List<UiMessage>, now: Long): Double? {
     val message = messages.lastOrNull {
         it.isAssistant && it.tokens != null && it.created > 0
@@ -2104,11 +2395,9 @@ private fun modelLabel(ref: ModelRef?, models: List<ModelInfo>): String {
     val info = models.firstOrNull { it.modelID == ref.id && it.providerID == ref.providerID }
     val name = info?.label ?: ref.id
     val provider = ref.providerID.takeIf { it.isNotBlank() }
-    val variant = ref.variant?.takeIf { it.isNotBlank() && it != "default" }
     return buildString {
         append(name)
         provider?.let { append(" · ").append(it) }
-        variant?.let { append(" · ").append(it) }
     }
 }
 

@@ -102,31 +102,31 @@ fun PvpsBackdrop(modifier: Modifier = Modifier) {
         drawRect(color = DeepBackground)
         // Soft signal glow instead of a hard engineering grid: the backdrop
         // should recede and let content carry the hierarchy.
+        // One quiet light source. No dot grid: the old texture made every screen
+        // feel like a dashboard and competed with the type.
         drawRect(
-            brush = Brush.radialGradient(
-                colors = listOf(Accent.copy(alpha = 0.075f), Color.Transparent),
-                center = Offset(size.width * 0.88f, size.height * 0.06f),
-                radius = size.width * 0.9f
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    Color.White.copy(alpha = 0.018f),
+                    Color.Transparent,
+                    Color.Black.copy(alpha = 0.12f)
+                )
             )
         )
         drawRect(
             brush = Brush.radialGradient(
-                colors = listOf(Violet.copy(alpha = 0.055f), Color.Transparent),
-                center = Offset(size.width * 0.08f, size.height * 0.92f),
+                colors = listOf(Accent.copy(alpha = 0.055f), Color.Transparent),
+                center = Offset(size.width * 0.9f, -size.height * 0.05f),
                 radius = size.width * 0.85f
             )
         )
-        val step = 28.dp.toPx()
-        val dot = OutlineSoft.copy(alpha = 0.5f)
-        var x = step / 2
-        while (x <= size.width) {
-            var y = step / 2
-            while (y <= size.height) {
-                drawCircle(dot, radius = 0.9f, center = Offset(x, y))
-                y += step
-            }
-            x += step
-        }
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(Violet.copy(alpha = 0.035f), Color.Transparent),
+                center = Offset(size.width * 0.05f, size.height * 0.95f),
+                radius = size.width * 0.9f
+            )
+        )
     }
 }
 
@@ -159,55 +159,47 @@ fun ScreenHeader(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = DeepBackground.copy(alpha = 0.94f)
+        color = Color.Transparent
     ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 10.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (onBack != null) {
-                    GlassIconButton(onClick = onBack, size = 38.dp) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = TextPrimary,
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
-                } else {
-                    PvpsMark(34.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (onBack != null) {
+                GlassIconButton(onClick = onBack, size = 40.dp) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = TextPrimary,
+                        modifier = Modifier.size(19.dp)
+                    )
                 }
-                Spacer(Modifier.width(10.dp))
-                Column(modifier = Modifier.weight(1f)) {
+            } else {
+                PvpsMark(36.dp)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = TextPrimary,
+                    fontFamily = DisplayFont,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (subtitle != null) {
                     Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleLarge,
-                        color = TextPrimary,
-                        fontFamily = DisplayFont,
+                        text = subtitle.uppercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextFaint,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    if (subtitle != null) {
-                        Text(
-                            text = subtitle.uppercase(),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TextSecondary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
                 }
-                actions()
             }
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .background(OutlineDark.copy(alpha = 0.55f))
-            )
+            actions()
         }
     }
 }

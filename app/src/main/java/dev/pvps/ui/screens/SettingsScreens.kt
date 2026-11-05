@@ -307,6 +307,22 @@ fun SettingsScreen(
                         valueRange = 0.8f..1.35f,
                         steps = 10
                     )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Interface zoom: ${(settings.uiScale * 100).toInt()}%",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        "Scales spacing and controls, not just text. Useful for tuning density without rebuilding.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary
+                    )
+                    Slider(
+                        value = settings.uiScale,
+                        onValueChange = { value -> viewModel.updateSettings { it.copy(uiScale = value) } },
+                        valueRange = 0.85f..1.2f,
+                        steps = 6
+                    )
                 }
             }
             item {

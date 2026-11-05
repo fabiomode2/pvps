@@ -32,10 +32,30 @@ Termux terminal-emulator is GPLv3; see [NOTICE](NOTICE).
 ## Fast iteration
 
 ```bash
-./scripts/dev.sh install   # incremental build + install + launch
-./scripts/dev.sh apk       # debug APK only
-./scripts/dev.sh logcat    # follow app logs
+./scripts/dev.sh install            # incremental build + install + launch
+./scripts/dev.sh watch              # rebuild + reinstall on save
+./scripts/dev.sh connect 192.168.1.5:5555  # adb over WiFi
+./scripts/dev.sh apk                # debug APK only
+./scripts/dev.sh logcat             # follow app logs
 ```
 
 Gradle's daemon and build cache stay warm between runs. On ARM hosts the script
-automatically uses the local qemu-wrapped `aapt2` in `/tmp/opencode`.
+automatically uses the local qemu-wrapped `aapt2` in `/tmp/opencode`. `watch`
+needs `inotify-tools` and is the fastest loop when the phone is connected over
+USB or wireless adb.
+
+### UI iteration without reinstalling
+
+The app reads its appearance at runtime. **Settings → Appearance** can switch
+the palette, change the font scale and zoom the whole interface (spacing and
+controls included); changes apply immediately and persist, no rebuild needed.
+
+For structural UI edits (layout, new composables), use Android Studio's
+Compose **Live Edit** with a debug build on Android 11+. It pushes changed
+composable bodies to the running app without a full reinstall. Android has no
+generic "reload any new Kotlin code" mechanism without that tooling; if Live
+Edit is not available, use `./scripts/dev.sh watch` plus wireless adb.
+
+Design tokens live in `ui/theme/Theme.kt`; shared widgets live in
+`ui/components/Components.kt`, so screens normally only compose existing
+building blocks.
