@@ -149,28 +149,24 @@ jobs:
             ```
 
             **What's new in ${{ steps.meta.outputs.version }}:**
-            - Fixed sessions and subagents showing as "running" forever. Status
-              now uses the newest busy/idle transition instead of the presence
-              of the historical busy timestamp.
-            - Redesigned the whole app: compact graphite/phosphor interface,
-              Material 3 navigation, denser dashboard, real file names, and a
-              focused terminal chrome.
-            - OpenCode chat is now compact and informative: session context,
-              spend, tokens/s, model/agent, subagent sessions, queued prompts,
-              and expandable reasoning/tool cards.
-            - Fixed missing chat messages by loading the newest message page
-              instead of the oldest, and by showing optimistic user messages.
-            - You can now queue prompts while OpenCode is working. Stop and
-              send are separate actions, so you no longer have to interrupt a
-              run to send the next message.
-            - The composer stays above the keyboard and the Enter/Send key works.
-            - Fixed terminal input: JSch buffered streams are now captured once,
-              so keystrokes, paste, Ctrl and shortcut keys actually reach the PTY.
-            - Added session context %, spend, tokens/s and subagent status to chat.
-            - Setup: first connection reaches the fingerprint trust prompt;
-              setup codes prefer public IPv4; SSH port is detected.
-            - Update APKs are always verified against SHA-256, and corrupt vaults
-              are quarantined instead of silently overwritten.
+            - Fixed queued OpenCode prompts never sending. Queued prompts are
+              promoted when the session becomes idle, and can also be sent now.
+            - OpenCode questions/forms now appear inside conversations and can
+              be answered without leaving the app.
+            - Redesigned OpenCode chat: full-screen model picker with provider,
+              search, variants and reasoning effort; full-screen session picker;
+              collapsed tool/thinking activity; fixed context, spend and tok/s.
+            - Model and agent selection now persists between launches.
+            - SSH tunnels and OpenCode connections now survive backgrounding and
+              activity recreation, with automatic reconnect and tunnel rebuild.
+            - Actionable notifications for OpenCode responses, permissions and
+              questions instead of only the static SSH notification.
+            - Theme and font scale now apply correctly, with Graphite, Midnight,
+              Ember and Paper themes.
+            - Files use a grid by default, with a list toggle and hidden files
+              hidden until explicitly enabled.
+            - Cleaned up the More tab, kept the dock visible in the terminal, and
+              added a faster local install/build script.
           files: |
             dist/pvps-${{ steps.meta.outputs.version }}.apk
             dist/SHA256SUMS
