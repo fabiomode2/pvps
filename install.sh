@@ -257,6 +257,8 @@ EOF
   else
     say "${UNIT_FILE} is already up to date"
   fi
+  sudo chown root:root "${UNIT_FILE}"
+  sudo chmod 644 "${UNIT_FILE}"
 }
 
 port_in_use() {
@@ -477,6 +479,9 @@ detect_host() {
   if [[ -z "${host}" ]]; then
     host="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
   fi
+  if [[ -z "${host}" ]]; then
+    host="$(hostname 2>/dev/null || true)"
+  fi
   printf '%s' "${host}"
 }
 
@@ -489,12 +494,14 @@ make_setup_code() {
     [[ -n "${host}" ]] || host="unknown"
   fi
 
-  python3 - "${host}" "${RUN_USER}" "${PASSWORD}" "${HOME}" "${OC_PORT}" "${OC_USER}" <<'PY'
+  PVPS_SETUP_PASSWORD="${PASSWORD}" python3 - "${host}" "${RUN_USER}" "${HOME}" "${OC_PORT}" "${OC_USER}" <<'PY'
 import base64
 import json
+import os
 import sys
 
-host, user, password, directory, oc_port, oc_user = sys.argv[1:7]
+host, user, directory, oc_port, oc_user = sys.argv[1:6]
+password = os.environ["PVPS_SETUP_PASSWORD"]
 payload = {
     "v": 1,
     "name": "vps",

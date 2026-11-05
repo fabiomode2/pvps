@@ -82,6 +82,9 @@ jobs:
           minor="${minor//[^0-9]/}"
           patch="${patch//[^0-9]/}"
           version_code=$((10#${major:-0} * 10000 + 10#${minor:-0} * 100 + 10#${patch:-0}))
+          if (( version_code < 1 )); then
+            version_code=1
+          fi
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "version_code=${version_code}" >> "${GITHUB_OUTPUT}"
           echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
