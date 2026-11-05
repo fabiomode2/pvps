@@ -11,6 +11,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
@@ -99,12 +100,14 @@ class OpenCodeClient(
     suspend fun prompt(
         sessionId: String,
         text: String,
-        delivery: String? = null
+        delivery: String? = null,
+        files: List<PromptFileInput> = emptyList()
     ): PromptInboxUser = withContext(Dispatchers.IO) {
         withTimeout(60_000) {
             val body = buildJsonObject {
                 put("text", text)
                 if (delivery != null) put("delivery", delivery)
+                filesJson(files)?.let { put("files", it) }
             }
             json.decodeFromJsonElement(
                 PromptResponse.serializer(),
@@ -112,6 +115,55 @@ class OpenCodeClient(
             ).data
         }
     }
+
+    suspend fun commands(directory: String?): List<CommandInfo> = withContext(Dispatchers.IO) {
+        withTimeout(30_000) {
+            val query = if (directory.isNullOrBlank()) emptyList() else {
+                listOf("location[directory]" to directory)
+            }
+            json.decodeFromJsonElement(
+                CommandsResponse.serializer(),
+                get("/api/command", query)
+            ).data
+        }
+    }
+
+    suspend fun runCommand(
+        sessionId: String,
+        name: String,
+        text: String,
+        delivery: String? = "queue",
+        files: List<PromptFileInput> = emptyList()
+    ) = withContext(Dispatchers.IO) {
+        withTimeout(60_000) {
+            val body = buildJsonObject {
+                put("name", name)
+                put("text", text)
+                if (delivery != null) put("delivery", delivery)
+                filesJson(files)?.let { put("files", it) }
+            }
+            post("/api/session/$sessionId/command", body)
+        }
+        Unit
+    }
+
+    suspend fun compact(sessionId: String) = withContext(Dispatchers.IO) {
+        withTimeout(60_000) {
+            post("/api/session/$sessionId/compact", buildJsonObject { })
+        }
+        Unit
+    }
+
+    private fun filesJson(files: List<PromptFileInput>) =
+        if (files.isEmpty()) null else buildJsonArray {
+            files.forEach { file ->
+                add(buildJsonObject {
+                    put("uri", file.uri)
+                    file.name?.takeIf { it.isNotBlank() }?.let { put("name", it) }
+                    file.description?.takeIf { it.isNotBlank() }?.let { put("description", it) }
+                })
+            }
+        }
 
     suspend fun inbox(sessionId: String): List<PromptInboxUser> = withContext(Dispatchers.IO) {
         withTimeout(30_000) {
@@ -345,6 +397,75 @@ class OpenCodeClient(
         runCatching { sseClient.connectionPool.evictAll() }
         runCatching { sseClient.dispatcher.executorService.shutdown() }
     }
+
+    /**
+     * Real per-session spend lives in the OpenCode Console request log, not in
+     * the local session object (Go-covered requests report cost=0 locally).
+     * The local server exposes the Console OAuth credential, so query the
+     * Console with it and sum the billed requests. Returns null when the
+     * credential is missing/expired, leaving the UI on its estimate.
+     */
+    suspend fun consoleSessionCost(sessionId: String, since: Long, until: Long): Double? =
+        withContext(Dispatchers.IO) {
+            withTimeout(45_000) {
+                val credentials = json.decodeFromJsonElement(
+                    CredentialsResponse.serializer(),
+                    get("/api/credential")
+                ).data
+                val oauth = credentials.firstOrNull { credential ->
+                    val candidate = credential.value
+                    credential.active &&
+                        candidate != null &&
+                        candidate.type == "oauth" &&
+                        !candidate.access.isNullOrBlank()
+                } ?: return@withTimeout null
+                val value = oauth.value ?: return@withTimeout null
+                if (value.expires > 0 && value.expires < System.currentTimeMillis()) {
+                    return@withTimeout null
+                }
+                val metadata = value.metadata
+                val orgId = metadata?.orgID.orEmpty()
+                if (orgId.isBlank()) return@withTimeout null
+                val root = metadata?.server?.takeIf { it.isNotBlank() }
+                    ?.trimEnd('/')
+                    ?: "https://opencode.ai"
+                val endpoint = "$root/console/api/request-logs".toHttpUrl()
+                var cursor: String? = null
+                var total = 0.0
+                var pages = 0
+                var sawItems = false
+                do {
+                    val url = endpoint.newBuilder()
+                        .addQueryParameter("category", "inference")
+                        .addQueryParameter("sessionID", sessionId)
+                        .addQueryParameter("since", since.toString())
+                        .addQueryParameter("until", until.toString())
+                        .addQueryParameter("limit", "100")
+                        .apply { cursor?.let { addQueryParameter("cursor", it) } }
+                        .build()
+                    val request = Request.Builder()
+                        .url(url)
+                        .header("Authorization", "Bearer ${value.access}")
+                        .header("x-org-id", orgId)
+                        .header("Accept", "application/json")
+                        .get()
+                        .build()
+                    client.newCall(request).execute().use { response ->
+                        val body = response.body?.string().orEmpty()
+                        if (!response.isSuccessful) throw OpenCodeException(response.code, body)
+                        val page = json.decodeFromJsonElement(
+                            ConsoleRequestLogs.serializer(),
+                            json.parseToJsonElement(body)
+                        )
+                        if (page.items.isNotEmpty()) sawItems = true
+                        page.items.forEach { total += it.cost }
+                        cursor = page.nextCursor
+                    }
+                    pages++
+                } while (!cursor.isNullOrBlank() && pages < 20)
+                if (sawItems) total else null
+            }
+        }
 
     private suspend fun get(path: String, query: List<Pair<String, String>> = emptyList()): JsonObject =
         request("GET", path, query, null)

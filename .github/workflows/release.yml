@@ -149,27 +149,22 @@ jobs:
             ```
 
             **What's new in ${{ steps.meta.outputs.version }}:**
-            - Queued OpenCode prompts now always use queue delivery, so they
-              start when the session is idle and wait safely during a turn.
-              A background drain promotes stranded prompts.
-            - Reasoning effort is available from both the composer chip and the
-              full-screen model picker, and the last model/effort persists.
-            - Redesigned editorial chat: one collapsed activity row per turn
-              ("Working… · 12 tool calls"), cleaner composer and session list,
-              estimated spend when the provider reports no billed cost, and
-              corrected context/tok/s metrics.
-            - OpenCode questions/forms appear inline and can be answered without
-              leaving the conversation.
-            - SSH tunnels and OpenCode connections survive backgrounding and
-              activity recreation, with automatic reconnect and tunnel rebuild.
-            - Actionable notifications for OpenCode responses, permissions and
-              questions instead of only the static SSH notification.
-            - Theme, font scale and interface zoom now apply at runtime, with
-              Graphite, Midnight, Ember and Paper themes.
-            - Files use a grid by default, with a list toggle and hidden files
-              hidden until explicitly enabled.
-            - Cleaned up the More tab, kept the dock visible in the terminal, and
-              added a faster local install/watch loop plus wireless adb support.
+            - Attach multiple files and photos to a prompt. Files are sent as
+              inline data parts that OpenCode can read directly.
+            - Message drafts are kept per session when switching tabs.
+            - Slash-command autocomplete in the composer: /init, /compact and
+              the project commands exposed by OpenCode.
+            - Compact inline model/effort panel inside the composer instead of
+              a full-screen picker. The agent/READY row no longer overlaps or
+              grows over the conversation.
+            - Context now shows exact used/limit tokens, with a note explaining
+              that it is measured from the latest assistant request.
+            - Spend uses the real OpenCode Console request log for the active
+              session, with a marked estimate and the Go plan allowance as
+              fallback when Console credentials are unavailable.
+            - Queued prompts stay visible and are promoted on idle, with a
+              bounded queue panel so it cannot cover the chat.
+            - Forms/questions remain inline with background notifications.
           files: |
             dist/pvps-${{ steps.meta.outputs.version }}.apk
             dist/SHA256SUMS

@@ -1,10 +1,15 @@
 package dev.pvps.ui.screens
 
+import android.content.Context
 import android.graphics.BitmapFactory
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.util.Base64
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +24,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -30,8 +36,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ExpandLess
@@ -75,6 +85,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.viewModelScope
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -101,11 +114,13 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import dev.pvps.data.model.ConnectionState
 import dev.pvps.opencode.AgentInfo
+import dev.pvps.opencode.CommandInfo
 import dev.pvps.opencode.FileAttachment
 import dev.pvps.opencode.ModelInfo
 import dev.pvps.opencode.ModelRef
 import dev.pvps.opencode.OpenCodeRepository
 import dev.pvps.opencode.PermissionRequest
+import dev.pvps.opencode.PromptFileInput
 import dev.pvps.opencode.SessionInfo
 import dev.pvps.opencode.ToolContent
 import dev.pvps.opencode.ToolPart
@@ -116,6 +131,7 @@ import dev.pvps.opencode.stringOrNull
 import dev.pvps.ui.AppViewModel
 import dev.pvps.ui.components.EmptyState
 import dev.pvps.ui.components.ErrorBanner
+import dev.pvps.ui.components.InfoRow
 import dev.pvps.ui.components.MonospaceBox
 import dev.pvps.ui.components.ScreenHeader
 import dev.pvps.ui.components.StatusDot
@@ -137,9 +153,24 @@ import dev.pvps.ui.theme.TextSecondary
 import dev.pvps.ui.theme.Violet
 import dev.pvps.ui.theme.Void
 import dev.pvps.ui.theme.Warning
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import java.util.Locale
+
+private data class ChatAttachment(
+    val uri: Uri,
+    val name: String,
+    val mime: String,
+    val base64: String,
+    val size: Long
+) {
+    fun promptFile(): PromptFileInput = PromptFileInput(
+        uri = "data:$mime;base64,$base64",
+        name = name
+    )
+}
 
 @Composable
 fun ChatScreen(
@@ -152,13 +183,51 @@ fun ChatScreen(
     val chat = viewModel.openCodeState.collectAsStateValue()
     val settings = viewModel.settings.collectAsStateValue()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val listState = rememberLazyListState()
-    var composer by remember { mutableStateOf("") }
+    val draftKey = chat.activeSessionId
+    var composer by remember(draftKey) {
+        mutableStateOf(viewModel.container.chatDrafts.get(draftKey))
+    }
+    var attachments by remember(draftKey) { mutableStateOf<List<ChatAttachment>>(emptyList()) }
+    var attachmentError by remember(draftKey) { mutableStateOf<String?>(null) }
+    var sending by remember(draftKey) { mutableStateOf(false) }
     var showSessions by remember { mutableStateOf(false) }
     var showStats by remember { mutableStateOf(false) }
-    var showModels by remember { mutableStateOf(false) }
-    var showAgents by remember { mutableStateOf(false) }
     var expanded by remember { mutableStateOf<Set<String>>(emptySet()) }
+
+    val filePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                val picked = mutableListOf<ChatAttachment>()
+                val errors = mutableListOf<String>()
+                uris.forEach { uri ->
+                    runCatching { readChatAttachment(context, uri) }
+                        .onSuccess { picked += it }
+                        .onFailure { errors += (it.message ?: "Could not read attachment") }
+                }
+                picked to errors
+            }
+            val room = (MAX_ATTACHMENTS - attachments.size).coerceAtLeast(0)
+            var totalBytes = attachments.sumOf { it.size }
+            val added = mutableListOf<ChatAttachment>()
+            for (candidate in result.first.take(room)) {
+                if (totalBytes + candidate.size > MAX_TOTAL_ATTACHMENT_BYTES) break
+                totalBytes += candidate.size
+                added += candidate
+            }
+            attachmentError = when {
+                result.first.size > room -> "Max $MAX_ATTACHMENTS attachments"
+                added.size < result.first.size -> "Total attachment size must stay under 24 MB"
+                result.second.isNotEmpty() -> result.second.first()
+                else -> null
+            }
+            attachments = (attachments + added)
+        }
+    }
 
     LaunchedEffect(host?.id, connection?.status) {
         if (host != null && connection?.status == ConnectionState.Status.CONNECTED) {
@@ -206,20 +275,20 @@ fun ChatScreen(
     val tps = tokensPerSecond(chat.messages, now)
     val runningSubagents = chat.subagents.count { it.isRunning }
     val goMeter = chat.usage?.go?.rolling
-    val actualSpend = session?.cost ?: 0.0
-    val estimatedSpend = if (actualSpend > 0.0) {
+    val actualSpend = chat.realCost ?: session?.cost?.takeIf { it > 0.0 }
+    val estimatedSpend = if (actualSpend != null) {
         0.0
     } else {
         estimateSessionCost(session?.tokens, modelInfo, chat.messages)
     }
     val spentValue = when {
-        actualSpend > 0.0 -> formatCost(actualSpend)
+        actualSpend != null -> formatCost(actualSpend)
         estimatedSpend > 0.0 -> "~" + formatCost(estimatedSpend)
         goMeter != null -> "${goMeter.percent.toInt()}%"
         else -> "—"
     }
     val spentLabel = when {
-        actualSpend > 0.0 -> "SPENT"
+        actualSpend != null -> "SPENT"
         estimatedSpend > 0.0 -> "SPENT · EST"
         else -> "GO PLAN"
     }
@@ -310,11 +379,12 @@ fun ChatScreen(
                 session = session,
                 contextFraction = contextFraction,
                 contextUsed = contextUsed,
+                contextLimit = contextLimit,
                 spentLabel = spentLabel,
                 spentValue = spentValue,
                 spentDetail = buildString {
                     goMeter?.let { append("plan ").append(it.percent.toInt()).append("%") }
-                    if (actualSpend <= 0.0 && estimatedSpend > 0.0) {
+                    if (actualSpend == null && estimatedSpend > 0.0) {
                         if (isNotEmpty()) append(" · ")
                         append("estimated")
                     }
@@ -455,25 +525,41 @@ fun ChatScreen(
 
             Composer(
                 value = composer,
-                onValueChange = { composer = it },
+                onValueChange = {
+                    composer = it
+                    viewModel.container.chatDrafts.set(draftKey, it)
+                },
                 busy = chat.busy,
+                sending = sending,
                 connected = chat.connected,
                 modelLabel = modelLabel(session?.model, chat.models),
                 model = modelInfo,
+                models = chat.models,
                 variant = session?.model?.variant,
                 agent = session?.agent,
                 agents = chat.agents,
+                commands = chat.commands,
                 queued = chat.queued,
-                showAgents = showAgents,
-                onShowModels = { showModels = true },
+                attachments = attachments,
+                attachmentError = attachmentError,
+                onAttach = { filePicker.launch(arrayOf("*/*")) },
+                onRemoveAttachment = { uri ->
+                    attachments = attachments.filterNot { it.uri == uri }
+                    attachmentError = null
+                },
+                onSelectModel = { model ->
+                    scope.launch { viewModel.container.openCode.switchModel(model) }
+                },
                 onSelectVariant = { model, variant ->
                     scope.launch { viewModel.container.openCode.switchModel(model, variant) }
                 },
-                onShowAgents = { showAgents = true },
-                onDismissAgents = { showAgents = false },
                 onSelectAgent = { agent ->
-                    showAgents = false
                     scope.launch { viewModel.container.openCode.switchAgent(agent) }
+                },
+                onPickCommand = { command ->
+                    val text = "/${command.name} "
+                    composer = text
+                    viewModel.container.chatDrafts.set(draftKey, text)
                 },
                 onCancelQueued = { id ->
                     scope.launch { viewModel.container.openCode.cancelQueued(id) }
@@ -482,10 +568,42 @@ fun ChatScreen(
                     scope.launch { viewModel.container.openCode.sendQueuedNow(item) }
                 },
                 onSend = {
-                    val text = composer.trim()
-                    if (text.isNotEmpty()) {
-                        composer = ""
-                        scope.launch { viewModel.container.openCode.send(text) }
+                    if (!sending) {
+                        val raw = composer.trim()
+                        val sentAttachments = attachments
+                        val outgoing = sentAttachments.map { it.promptFile() }
+                        val commandName = if (raw.startsWith("/")) {
+                            raw.removePrefix("/").substringBefore(' ').trim()
+                        } else ""
+                        val knownCommand = commandName.isNotBlank() && (
+                            commandName == "compact" ||
+                                commandName == "init" ||
+                                chat.commands.any { it.name == commandName }
+                            )
+                        if (knownCommand || raw.isNotEmpty() || outgoing.isNotEmpty()) {
+                            sending = true
+                            viewModel.viewModelScope.launch {
+                                val ok = if (knownCommand) {
+                                    val args = raw.removePrefix("/$commandName").trim()
+                                    viewModel.container.openCode.runCommand(
+                                        commandName,
+                                        args,
+                                        outgoing
+                                    )
+                                } else {
+                                    viewModel.container.openCode.send(raw, outgoing)
+                                }
+                                sending = false
+                                if (ok) {
+                                    if (composer.trim() == raw) {
+                                        composer = ""
+                                        viewModel.container.chatDrafts.clear(draftKey)
+                                    }
+                                    attachments = attachments - sentAttachments.toSet()
+                                    attachmentError = null
+                                }
+                            }
+                        }
                     }
                 },
                 onStop = { scope.launch { viewModel.container.openCode.interrupt() } }
@@ -509,25 +627,6 @@ fun ChatScreen(
             onDismiss = { showSessions = false }
         )
     }
-    if (showModels) {
-        ModelPickerDialog(
-            models = chat.models,
-            selected = session?.model,
-            onSelectModel = { model ->
-                val current = session?.model
-                val keepVariant = if (
-                    current != null && current.id == model.modelID && current.providerID == model.providerID
-                ) {
-                    model.variants.firstOrNull { it.id == current.variant }
-                } else null
-                scope.launch { viewModel.container.openCode.switchModel(model, keepVariant) }
-            },
-            onSelectVariant = { model, variant ->
-                scope.launch { viewModel.container.openCode.switchModel(model, variant) }
-            },
-            onDismiss = { showModels = false }
-        )
-    }
     if (showStats) {
         StatsDialog(
             session = session,
@@ -540,7 +639,8 @@ fun ChatScreen(
             contextLimit = contextLimit,
             contextFraction = contextFraction,
             tps = tps,
-            estimatedCost = if (actualSpend > 0.0) 0.0 else estimatedSpend,
+            realCost = chat.realCost,
+            estimatedCost = if (actualSpend != null) 0.0 else estimatedSpend,
             onOpenSubagent = { id ->
                 showStats = false
                 scope.launch { viewModel.container.openCode.selectSession(id) }
@@ -559,6 +659,7 @@ private fun SessionPulse(
     session: SessionInfo?,
     contextFraction: Double?,
     contextUsed: Long?,
+    contextLimit: Long,
     spentLabel: String,
     spentValue: String,
     spentDetail: String?,
@@ -578,7 +679,9 @@ private fun SessionPulse(
         PulseCell(
             label = "CTX",
             value = contextFraction?.let { "${(it * 100).toInt()}%" } ?: "—",
-            detail = contextUsed?.let { compactTokens(it) },
+            detail = contextUsed?.let {
+                "${compactTokens(it)}/${compactTokens(contextLimit)}"
+            },
             color = when {
                 contextFraction == null -> TextSecondary
                 contextFraction > 0.85 -> Danger
@@ -1240,87 +1343,401 @@ private fun PermissionCard(permission: PermissionRequest, onReply: (String) -> U
     }
 }
 
+private enum class ComposerPanel { None, Model, Agent }
+
 @Composable
 private fun Composer(
     value: String,
     onValueChange: (String) -> Unit,
     busy: Boolean,
+    sending: Boolean,
     connected: Boolean,
     modelLabel: String,
     model: ModelInfo?,
+    models: List<ModelInfo>,
     variant: String?,
     agent: String?,
     agents: List<AgentInfo>,
+    commands: List<CommandInfo>,
     queued: List<OpenCodeRepository.QueuedPrompt>,
-    showAgents: Boolean,
-    onShowModels: () -> Unit,
+    attachments: List<ChatAttachment>,
+    attachmentError: String?,
+    onAttach: () -> Unit,
+    onRemoveAttachment: (Uri) -> Unit,
+    onSelectModel: (ModelInfo) -> Unit,
     onSelectVariant: (ModelInfo, ModelVariant) -> Unit,
-    onShowAgents: () -> Unit,
-    onDismissAgents: () -> Unit,
     onSelectAgent: (AgentInfo) -> Unit,
+    onPickCommand: (CommandInfo) -> Unit,
     onCancelQueued: (String) -> Unit,
     onSendQueuedNow: (OpenCodeRepository.QueuedPrompt) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit
 ) {
-    var showEfforts by remember { mutableStateOf(false) }
-    val efforts = model?.variants.orEmpty()
+    var panel by remember { mutableStateOf(ComposerPanel.None) }
+    var modelQuery by remember { mutableStateOf("") }
+    var pendingModel by remember { mutableStateOf<ModelInfo?>(null) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val panelModel = pendingModel ?: model
+    val efforts = panelModel?.variants.orEmpty()
+    val agentLabel = agents.firstOrNull { it.id == agent }?.name
+        ?: agent?.takeIf { it.isNotBlank() }
+        ?: "agent"
     val effortLabel = efforts.firstOrNull { it.id == variant }?.label
         ?: variant?.takeIf { it.isNotBlank() && it != "default" }
         ?: "auto"
+    val commandQuery = value.removePrefix("/").substringBefore(' ').trim()
+    val showCommands = connected && value.startsWith("/") && !value.contains(' ') && !value.contains('\n')
+    val filteredCommands = commands.filter {
+        commandQuery.isBlank() || it.name.contains(commandQuery, ignoreCase = true)
+    }
+
+    LaunchedEffect(showCommands) {
+        if (showCommands) panel = ComposerPanel.None
+    }
+    LaunchedEffect(connected) {
+        if (!connected) {
+            panel = ComposerPanel.None
+            pendingModel = null
+        }
+    }
+
     Surface(color = DeepBackground.copy(alpha = 0.97f)) {
         Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                TinyAction(modelLabel, onShowModels)
-                if (efforts.isNotEmpty()) {
-                    Box {
-                        TinyAction("effort · $effortLabel", { showEfforts = true })
-                        DropdownMenu(expanded = showEfforts, onDismissRequest = { showEfforts = false }) {
-                            efforts.forEach { item ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            "effort · ${item.label}",
-                                            color = if (item.id == variant) Accent else TextPrimary
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TinyAction(modelLabel) {
+                        keyboard?.hide()
+                        pendingModel = null
+                        panel = if (panel == ComposerPanel.Model) ComposerPanel.None else ComposerPanel.Model
+                    }
+                    if (efforts.isNotEmpty()) {
+                        TinyAction("effort · $effortLabel") {
+                            keyboard?.hide()
+                            pendingModel = null
+                            panel = ComposerPanel.Model
+                        }
+                    }
+                    TinyAction(agentLabel) {
+                        keyboard?.hide()
+                        panel = if (panel == ComposerPanel.Agent) ComposerPanel.None else ComposerPanel.Agent
+                    }
+                }
+                Spacer(Modifier.width(2.dp))
+                StatusDot(
+                    when {
+                        sending -> Accent
+                        busy -> Warning
+                        connected -> Success
+                        else -> TextFaint
+                    },
+                    6
+                )
+                Spacer(Modifier.width(5.dp))
+                Text(
+                    when {
+                        sending -> "SENDING"
+                        busy -> "WORKING"
+                        connected -> "READY"
+                        else -> "OFFLINE"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = when {
+                        sending -> Accent
+                        busy -> Warning
+                        connected -> Success
+                        else -> TextFaint
+                    },
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+
+            if (attachments.isNotEmpty() || attachmentError != null) {
+                Spacer(Modifier.height(7.dp))
+                if (attachments.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        attachments.forEach { item ->
+                            Surface(
+                                color = SurfaceRaised.copy(alpha = 0.72f),
+                                shape = RoundedCornerShape(50),
+                                border = BorderStroke(1.dp, OutlineDark)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(start = 10.dp, end = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        item.name,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.widthIn(max = 160.dp)
+                                    )
+                                    Text(
+                                        " · ${formatAttachmentSize(item.size)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextFaint,
+                                        maxLines = 1
+                                    )
+                                    IconButton(
+                                        onClick = { onRemoveAttachment(item.uri) },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Remove attachment",
+                                            tint = TextFaint,
+                                            modifier = Modifier.size(13.dp)
                                         )
-                                    },
-                                    onClick = {
-                                        showEfforts = false
-                                        model?.let { onSelectVariant(it, item) }
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+                attachmentError?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Warning,
+                        modifier = Modifier.padding(top = 4.dp, start = 2.dp)
+                    )
+                }
+            }
+
+            if (showCommands && filteredCommands.isNotEmpty()) {
+                Spacer(Modifier.height(7.dp))
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = SurfaceRaised.copy(alpha = 0.82f),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, OutlineDark)
+                ) {
+                    LazyColumn(modifier = Modifier.heightIn(max = 164.dp)) {
+                        items(filteredCommands, key = { "cmd-${it.name}" }) { command ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        onPickCommand(command)
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "/${command.name}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Accent,
+                                    fontFamily = MonoFont,
+                                    modifier = Modifier.widthIn(min = 72.dp)
+                                )
+                                Text(
+                                    command.description.orEmpty(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextFaint,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
                                 )
                             }
                         }
                     }
                 }
-                Box {
-                    TinyAction(agent ?: "agent", onShowAgents)
-                    DropdownMenu(expanded = showAgents, onDismissRequest = onDismissAgents) {
-                        agents.filterNot { it.hidden }.forEach { item ->
-                            DropdownMenuItem(
-                                text = { Text(item.name, color = TextPrimary) },
-                                onClick = { onSelectAgent(item) }
+            }
+
+            if (panel != ComposerPanel.None) {
+                Spacer(Modifier.height(7.dp))
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = SurfaceRaised.copy(alpha = 0.72f),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, OutlineDark)
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                if (panel == ComposerPanel.Model) "MODEL & EFFORT" else "AGENT",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextFaint,
+                                modifier = Modifier.weight(1f)
                             )
+                            IconButton(
+                                onClick = {
+                                    panel = ComposerPanel.None
+                                    pendingModel = null
+                                },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Close panel",
+                                    tint = TextFaint,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                        }
+                        when (panel) {
+                            ComposerPanel.Model -> {
+                                OutlinedTextField(
+                                    value = modelQuery,
+                                    onValueChange = { modelQuery = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    placeholder = {
+                                        Text("Search models or providers", style = MaterialTheme.typography.labelSmall)
+                                    },
+                                    singleLine = true,
+                                    textStyle = MaterialTheme.typography.bodySmall,
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.Search,
+                                            contentDescription = null,
+                                            tint = TextFaint,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = Accent.copy(alpha = 0.28f),
+                                        unfocusedBorderColor = OutlineDark,
+                                        focusedContainerColor = SurfaceHigh.copy(alpha = 0.30f),
+                                        unfocusedContainerColor = SurfaceHigh.copy(alpha = 0.18f),
+                                        cursorColor = Accent,
+                                        focusedTextColor = TextPrimary,
+                                        unfocusedTextColor = TextPrimary
+                                    )
+                                )
+                                val filteredModels = remember(models, modelQuery) {
+                                    val query = modelQuery.trim()
+                                    if (query.isBlank()) models else models.filter {
+                                        it.name.contains(query, true) ||
+                                            it.modelID.contains(query, true) ||
+                                            it.providerID.contains(query, true) ||
+                                            it.family.contains(query, true)
+                                    }
+                                }
+                                Spacer(Modifier.height(5.dp))
+                                LazyColumn(modifier = Modifier.heightIn(max = 148.dp)) {
+                                    items(filteredModels, key = { "model-${it.providerID}-${it.modelID}" }) { item ->
+                                        val selected = model?.modelID == item.modelID &&
+                                            model.providerID == item.providerID
+                                        ComposerModelRow(
+                                            model = item,
+                                            selected = selected,
+                                            onClick = {
+                                                if (selected) {
+                                                    if (item.variants.isEmpty()) panel = ComposerPanel.None
+                                                } else {
+                                                    pendingModel = item
+                                                    onSelectModel(item)
+                                                    if (item.variants.isEmpty()) panel = ComposerPanel.None
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
+                                if (efforts.isNotEmpty()) {
+                                    Spacer(Modifier.height(7.dp))
+                                    Text(
+                                        "REASONING EFFORT",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextFaint
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Row(
+                                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        efforts.forEach { effort ->
+                                            ComposerChoice(
+                                                label = effort.label,
+                                                selected = effort.id == variant,
+                                                onClick = {
+                                                    panelModel?.let { onSelectVariant(it, effort) }
+                                                    pendingModel = null
+                                                    panel = ComposerPanel.None
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            ComposerPanel.Agent -> {
+                                LazyColumn(modifier = Modifier.heightIn(max = 168.dp)) {
+                                    items(agents.filterNot { it.hidden }, key = { "agent-${it.id}" }) { item ->
+                                        val selected = item.id == agent
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(if (selected) Accent.copy(alpha = 0.10f) else Color.Transparent)
+                                                .clickable {
+                                                    onSelectAgent(item)
+                                                    panel = ComposerPanel.None
+                                                }
+                                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(Modifier.weight(1f)) {
+                                                Text(
+                                                    item.name,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = if (selected) Accent else TextPrimary,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                item.description?.takeIf { it.isNotBlank() }?.let {
+                                                    Text(
+                                                        it,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = TextFaint,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                            }
+                                            if (selected) {
+                                                Icon(
+                                                    Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    tint = Accent,
+                                                    modifier = Modifier.size(15.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            ComposerPanel.None -> Unit
                         }
                     }
                 }
-                Spacer(Modifier.weight(1f))
-                StatusDot(if (busy) Warning else if (connected) Success else TextFaint, 6)
-                Spacer(Modifier.width(5.dp))
-                Text(
-                    when {
-                        busy -> "WORKING · QUEUE ON SEND"
-                        connected -> "READY"
-                        else -> "OFFLINE"
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (busy) Warning else if (connected) Success else TextFaint
-                )
             }
 
             if (queued.isNotEmpty()) {
                 Spacer(Modifier.height(7.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 112.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     queued.forEach { item ->
                         Surface(
                             color = Warning.copy(alpha = 0.07f),
@@ -1341,6 +1758,14 @@ private fun Composer(
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f)
                                 )
+                                if (item.files > 0) {
+                                    Text(
+                                        " +${item.files} files",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextFaint,
+                                        maxLines = 1
+                                    )
+                                }
                                 if (!busy) {
                                     Text(
                                         "SEND NOW",
@@ -1383,9 +1808,21 @@ private fun Composer(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(
                         onSend = {
-                            if (connected && value.isNotBlank()) onSend()
+                            if (connected && !sending &&
+                                (value.isNotBlank() || attachments.isNotEmpty())
+                            ) onSend()
                         }
                     ),
+                    leadingIcon = {
+                        IconButton(onClick = onAttach, enabled = connected) {
+                            Icon(
+                                Icons.Default.AttachFile,
+                                contentDescription = "Attach files",
+                                tint = if (connected) TextSecondary else TextFaint,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+                    },
                     shape = RoundedCornerShape(18.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Accent.copy(alpha = 0.30f),
@@ -1408,7 +1845,8 @@ private fun Composer(
                     )
                     Spacer(Modifier.width(6.dp))
                 }
-                val sendEnabled = connected && value.isNotBlank()
+                val sendEnabled = connected && !sending &&
+                    (value.isNotBlank() || attachments.isNotEmpty())
                 CircleAction(
                     icon = Icons.Default.Send,
                     description = if (busy) "Queue message" else "Send",
@@ -1419,6 +1857,88 @@ private fun Composer(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ComposerModelRow(
+    model: ModelInfo,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (selected) Accent.copy(alpha = 0.10f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    model.label,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (selected) Accent else TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    model.providerID,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextFaint,
+                    maxLines = 1
+                )
+            }
+            Text(
+                buildString {
+                    if (model.contextLabel.isNotBlank()) append(model.contextLabel).append(" ctx")
+                    model.firstCost?.input?.takeIf { it > 0 }?.let {
+                        if (isNotEmpty()) append(" · ")
+                        append("$").append(String.format(Locale.US, "%.2f", it)).append("/M in")
+                    }
+                    if (model.variants.isNotEmpty()) {
+                        if (isNotEmpty()) append(" · ")
+                        append(model.variants.size).append(" effort")
+                    }
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = TextFaint,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        if (selected) {
+            Icon(
+                Icons.Default.Check,
+                contentDescription = null,
+                tint = Accent,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ComposerChoice(label: String, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .clickable(onClick = onClick),
+        color = if (selected) Accent else SurfaceRaised.copy(alpha = 0.7f),
+        shape = RoundedCornerShape(50),
+        border = BorderStroke(1.dp, if (selected) Accent else OutlineDark)
+    ) {
+        Text(
+            label.uppercase(),
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = if (selected) Void else TextPrimary,
+            maxLines = 1
+        )
     }
 }
 
@@ -1440,232 +1960,6 @@ private fun CircleAction(
         contentAlignment = Alignment.Center
     ) {
         Icon(icon, contentDescription = description, tint = tint, modifier = Modifier.size(20.dp))
-    }
-}
-
-@Composable
-private fun ModelPickerDialog(
-    models: List<ModelInfo>,
-    selected: ModelRef?,
-    onSelectModel: (ModelInfo) -> Unit,
-    onSelectVariant: (ModelInfo, ModelVariant) -> Unit,
-    onDismiss: () -> Unit
-) {
-    var query by remember { mutableStateOf("") }
-    val filtered = remember(models, query) {
-        val needle = query.trim().lowercase()
-        if (needle.isBlank()) models else models.filter {
-            it.label.lowercase().contains(needle) ||
-                it.providerID.lowercase().contains(needle) ||
-                it.modelID.lowercase().contains(needle)
-        }
-    }
-    val grouped = remember(filtered) {
-        filtered.filter { it.enabled }.groupBy { it.providerID.ifBlank { "local" } }.toList()
-            .sortedBy { it.first }
-    }
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(modifier = Modifier.fillMaxSize(), color = DeepBackground) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "Model & effort",
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = TextPrimary,
-                            fontFamily = dev.pvps.ui.theme.DisplayFont
-                        )
-                        Text(
-                            "${filtered.count { it.enabled }} models · ${grouped.size} providers",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary
-                        )
-                    }
-                    Text(
-                        "DONE",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Accent,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .clickable(onClick = onDismiss)
-                            .padding(horizontal = 14.dp, vertical = 8.dp)
-                    )
-                }
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    placeholder = { Text("Search model or provider", color = TextFaint) },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextFaint) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(16.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Accent.copy(alpha = 0.55f),
-                        unfocusedBorderColor = OutlineDark,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        cursorColor = Accent,
-                        focusedContainerColor = SurfaceRaised.copy(alpha = 0.35f),
-                        unfocusedContainerColor = SurfaceRaised.copy(alpha = 0.25f)
-                    )
-                )
-                Spacer(Modifier.height(10.dp))
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        start = 14.dp, end = 14.dp, top = 4.dp, bottom = 32.dp
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(9.dp)
-                ) {
-                    grouped.forEach { (provider, list) ->
-                        item(key = "provider-$provider") {
-                            Row(
-                                modifier = Modifier.padding(start = 4.dp, top = 14.dp, bottom = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    provider.uppercase(),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = Accent
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Box(
-                                    Modifier
-                                        .height(1.dp)
-                                        .weight(1f)
-                                        .background(OutlineDark.copy(alpha = 0.65f))
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    "${list.size}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = TextFaint
-                                )
-                            }
-                        }
-                        items(list, key = { "${it.providerID}/${it.modelID}" }) { model ->
-                            val isSelected = selected?.id == model.modelID &&
-                                selected.providerID == model.providerID
-                            ModelPickerRow(
-                                model = model,
-                                selected = isSelected,
-                                selectedVariant = if (isSelected) selected?.variant else null,
-                                onSelectModel = { onSelectModel(model) },
-                                onSelectVariant = { variant -> onSelectVariant(model, variant) }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ModelPickerRow(
-    model: ModelInfo,
-    selected: Boolean,
-    selectedVariant: String?,
-    onSelectModel: () -> Unit,
-    onSelectVariant: (ModelVariant) -> Unit
-) {
-    Surface(
-        color = if (selected) Accent.copy(alpha = 0.07f) else SurfaceRaised.copy(alpha = 0.46f),
-        shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(1.dp, if (selected) Accent.copy(alpha = 0.40f) else OutlineDark.copy(alpha = 0.65f)),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .clickable(onClick = onSelectModel)
-    ) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            model.label,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = TextPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Surface(
-                            color = Accent.copy(alpha = 0.10f),
-                            shape = RoundedCornerShape(50)
-                        ) {
-                            Text(
-                                model.providerID.uppercase(),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = AccentDim,
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        buildString {
-                            append(model.modelID)
-                            model.limit?.context?.takeIf { it > 0 }?.let {
-                                append(" · ").append(model.contextLabel).append(" context")
-                            }
-                            model.firstCost?.let {
-                                append(" · $").append(String.format(Locale.US, "%.2f", it.input)).append("/M in")
-                            }
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextFaint,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                if (selected) {
-                    Text("ACTIVE", style = MaterialTheme.typography.labelSmall, color = Accent)
-                }
-            }
-            if (selected && model.variants.isNotEmpty()) {
-                Spacer(Modifier.height(11.dp))
-                Text("REASONING EFFORT", style = MaterialTheme.typography.labelSmall, color = TextFaint)
-                Spacer(Modifier.height(5.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    model.variants.forEach { variant ->
-                        val activeVariant = selectedVariant == variant.id
-                        Surface(
-                            color = if (activeVariant) Accent else SurfaceHigh,
-                            shape = RoundedCornerShape(50),
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .clickable { onSelectVariant(variant) }
-                        ) {
-                            Text(
-                                variant.label,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = if (activeVariant) Void else TextSecondary,
-                                modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp)
-                            )
-                        }
-                    }
-                }
-            } else if (!selected && model.variants.isNotEmpty()) {
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "${model.variants.size} effort levels · tap to select",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextFaint
-                )
-            }
-        }
     }
 }
 
@@ -2080,12 +2374,15 @@ private fun StatsDialog(
     contextLimit: Long,
     contextFraction: Double?,
     tps: Double?,
+    realCost: Double?,
     estimatedCost: Double,
     onOpenSubagent: (String) -> Unit,
     onOpenParent: (SessionInfo) -> Unit,
     onDismiss: () -> Unit
 ) {
     val totalTokens = session?.tokens ?: messages.lastOrNull { it.tokens != null }?.tokens ?: TokenUsage()
+    val providerCost = realCost ?: session?.cost?.takeIf { it > 0.0 } ?: 0.0
+    val usingEstimate = realCost == null && providerCost <= 0.0 && estimatedCost > 0.0
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = SurfaceHigh,
@@ -2134,14 +2431,30 @@ private fun StatsDialog(
                         style = MaterialTheme.typography.labelSmall,
                         color = TextSecondary
                     )
+                    Text(
+                        "Estimated from the latest assistant request (input + cache). It updates after each turn.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextFaint
+                    )
                 }
 
                 StatsGrid(
-                    cost = (session?.cost ?: 0.0).takeIf { it > 0.0 } ?: estimatedCost,
-                    estimated = (session?.cost ?: 0.0) <= 0.0 && estimatedCost > 0.0,
+                    cost = providerCost.takeIf { it > 0.0 } ?: estimatedCost,
+                    estimated = usingEstimate,
                     totalTokens = totalTokens,
                     tps = tps,
                     messages = messages.size
+                )
+                Text(
+                    when {
+                        realCost != null ->
+                            "Actual spend from the OpenCode Console request log for this session."
+                        usingEstimate ->
+                            "The local provider reports $0.00 for this session. The dollar figure is estimated from model list price; the Go allowance below is authoritative."
+                        else -> "Cost reported by the provider for this session."
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextFaint
                 )
                 usage?.go?.let { go ->
                     Text("OPENCODE GO ALLOWANCE", style = MaterialTheme.typography.labelSmall, color = TextFaint)
@@ -2149,6 +2462,18 @@ private fun StatsDialog(
                         StatBox("ROLLING", "${go.rolling.percent.toInt()}%", Modifier.weight(1f))
                         StatBox("WEEKLY", "${go.weekly.percent.toInt()}%", Modifier.weight(1f))
                         StatBox("MONTHLY", "${go.monthly.percent.toInt()}%", Modifier.weight(1f))
+                    }
+                }
+                if (usage != null && usage.budgets.isNotEmpty()) {
+                    Text("REPORTED BUDGETS", style = MaterialTheme.typography.labelSmall, color = TextFaint)
+                    usage.budgets.take(4).forEach { budget ->
+                        InfoRow(
+                            label = listOf(budget.scope, budget.per)
+                                .filter { it.isNotBlank() }
+                                .joinToString(" · ")
+                                .ifBlank { "Budget" },
+                            value = "${formatCost(budget.spent)} / ${formatCost(budget.limit)}"
+                        )
                     }
                 }
 
@@ -2388,6 +2713,51 @@ private fun tokensPerSecond(messages: List<UiMessage>, now: Long): Double? {
     val output = tokens.output + tokens.reasoning
     if (output <= 0 || seconds <= 0) return null
     return (output / seconds).coerceIn(0.1, 4000.0)
+}
+
+private const val MAX_ATTACHMENTS = 8
+private const val MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+private const val MAX_TOTAL_ATTACHMENT_BYTES = 24 * 1024 * 1024
+
+private fun readChatAttachment(context: Context, uri: Uri): ChatAttachment {
+    val resolver = context.contentResolver
+    var name = uri.lastPathSegment ?: "attachment"
+    var declaredSize = -1L
+    resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)
+        ?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (nameIndex >= 0) {
+                    cursor.getString(nameIndex)?.takeIf { it.isNotBlank() }?.let { name = it }
+                }
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) {
+                    declaredSize = cursor.getLong(sizeIndex)
+                }
+            }
+        }
+    if (declaredSize > MAX_ATTACHMENT_BYTES) {
+        error("$name is too large (max 20 MB)")
+    }
+    val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
+        ?: error("Could not open $name")
+    if (bytes.size > MAX_ATTACHMENT_BYTES) {
+        error("$name is too large (max 20 MB)")
+    }
+    val mime = resolver.getType(uri)?.takeIf { it.isNotBlank() } ?: "application/octet-stream"
+    return ChatAttachment(
+        uri = uri,
+        name = name,
+        mime = mime,
+        base64 = Base64.encodeToString(bytes, Base64.NO_WRAP),
+        size = bytes.size.toLong()
+    )
+}
+
+private fun formatAttachmentSize(bytes: Long): String = when {
+    bytes >= 1024 * 1024 -> String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
+    bytes >= 1024 -> String.format(Locale.US, "%.0f KB", bytes / 1024.0)
+    else -> "$bytes B"
 }
 
 private fun modelLabel(ref: ModelRef?, models: List<ModelInfo>): String {

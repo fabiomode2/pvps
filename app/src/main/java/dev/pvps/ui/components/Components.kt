@@ -822,7 +822,9 @@ fun TinyAction(label: String, onClick: () -> Unit) {
             label.uppercase(),
             modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
             style = MaterialTheme.typography.labelSmall,
-            color = TextPrimary
+            color = TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }

@@ -36,7 +36,8 @@ class OpenCodeRepository(
         val id: String,
         val text: String,
         val created: Long,
-        val delivery: String = "queue"
+        val delivery: String = "queue",
+        val files: Int = 0
     )
 
     data class State(
@@ -51,8 +52,10 @@ class OpenCodeRepository(
         val permissions: List<PermissionRequest> = emptyList(),
         val models: List<ModelInfo> = emptyList(),
         val agents: List<AgentInfo> = emptyList(),
+        val commands: List<CommandInfo> = emptyList(),
         val forms: List<FormInfo> = emptyList(),
         val usage: UsageLimits? = null,
+        val realCost: Double? = null,
         val busy: Boolean = false,
         val error: String? = null
     ) {
@@ -114,6 +117,7 @@ class OpenCodeRepository(
             val sessions = newClient.listSessions()
             val models = runCatching { newClient.models(host.openCodeDirectory) }.getOrDefault(emptyList())
             val agents = runCatching { newClient.agents(host.openCodeDirectory) }.getOrDefault(emptyList())
+            val commands = runCatching { newClient.commands(host.openCodeDirectory) }.getOrDefault(emptyList())
             val usage = runCatching { newClient.usageLimits(host.openCodeDirectory) }.getOrNull()
             _state.value = _state.value.copy(
                 connecting = false,
@@ -122,6 +126,7 @@ class OpenCodeRepository(
                 sessions = sessions,
                 models = models,
                 agents = agents,
+                commands = withBuiltinCommands(commands),
                 usage = usage,
                 error = null
             )
@@ -189,12 +194,14 @@ class OpenCodeRepository(
             queued = emptyList(),
             permissions = emptyList(),
             forms = emptyList(),
+            realCost = null,
             busy = _state.value.sessions.firstOrNull { it.id == sessionId }?.isRunning == true
         )
         refreshMessages()
         refreshInbox()
         refreshPermissions()
         refreshForms()
+        scope.launch { refreshRealCost(sessionId) }
         // A queue left behind by a previous app process must not stay parked
         // when the session is already idle.
         if (_state.value.activeSession?.isRunning != true) promoteQueued()
@@ -267,13 +274,17 @@ class OpenCodeRepository(
         val id = _state.value.activeSessionId ?: return
         runCatching {
             val queued = c.inbox(id)
-                .filter { it.type == "user" && it.payload.text.isNotBlank() }
+                .filter {
+                    it.type == "user" &&
+                        (it.payload.text.isNotBlank() || it.payload.files.isNotEmpty())
+                }
                 .map {
                     QueuedPrompt(
                         id = it.id,
                         text = it.payload.text,
                         created = it.time.created,
-                        delivery = it.delivery
+                        delivery = it.delivery,
+                        files = it.payload.files.size
                     )
                 }
             if (_state.value.activeSessionId == id) {
@@ -317,6 +328,20 @@ class OpenCodeRepository(
         }
     }
 
+    private suspend fun refreshRealCost(sessionId: String) {
+        val c = client ?: return
+        val session = _state.value.sessions.firstOrNull { it.id == sessionId } ?: return
+        val now = System.currentTimeMillis()
+        val since = session.time.created.takeIf { it > 0 }?.minus(60_000)
+            ?: (now - 7 * 24 * 60 * 60 * 1000L)
+        val until = now + 60_000
+        val cost = runCatching { c.consoleSessionCost(sessionId, since, until) }.getOrNull()
+            ?: return
+        if (_state.value.activeSessionId == sessionId) {
+            _state.value = _state.value.copy(realCost = cost)
+        }
+    }
+
     suspend fun replyForm(form: FormInfo, answer: Map<String, JsonElement>) {
         val c = client ?: return
         val id = _state.value.activeSessionId ?: return
@@ -347,66 +372,136 @@ class OpenCodeRepository(
         runCatching {
             val models = c.models(directory)
             val agents = c.agents(directory)
-            _state.value = _state.value.copy(models = models, agents = agents)
+            val commands = c.commands(directory)
+            _state.value = _state.value.copy(
+                models = models,
+                agents = agents,
+                commands = withBuiltinCommands(commands)
+            )
         }.onFailure {
             _state.value = _state.value.copy(error = it.message)
         }
     }
 
-    suspend fun send(text: String) {
-        val prompt = text.trim()
-        if (prompt.isBlank()) return
-        val c = client ?: return
+    private fun withBuiltinCommands(commands: List<CommandInfo>): List<CommandInfo> {
+        // /compact is a dedicated API in v2, not always present in /api/command.
+        // Keep /init available even if the project command list fails to load.
+        val all = commands + listOf(
+            CommandInfo("compact", "Compact the active context"),
+            CommandInfo("init", "Initialize project instructions")
+        )
+        return all.distinctBy { it.name }.sortedBy { it.name }
+    }
+
+    suspend fun send(text: String, files: List<PromptFileInput> = emptyList()): Boolean {
+        val prompt = text.trim().ifBlank {
+            if (files.isEmpty()) return false else "Please review the attached file(s)."
+        }
+        val c = client ?: return false
         val id = _state.value.activeSessionId ?: run {
             newSession()
             _state.value.activeSessionId
-        } ?: return
+        } ?: return false
 
         _state.value = _state.value.copy(error = null, busy = true)
-        Log.i("PVPSQueue", "send session=$id queued=${_state.value.queued.size}")
+        Log.i("PVPSQueue", "send session=$id files=${files.size} queued=${_state.value.queued.size}")
 
-        runCatching {
+        return runCatching {
             // Always use queue delivery. The server starts the loop immediately
             // when the session is idle and parks the prompt when a turn is
             // running. Using "steer" here aborts an in-flight turn, and choosing
             // between the two from a cached busy flag caused prompts to be lost
             // whenever that flag was stale.
-            val ack = c.prompt(id, prompt, delivery = "queue")
+            val ack = c.prompt(id, prompt, delivery = "queue", files = files)
             val created = ack.time.created.takeIf { it > 0 } ?: System.currentTimeMillis()
             val ackId = ack.id.ifBlank { "local-${System.currentTimeMillis()}" }
-            Log.i("PVPSQueue", "ack id=$ackId delivery=${ack.delivery}")
-            val optimistic = UiMessage(
-                id = ackId,
-                type = "user",
-                created = created,
-                text = prompt,
-                files = ack.payload.files,
-                parts = emptyList(),
-                agent = null,
-                model = null,
-                cost = 0.0,
-                tokens = null,
-                finish = null,
-                error = null,
-                command = null,
-                status = null,
-                output = null,
-                outcome = null
-            )
-            synchronized(optimisticLock) {
-                optimisticIds += ackId
-                _state.value = _state.value.copy(
-                    messages = (_state.value.messages + optimistic)
-                        .distinctBy { it.id }
-                        .sortedBy { it.created }
-                )
-            }
+            Log.i("PVPSQueue", "ack id=$ackId delivery=${ack.delivery} files=${ack.payload.files.size}")
+            addOptimisticUserMessage(ackId, created, prompt, ack.payload.files)
             scheduleRefresh()
-        }.onFailure {
+            true
+        }.getOrElse {
             _state.value = _state.value.copy(
                 busy = false,
                 error = it.message ?: "Prompt failed"
             )
+            false
+        }
+    }
+
+    suspend fun runCommand(
+        name: String,
+        text: String,
+        files: List<PromptFileInput> = emptyList()
+    ): Boolean {
+        val command = name.trim().removePrefix("/").trim()
+        val c = client ?: return false
+        val id = _state.value.activeSessionId ?: run {
+            newSession()
+            _state.value.activeSessionId
+        } ?: return false
+        _state.value = _state.value.copy(error = null)
+        return runCatching {
+            if (command == "compact") {
+                c.compact(id)
+            } else {
+                c.runCommand(id, command, text.trim(), delivery = "queue", files = files)
+                addOptimisticUserMessage(
+                    "local-${System.currentTimeMillis()}",
+                    System.currentTimeMillis(),
+                    "/$command${text.takeIf { it.isNotBlank() }?.let { " $it" }.orEmpty()}",
+                    emptyList()
+                )
+            }
+            scheduleRefresh()
+            true
+        }.getOrElse {
+            _state.value = _state.value.copy(error = it.message ?: "Command failed")
+            false
+        }
+    }
+
+    private fun addOptimisticUserMessage(
+        ackId: String,
+        created: Long,
+        text: String,
+        files: List<FileAttachment>
+    ) {
+        val optimistic = UiMessage(
+            id = ackId,
+            type = "user",
+            created = created,
+            text = text,
+            files = files,
+            parts = emptyList(),
+            agent = null,
+            model = null,
+            cost = 0.0,
+            tokens = null,
+            finish = null,
+            error = null,
+            command = null,
+            status = null,
+            output = null,
+            outcome = null
+        )
+        synchronized(optimisticLock) {
+            optimisticIds += ackId
+            _state.value = _state.value.copy(
+                messages = (_state.value.messages + optimistic)
+                    .distinctBy { it.id }
+                    .sortedBy { it.created }
+            )
+        }
+    }
+
+    suspend fun compact() {
+        val c = client ?: return
+        val id = _state.value.activeSessionId ?: return
+        runCatching {
+            c.compact(id)
+            scheduleRefresh()
+        }.onFailure {
+            _state.value = _state.value.copy(error = it.message ?: "Could not compact context")
         }
     }
 
@@ -614,7 +709,11 @@ class OpenCodeRepository(
                 refreshInbox()
                 scheduleRefresh()
             }
-            "session.usage.updated" -> refreshUsage()
+            "session.usage.updated" -> {
+                refreshUsage()
+                scheduleRefresh()
+            }
+            "message.updated", "message.part.updated", "message.part.removed" -> scheduleRefresh()
             "session.model.selected", "session.agent.selected" -> refreshSessions()
             "session.created", "session.deleted", "session.renamed", "session.moved",
             "session.archived", "session.unarchived" -> refreshSessions()
@@ -627,6 +726,7 @@ class OpenCodeRepository(
                 refreshSessions()
                 refreshInbox()
                 refreshUsage()
+                scope.launch { _state.value.activeSessionId?.let { refreshRealCost(it) } }
                 if (event.type == "session.idle" || event.type.startsWith("session.execution.")) {
                     notifyLatestAssistant()
                     // Delivering existing queue is what makes the "queued
@@ -677,6 +777,7 @@ class OpenCodeRepository(
 
     private suspend fun refreshAll() {
         refreshSessions()
+        refreshModelsAndAgents()
         refreshMessages()
         refreshInbox()
         refreshPermissions()

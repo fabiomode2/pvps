@@ -116,6 +116,22 @@ data class PromptResponse(val data: PromptInboxUser = PromptInboxUser())
 data class InboxResponse(val data: List<PromptInboxUser> = emptyList())
 
 @Serializable
+data class CommandInfo(
+    val name: String = "",
+    val description: String? = null
+)
+
+@Serializable
+data class CommandsResponse(val data: List<CommandInfo> = emptyList())
+
+@Serializable
+data class PromptFileInput(
+    val uri: String = "",
+    val name: String? = null,
+    val description: String? = null
+)
+
+@Serializable
 data class ModelsResponse(val data: List<ModelInfo> = emptyList())
 
 @Serializable
@@ -401,6 +417,41 @@ data class UsageLimits(
 
 @Serializable
 data class UsageLimitsResponse(val data: UsageLimits? = null)
+@Serializable
+data class CredentialMetadata(
+    val server: String = "",
+    val orgID: String = ""
+)
+
+@Serializable
+data class CredentialValue(
+    val type: String = "",
+    val access: String? = null,
+    val expires: Long = 0,
+    val metadata: CredentialMetadata? = null
+)
+
+@Serializable
+data class CredentialInfo(
+    val id: String = "",
+    val integrationID: String = "",
+    val label: String = "",
+    val active: Boolean = false,
+    val value: CredentialValue? = null
+)
+
+@Serializable
+data class CredentialsResponse(val data: List<CredentialInfo> = emptyList())
+
+@Serializable
+data class ConsoleRequestLog(val cost: Double = 0.0)
+
+@Serializable
+data class ConsoleRequestLogs(
+    val items: List<ConsoleRequestLog> = emptyList(),
+    val nextCursor: String? = null
+)
+
 
 @Serializable
 data class AgentInfo(
