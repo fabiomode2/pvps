@@ -5,6 +5,8 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Base64
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -39,6 +41,7 @@ import androidx.compose.material.icons.Icons
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Build
@@ -52,6 +55,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
@@ -245,12 +249,45 @@ fun ChatScreen(
     val photoPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(MAX_ATTACHMENTS)
     ) { uris -> importUris(uris) }
+    var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+    val cameraPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { success ->
+        val uri = pendingCameraUri
+        pendingCameraUri = null
+        if (success && uri != null) importUris(listOf(uri))
+    }
+    val launchCamera: () -> Unit = {
+        runCatching {
+            val photo = File(context.cacheDir, "camera-${System.currentTimeMillis()}.jpg")
+            FileProvider.getUriForFile(context, "${context.packageName}.files", photo)
+        }.onSuccess { uri ->
+            pendingCameraUri = uri
+            cameraPicker.launch(uri)
+        }.onFailure {
+            attachmentError = "Camera unavailable: ${it.message}"
+        }
+    }
 
     LaunchedEffect(host?.id, connection?.status, connection?.message) {
         if (host != null && connection?.status == ConnectionState.Status.CONNECTED) {
             // The repository compares the current tunnel URL and reconnects
             // only when the SSH watchdog rebuilt the forward on a new port.
             viewModel.connectOpenCode(host)
+        }
+    }
+
+    val pendingOpenSession = viewModel.pendingOpenSession.collectAsStateValue()
+    LaunchedEffect(pendingOpenSession, chat.connected, chat.sessions.size, chat.activeSessionId) {
+        val target = pendingOpenSession ?: return@LaunchedEffect
+        if (!chat.connected) return@LaunchedEffect
+        when {
+            chat.activeSessionId == target -> viewModel.consumePendingOpenSession()
+            chat.sessions.any { it.id == target } -> {
+                viewModel.consumePendingOpenSession()
+                viewModel.container.openCode.selectSession(target)
+            }
+            chat.sessions.isNotEmpty() -> viewModel.consumePendingOpenSession()
         }
     }
 
@@ -279,7 +316,8 @@ fun ChatScreen(
 
     val session = chat.activeSession
     val lastUsage = chat.messages.lastOrNull { it.isAssistant && it.tokens != null }?.tokens
-    val contextUsed = lastUsage?.let { it.input + it.cache.read + it.cache.write }
+    val contextUsed = chat.contextTokens.takeIf { it > 0 }
+        ?: lastUsage?.let { it.input + it.cache.read + it.cache.write }
     val modelInfo = session?.model?.let { ref ->
         chat.models.firstOrNull {
             it.modelID == ref.id && it.providerID == ref.providerID
@@ -294,7 +332,10 @@ fun ChatScreen(
     val tps = tokensPerSecond(chat.messages, now)
     val runningSubagents = chat.subagents.count { it.isRunning }
     val goMeter = chat.usage?.go?.rolling
-    val actualSpend = chat.realCost ?: session?.cost?.takeIf { it > 0.0 }
+    // Console logs often report an explicit 0.00 for sessions covered by the Go
+    // allowance. Do not turn that into a misleading "$0.00" headline.
+    val actualSpend = chat.realCost?.takeIf { it > 0.0 }
+        ?: session?.cost?.takeIf { it > 0.0 }
     val estimatedSpend = if (actualSpend != null) {
         0.0
     } else {
@@ -302,14 +343,15 @@ fun ChatScreen(
     }
     val spentValue = when {
         actualSpend != null -> formatCost(actualSpend)
-        estimatedSpend > 0.0 -> "~" + formatCost(estimatedSpend)
         goMeter != null -> "${goMeter.percent.toInt()}%"
+        estimatedSpend > 0.0 -> "~" + formatCost(estimatedSpend)
         else -> "—"
     }
     val spentLabel = when {
         actualSpend != null -> "SPENT"
+        goMeter != null -> "GO PLAN"
         estimatedSpend > 0.0 -> "SPENT · EST"
-        else -> "GO PLAN"
+        else -> "SPENT"
     }
     val activeForm = chat.forms.firstOrNull()
 
@@ -318,42 +360,31 @@ fun ChatScreen(
         contentColor = MaterialTheme.colorScheme.onBackground,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            ScreenHeader(
-                title = session?.displayTitle ?: "OpenCode",
-                subtitle = buildString {
-                    append(host?.name ?: "No host")
-                    append(" · ")
-                    append(
-                        when {
-                            session?.parentID != null -> "subagent"
-                            chat.connected -> if (chat.busy) "working" else "ready"
-                            chat.connecting -> "connecting"
-                            else -> "offline"
-                        }
-                    )
+            ChatTopBar(
+                hostName = host?.name,
+                stateLabel = when {
+                    session?.parentID != null -> "subagent"
+                    chat.connected -> if (chat.busy) "working" else "ready"
+                    chat.connecting -> "connecting"
+                    else -> "offline"
                 },
+                contextFraction = contextFraction,
+                contextUsed = contextUsed,
+                contextLimit = contextLimit,
+                spentValue = spentValue,
+                spentLabel = spentLabel,
+                tps = tps,
+                busy = chat.busy,
                 onBack = onBack,
-                actions = {
-                    IconButton(
-                        onClick = { expanded = emptySet() },
-                        enabled = expanded.isNotEmpty()
-                    ) {
-                        Icon(
-                            Icons.Default.UnfoldLess,
-                            contentDescription = "Collapse all thinking and tools",
-                            tint = if (expanded.isNotEmpty()) TextSecondary else TextFaint
-                        )
-                    }
-                    IconButton(onClick = { showSessions = true }, enabled = chat.connected) {
-                        Icon(Icons.Default.List, contentDescription = "Sessions", tint = TextSecondary)
-                    }
-                    IconButton(
-                        onClick = { scope.launch { viewModel.container.openCode.newSession() } },
-                        enabled = chat.connected && !chat.connecting
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = "New session", tint = Accent)
-                    }
-                }
+                onStats = { showStats = true },
+                onCollapse = { expanded = emptySet() },
+                canCollapse = expanded.isNotEmpty(),
+                onSessions = { showSessions = true },
+                sessionsEnabled = chat.connected,
+                onNewSession = {
+                    scope.launch { viewModel.container.openCode.newSession() }
+                },
+                newSessionEnabled = chat.connected && !chat.connecting
             )
         }
     ) { padding ->
@@ -404,27 +435,6 @@ fun ChatScreen(
                 )
                 return@Column
             }
-
-            SessionPulse(
-                session = session,
-                contextFraction = contextFraction,
-                contextUsed = contextUsed,
-                contextLimit = contextLimit,
-                spentLabel = spentLabel,
-                spentValue = spentValue,
-                spentDetail = buildString {
-                    goMeter?.let { append("plan ").append(it.percent.toInt()).append("%") }
-                    if (actualSpend == null && estimatedSpend > 0.0) {
-                        if (isNotEmpty()) append(" · ")
-                        append("estimated")
-                    }
-                }.ifBlank { null },
-                tps = tps,
-                subagents = chat.subagents.size,
-                runningSubagents = runningSubagents,
-                busy = chat.busy,
-                onClick = { showStats = true }
-            )
 
             chat.parentSession?.let { parent ->
                 Surface(
@@ -584,7 +594,21 @@ fun ChatScreen(
                 )
             }
 
-            if (activeForm == null) {
+            if (activeForm == null && session?.parentID != null) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    color = Violet.copy(alpha = 0.08f),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Violet.copy(alpha = 0.18f))
+                ) {
+                    Text(
+                        "Read-only subagent. Messages can only be sent to the parent session.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Violet,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                    )
+                }
+            } else if (activeForm == null) {
             Composer(
                 value = composer,
                 onValueChange = {
@@ -610,6 +634,7 @@ fun ChatScreen(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                     )
                 },
+                onAttachCamera = launchCamera,
                 onRemoveAttachment = { uri ->
                     attachments = attachments.filterNot { it.uri == uri }
                     attachmentError = null
@@ -682,7 +707,8 @@ fun ChatScreen(
     if (showSessions) {
         SessionDialog(
             sessions = chat.rootSessions,
-            allSessions = chat.sessions,
+            projects = chat.projects,
+            activeSession = session,
             activeId = chat.activeSessionId,
             onSelect = { id ->
                 showSessions = false
@@ -723,100 +749,154 @@ fun ChatScreen(
 }
 
 @Composable
-private fun SessionPulse(
-    session: SessionInfo?,
+private fun ChatTopBar(
+    hostName: String?,
+    stateLabel: String,
     contextFraction: Double?,
     contextUsed: Long?,
     contextLimit: Long,
-    spentLabel: String,
     spentValue: String,
-    spentDetail: String?,
+    spentLabel: String,
     tps: Double?,
-    subagents: Int,
-    runningSubagents: Int,
     busy: Boolean,
-    onClick: () -> Unit
+    onBack: () -> Unit,
+    onStats: () -> Unit,
+    onCollapse: () -> Unit,
+    canCollapse: Boolean,
+    onSessions: () -> Unit,
+    sessionsEnabled: Boolean,
+    onNewSession: () -> Unit,
+    newSessionEnabled: Boolean
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        PulseCell(
-            label = "CTX",
-            value = contextFraction?.let { "${(it * 100).toInt()}%" } ?: "—",
-            detail = contextUsed?.let {
-                "${compactTokens(it)}/${compactTokens(contextLimit)}"
-            },
-            color = when {
-                contextFraction == null -> TextSecondary
-                contextFraction > 0.85 -> Danger
-                contextFraction > 0.65 -> Warning
-                else -> TextPrimary
-            },
-            modifier = Modifier.weight(1.05f)
-        )
-        PulseCell(
-            label = spentLabel,
-            value = spentValue,
-            detail = spentDetail,
-            color = TextPrimary,
-            modifier = Modifier.weight(1.25f)
-        )
-        PulseCell(
-            label = "TOK/S",
-            value = tps?.let { if (it >= 100) "${it.toInt()}" else String.format(Locale.US, "%.1f", it) } ?: "—",
-            detail = if (busy) "live" else null,
-            color = if (busy) Warning else TextPrimary,
-            modifier = Modifier.weight(1f)
-        )
-        PulseCell(
-            label = "AGENTS",
-            value = if (subagents == 0) "0" else "$runningSubagents/$subagents",
-            detail = if (runningSubagents > 0) "running" else null,
-            color = when {
-                runningSubagents > 0 -> Warning
-                subagents > 0 -> Violet
-                else -> TextSecondary
-            },
-            modifier = Modifier.weight(1f)
-        )
+    val contextColor = when {
+        contextFraction == null -> TextFaint
+        contextFraction > 0.85 -> Danger
+        contextFraction > 0.65 -> Warning
+        else -> Accent
     }
-}
-
-@Composable
-private fun PulseCell(
-    label: String,
-    value: String,
-    detail: String?,
-    color: Color,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = TextFaint, maxLines = 1)
-        Spacer(Modifier.height(1.dp))
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                value,
-                style = MaterialTheme.typography.titleMedium,
-                color = color,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            if (detail != null) {
-                Spacer(Modifier.width(4.dp))
+    Surface(modifier = Modifier.fillMaxWidth(), color = Color.Transparent) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 6.dp, end = 6.dp, top = 8.dp, bottom = 9.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = TextSecondary,
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onStats),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    progress = { (contextFraction ?: 0.0).toFloat() },
+                    modifier = Modifier.fillMaxSize().padding(2.dp),
+                    color = contextColor,
+                    trackColor = OutlineDark.copy(alpha = 0.7f),
+                    strokeWidth = 3.dp
+                )
                 Text(
-                    detail,
+                    contextFraction?.let { "${(it * 100).toInt()}%" } ?: "—",
                     style = MaterialTheme.typography.labelSmall,
-                    color = TextFaint,
+                    color = contextColor,
+                    maxLines = 1
+                )
+            }
+            Spacer(Modifier.width(9.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StatusDot(
+                        when {
+                            busy -> Warning
+                            stateLabel == "ready" -> Success
+                            stateLabel == "offline" -> Danger
+                            else -> TextFaint
+                        },
+                        5
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        hostName ?: "OpenCode",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        " · $stateLabel",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextFaint,
+                        maxLines = 1
+                    )
+                }
+                Text(
+                    buildString {
+                        append(spentLabel.lowercase())
+                        append(" ")
+                        append(spentValue)
+                        if (tps != null) {
+                            append("  ·  ")
+                            append(
+                                if (tps >= 100) "${tps.toInt()}"
+                                else String.format(Locale.US, "%.1f", tps)
+                            )
+                            append(" tok/s")
+                        }
+                        if (contextUsed != null && contextLimit > 0) {
+                            append("  ·  ")
+                            append(compactTokens(contextUsed))
+                            append("/")
+                            append(compactTokens(contextLimit))
+                        }
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (busy && tps != null) Warning else TextFaint,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(bottom = 1.dp)
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            IconButton(
+                onClick = onCollapse,
+                enabled = canCollapse,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    Icons.Default.UnfoldLess,
+                    contentDescription = "Collapse all thinking and tools",
+                    tint = if (canCollapse) TextSecondary else TextFaint,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            IconButton(
+                onClick = onSessions,
+                enabled = sessionsEnabled,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    Icons.Default.List,
+                    contentDescription = "Sessions",
+                    tint = TextSecondary,
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+            IconButton(
+                onClick = onNewSession,
+                enabled = newSessionEnabled,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = "New session",
+                    tint = Accent,
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }
@@ -926,6 +1006,16 @@ private fun AssistantTurnBlock(
                 }
             }
         }
+        if (last.completed == null) {
+            val reasoning = turn.asReversed()
+                .flatMap { it.parts }
+                .filterIsInstance<UiPart.Reasoning>()
+                .lastOrNull { it.text.isNotBlank() }
+                ?.text
+            if (reasoning != null) {
+                LiveReasoningWindow(reasoning)
+            }
+        }
         if (activity.isNotEmpty()) {
             ActivityGroup(
                 parts = activity,
@@ -934,6 +1024,51 @@ private fun AssistantTurnBlock(
                 onToggle = onToggle,
                 openCode = openCode,
                 onOpenSubagent = onOpenSubagent
+            )
+        }
+    }
+}
+
+@Composable
+private fun LiveReasoningWindow(text: String) {
+    // Keep the visible window small so the transcript stays readable while the
+    // model streams. The full reasoning remains available in activity history.
+    val words = remember(text) { text.trim().split(Regex("\\s+")) }
+    val window = remember(words) {
+        val tail = words.takeLast(32)
+        buildString {
+            if (words.size > tail.size) append("… ")
+            append(tail.joinToString(" "))
+        }
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+        color = Warning.copy(alpha = 0.055f),
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(1.dp, Warning.copy(alpha = 0.16f))
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(11.dp),
+                    color = Warning,
+                    strokeWidth = 1.3.dp
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "THINKING · LIVE",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Warning
+                )
+            }
+            Spacer(Modifier.height(5.dp))
+            Text(
+                window,
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary,
+                fontStyle = FontStyle.Italic,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -1113,6 +1248,7 @@ private fun ActivityGroup(
             ?: parts.lastIndex
     }
     val activePart = parts.getOrNull(activeIndex)
+    val activeTool = (activePart as? UiPart.Tool)?.tool
     val previousCount = parts.size - if (activePart == null) 0 else 1
     val summary = buildString {
         val noun = if (tools.size == 1) "tool call" else "tool calls"
@@ -1127,6 +1263,10 @@ private fun ActivityGroup(
             append(tools.size)
             append(" ")
             append(noun)
+        }
+        if ((running || failed) && activeTool != null) {
+            append(" · ")
+            append(activeTool.name)
         }
         if (reasoning.isNotEmpty()) {
             if (tools.isEmpty()) append(" · reasoning") else append(" · thinking")
@@ -1413,7 +1553,7 @@ private fun ToolCard(
                     Spacer(Modifier.height(8.dp))
                     Text("INPUT", style = MaterialTheme.typography.labelSmall, color = TextFaint)
                     Spacer(Modifier.height(3.dp))
-                    MonospaceBox(tool.input)
+                    MonospaceBox(tool.input.take(1_600))
                 }
                 tool.content.forEach { content ->
                     when (content) {
@@ -1421,7 +1561,7 @@ private fun ToolCard(
                             Spacer(Modifier.height(8.dp))
                             Text("OUTPUT", style = MaterialTheme.typography.labelSmall, color = TextFaint)
                             Spacer(Modifier.height(3.dp))
-                            MonospaceBox(content.text.take(12_000))
+                            MonospaceBox(content.text.take(2_400))
                         }
                         is ToolContent.File -> {
                             Spacer(Modifier.height(8.dp))
@@ -1625,6 +1765,7 @@ private fun Composer(
     attachmentError: String?,
     onAttachFiles: () -> Unit,
     onAttachPhotos: () -> Unit,
+    onAttachCamera: () -> Unit,
     onRemoveAttachment: (Uri) -> Unit,
     onSelectModel: (ModelInfo) -> Unit,
     onSelectVariant: (ModelInfo, ModelVariant) -> Unit,
@@ -1648,6 +1789,9 @@ private fun Composer(
     val effortLabel = efforts.firstOrNull { it.id == variant }?.label
         ?: variant?.takeIf { it.isNotBlank() && it != "default" }
         ?: "auto"
+    // Compact row: provider stays hidden until the full model picker opens.
+    val compactModelLabel = (model?.name?.takeIf { it.isNotBlank() } ?: modelLabel)
+        .substringBefore(" · ")
     val commandQuery = value.removePrefix("/").substringBefore(' ').trim()
     val showCommands = connected && value.startsWith("/") && !value.contains(' ') && !value.contains('\n')
     val filteredCommands = commands.filter {
@@ -1672,25 +1816,23 @@ private fun Composer(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TinyAction(modelLabel) {
+                    TinyAction(compactModelLabel, Modifier.weight(1.15f)) {
                         keyboard?.hide()
                         pendingModel = null
                         panel = if (panel == ComposerPanel.Model) ComposerPanel.None else ComposerPanel.Model
                     }
                     if (efforts.isNotEmpty()) {
-                        TinyAction("effort · $effortLabel") {
+                        TinyAction(effortLabel, Modifier.weight(0.8f)) {
                             keyboard?.hide()
                             pendingModel = null
                             panel = ComposerPanel.Model
                         }
                     }
-                    TinyAction(agentLabel) {
+                    TinyAction(agentLabel, Modifier.weight(0.85f)) {
                         keyboard?.hide()
                         panel = if (panel == ComposerPanel.Agent) ComposerPanel.None else ComposerPanel.Agent
                     }
@@ -2118,6 +2260,16 @@ private fun Composer(
                                     onClick = {
                                         showAttachMenu = false
                                         onAttachPhotos()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Camera", color = TextPrimary) },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = Warning)
+                                    },
+                                    onClick = {
+                                        showAttachMenu = false
+                                        onAttachCamera()
                                     }
                                 )
                                 DropdownMenuItem(
@@ -2653,18 +2805,42 @@ private fun fieldVisible(field: FormField, answers: Map<String, JsonElement>): B
 @Composable
 private fun SessionDialog(
     sessions: List<SessionInfo>,
-    allSessions: List<SessionInfo>,
+    projects: List<dev.pvps.opencode.ProjectInfo>,
+    activeSession: SessionInfo?,
     activeId: String?,
     onSelect: (String) -> Unit,
     onNew: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var query by remember { mutableStateOf("") }
-    val filtered = remember(sessions, query) {
+    var showAll by remember { mutableStateOf(false) }
+    val projectByID = remember(projects) { projects.associateBy { it.id } }
+    fun projectDirectory(session: SessionInfo): String =
+        session.location?.directory?.takeIf { it.isNotBlank() }
+            ?: projectByID[session.projectID]?.canonical
+            ?: "global"
+    fun projectName(session: SessionInfo): String {
+        val project = projectByID[session.projectID]
+        return project?.displayName
+            ?: projectDirectory(session).trimEnd('/').substringAfterLast('/').ifBlank { "Global" }
+    }
+    val currentDirectory = activeSession?.let { projectDirectory(it) }
+    val scoped = remember(sessions, showAll, currentDirectory) {
+        if (showAll || currentDirectory == null) sessions
+        else sessions.filter { projectDirectory(it) == currentDirectory }
+    }
+    val filtered = remember(scoped, query) {
         val needle = query.trim().lowercase()
-        if (needle.isBlank()) sessions else sessions.filter {
-            it.displayTitle.lowercase().contains(needle) || (it.agent ?: "").contains(needle, true)
+        if (needle.isBlank()) scoped else scoped.filter {
+            it.displayTitle.lowercase().contains(needle) ||
+                (it.agent ?: "").contains(needle, true) ||
+                projectName(it).lowercase().contains(needle)
         }
+    }
+    val grouped = remember(filtered, projectByID) {
+        filtered.groupBy { projectDirectory(it) }
+            .toList()
+            .sortedByDescending { (_, list) -> list.maxOfOrNull { it.time.updated } ?: 0L }
     }
     Dialog(
         onDismissRequest = onDismiss,
@@ -2681,7 +2857,7 @@ private fun SessionDialog(
                     Column(Modifier.weight(1f)) {
                         Text("Sessions", style = MaterialTheme.typography.headlineSmall, color = TextPrimary)
                         Text(
-                            "${allSessions.size} sessions · ${allSessions.count { it.isRunning }} running",
+                            "${sessions.size} sessions · ${sessions.count { it.isRunning }} running",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )
@@ -2709,7 +2885,7 @@ private fun SessionDialog(
                     value = query,
                     onValueChange = { query = it },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    placeholder = { Text("Search sessions", color = TextFaint) },
+                    placeholder = { Text("Search sessions or projects", color = TextFaint) },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextFaint) },
                     singleLine = true,
                     shape = RoundedCornerShape(14.dp),
@@ -2721,7 +2897,22 @@ private fun SessionDialog(
                         cursorColor = Accent
                     )
                 )
-                Spacer(Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 9.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    ComposerChoice(
+                        label = activeSession?.let { projectName(it) } ?: "Current project",
+                        selected = !showAll,
+                        onClick = { showAll = false }
+                    )
+                    ComposerChoice(
+                        label = "All projects",
+                        selected = showAll,
+                        onClick = { showAll = true }
+                    )
+                }
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(
@@ -2729,21 +2920,41 @@ private fun SessionDialog(
                     ),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    filtered.forEach { session ->
-                        item(key = session.id) {
+                    grouped.forEach { (directory, list) ->
+                        val label = projectByID[list.first().projectID]?.displayName
+                            ?: directory.trimEnd('/').substringAfterLast('/').ifBlank { "Global" }
+                        item(key = "project-$directory") {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(start = 4.dp, top = 8.dp, bottom = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Folder,
+                                    contentDescription = null,
+                                    tint = Accent.copy(alpha = 0.8f),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    label.uppercase(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(Modifier.weight(1f))
+                                Text(
+                                    "${list.size}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextFaint
+                                )
+                            }
+                        }
+                        items(list, key = { it.id }) { session ->
                             SessionRow(
                                 session = session,
                                 active = session.id == activeId,
-                                indent = false,
                                 onClick = { onSelect(session.id) }
-                            )
-                        }
-                        items(allSessions.filter { it.parentID == session.id }, key = { it.id }) { child ->
-                            SessionRow(
-                                session = child,
-                                active = child.id == activeId,
-                                indent = true,
-                                onClick = { onSelect(child.id) }
                             )
                         }
                     }
@@ -2757,7 +2968,6 @@ private fun SessionDialog(
 private fun SessionRow(
     session: SessionInfo,
     active: Boolean,
-    indent: Boolean,
     onClick: () -> Unit
 ) {
     Surface(
@@ -2770,13 +2980,11 @@ private fun SessionRow(
             1.dp,
             when {
                 active -> Accent.copy(alpha = 0.34f)
-                indent -> Violet.copy(alpha = 0.18f)
                 else -> OutlineDark.copy(alpha = 0.58f)
             }
         ),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = if (indent) 18.dp else 0.dp)
             .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
     ) {
@@ -2809,7 +3017,7 @@ private fun SessionRow(
             Spacer(Modifier.width(11.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    if (indent) "↳ ${session.displayTitle}" else session.displayTitle,
+                    session.displayTitle,
                     style = MaterialTheme.typography.bodyLarge,
                     color = if (active) TextPrimary else TextSecondary,
                     maxLines = 1,
@@ -2867,15 +3075,36 @@ private fun StatsDialog(
     val totalTokens = session?.tokens ?: messages.lastOrNull { it.tokens != null }?.tokens ?: TokenUsage()
     val providerCost = realCost ?: session?.cost?.takeIf { it > 0.0 } ?: 0.0
     val usingEstimate = realCost == null && providerCost <= 0.0 && estimatedCost > 0.0
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        containerColor = SurfaceHigh,
-        title = { Text("Session telemetry", color = TextPrimary) },
-        text = {
-            Column(
-                modifier = Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(Modifier.fillMaxSize(), color = DeepBackground) {
+            Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Telemetry", style = MaterialTheme.typography.headlineSmall, color = TextPrimary)
+                        Text(
+                            "Live session · context · spend · usage",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextFaint
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close telemetry", tint = TextSecondary)
+                    }
+                }
+                HorizontalDivider(color = OutlineDark.copy(alpha = 0.7f))
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                 Text(
                     session?.displayTitle ?: "No active session",
                     style = MaterialTheme.typography.titleMedium,
@@ -2916,7 +3145,7 @@ private fun StatsDialog(
                         color = TextSecondary
                     )
                     Text(
-                        "Estimated from the latest assistant request (input + cache). It updates after each turn.",
+                        "Measured from the live session context and the latest assistant usage. Refreshes after each step and when the SSE stream resyncs.",
                         style = MaterialTheme.typography.labelSmall,
                         color = TextFaint
                     )
@@ -2963,7 +3192,10 @@ private fun StatsDialog(
 
                 if (subagents.isNotEmpty()) {
                     Text("SUBAGENTS", style = MaterialTheme.typography.labelSmall, color = TextFaint)
-                    subagents.forEach { sub ->
+                    subagents
+                        .sortedWith(compareByDescending<SessionInfo> { it.isRunning }
+                            .thenByDescending { it.time.updated })
+                        .forEach { sub ->
                         Surface(
                             color = Violet.copy(alpha = 0.06f),
                             shape = RoundedCornerShape(8.dp),
@@ -3008,10 +3240,11 @@ private fun StatsDialog(
                         color = TextFaint
                     )
                 }
+                Spacer(Modifier.height(30.dp))
+                }
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close", color = Accent) } }
-    )
+        }
+    }
 }
 
 @Composable

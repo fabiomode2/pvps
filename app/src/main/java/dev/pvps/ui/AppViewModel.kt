@@ -10,9 +10,11 @@ import dev.pvps.data.model.SshKey
 import dev.pvps.service.ConnectionService
 import dev.pvps.ssh.KeyTools
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -33,6 +35,10 @@ class AppViewModel(val container: AppContainer) : ViewModel() {
     private val _selectedHostId = MutableStateFlow<String?>(null)
     val selectedHostId: StateFlow<String?> = _selectedHostId
 
+    private val _pendingOpenSession = MutableStateFlow<String?>(null)
+    /** Session requested by a notification tap; consumed by ChatScreen. */
+    val pendingOpenSession: StateFlow<String?> = _pendingOpenSession.asStateFlow()
+
     val selectedHost: StateFlow<Host?> = combine(hosts, _selectedHostId) { list, id ->
         list.firstOrNull { it.id == id } ?: list.firstOrNull()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -50,6 +56,14 @@ class AppViewModel(val container: AppContainer) : ViewModel() {
 
     fun selectHost(id: String) {
         _selectedHostId.value = id
+    }
+
+    fun requestOpenSession(sessionId: String?) {
+        if (!sessionId.isNullOrBlank()) _pendingOpenSession.value = sessionId
+    }
+
+    fun consumePendingOpenSession() {
+        _pendingOpenSession.value = null
     }
 
     fun connect(hostId: String) {
@@ -173,6 +187,23 @@ class AppViewModel(val container: AppContainer) : ViewModel() {
     fun onResume() {
         // Reconnect any session that died while the app was backgrounded.
         container.ssh.verifyConnections()
+        // The SSH watchdog may need a moment after a mobile handoff. Rebind
+        // OpenCode as soon as the tunnel is back so the event stream resumes
+        // even when the user is not looking at the Chat tab.
+        val host = selectedHost.value ?: hosts.value.firstOrNull()
+        if (host != null) {
+            viewModelScope.launch {
+                repeat(6) {
+                    if (container.ssh.stateFor(host.id).status ==
+                        dev.pvps.data.model.ConnectionState.Status.CONNECTED
+                    ) {
+                        container.openCode.connect(host)
+                        return@launch
+                    }
+                    delay(700)
+                }
+            }
+        }
         container.updates.refreshUnknownSources()
         if (container.updates.state.value is dev.pvps.update.UpdateState.ReadyToInstall &&
             !container.updates.needsUnknownSources.value

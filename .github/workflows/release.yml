@@ -149,25 +149,31 @@ jobs:
             ```
 
             **What's new in ${{ steps.meta.outputs.version }}:**
-            - Files now behave like a desktop file manager: compact Dolphin-style
-              list and grid views, breadcrumb path, type glyphs and only the
-              useful metadata (name, kind and size). Permissions and timestamps
-              no longer waste rows.
-            - New process inspector with a live memory card, top RAM process,
-              RAM/CPU/name sorting and per-process resource bars. Kill any process
-              directly from the list.
-            - SSH watchdog now actively probes the connection instead of trusting
-              JSch's cached socket state. Dead mobile sockets are re-dialled, the
-              OpenCode tunnel is rebuilt and a stale OpenCode client reconnects
-              automatically when the local port changes.
-            - Messages sent while the agent is working now steer at the next
-              thinking/tool step boundary instead of waiting for the whole turn
-              to finish.
-            - Expanding tool activity shows only the current step. Older tools
-              and reasoning move behind a "Show previous" history popup.
-            - Requirements from 1.0.8 remain: photo quick menu, full markdown and
-              tables, collapse-all, Latest pill, step-by-step question wizard and
-              image viewer.
+            - OpenCode v2 live streaming: text, reasoning and tool calls now
+              arrive over the native `session.*` event stream. Thinking appears
+              live in a compact 32-word window instead of waiting for a refresh.
+            - Dramatically lower latency. Incremental SSE deltas replace full
+              message re-fetches on every event; HTTP and reconnect timings are
+              visible in Settings → Diagnostics.
+            - Queue messages steer at the next thinking/tool step boundary.
+              Pending items are reconciled against the durable inbox and survive
+              tunnel reconnects.
+            - SSH tunnel keeps a stable local port and requires two consecutive
+              failed probes before reconnecting, ending the disconnect loops
+              when switching apps or tabs.
+            - New chat chrome: no session title, context ring, spend, tok/s and
+              one-line activity summaries. Full-screen telemetry and a project
+              grouped session picker hide read-only subagents.
+            - Files now have a full-screen preview with PDF pages, video, audio,
+              images, text/code and tar listings. Compact Dolphin-style list and
+              grid views, hidden-file toggle and no permission/date clutter.
+            - Process inspector with RAM pressure, top consumers, sortable
+              CPU/RAM/name table, mini bars and kill.
+            - Camera capture joins photos and files: up to 8 attachments,
+              20 MB each, 24 MB total.
+            - Runtime theme and font switching now recompose correctly.
+            - Installer asks only for the phone SSH public key and supports
+              `pvps-setup:` codes. Copy/export redacted diagnostics from Settings.
           files: |
             dist/pvps-${{ steps.meta.outputs.version }}.apk
             dist/SHA256SUMS

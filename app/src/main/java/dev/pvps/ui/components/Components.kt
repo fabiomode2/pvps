@@ -827,9 +827,9 @@ fun InfoRow(label: String, value: String) {
 }
 
 @Composable
-fun TinyAction(label: String, onClick: () -> Unit) {
+fun TinyAction(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
-        modifier = Modifier
+        modifier = modifier
             .clip(RoundedCornerShape(50))
             .clickable(onClick = onClick),
         color = SurfaceRaised.copy(alpha = 0.7f),

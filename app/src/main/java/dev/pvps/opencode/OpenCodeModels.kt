@@ -67,11 +67,41 @@ data class SessionInfo(
      * makes every finished session and subagent look active forever.
      */
     val isRunning: Boolean
-        get() = (time.busy ?: 0L) > (time.idle ?: 0L)
+        get() = (time.busy ?: 0L) > (time.idle ?: 0L) &&
+            (outcome == null || outcome == "running" || outcome == "busy")
 }
 
 @Serializable
 data class SessionsResponse(val data: List<SessionInfo> = emptyList())
+
+@Serializable
+data class ProjectInfo(
+    val id: String = "",
+    val canonical: String = "",
+    val name: String? = null,
+    val vcs: String? = null,
+    val time: ProjectTime = ProjectTime(),
+    val sandboxes: List<String> = emptyList()
+) {
+    val displayName: String
+        get() = name?.takeIf { it.isNotBlank() }
+            ?: canonical.trimEnd('/').substringAfterLast('/').takeIf { it.isNotBlank() }
+            ?: "Global"
+
+    val shortPath: String
+        get() = canonical.replace(System.getProperty("user.home").orEmpty(), "~")
+}
+
+@Serializable
+data class ProjectTime(
+    val created: Long = 0,
+    val updated: Long = 0,
+    val initialized: Long? = null,
+    val active: Long? = null
+)
+
+@Serializable
+data class ProjectsResponse(val data: List<ProjectInfo> = emptyList())
 
 @Serializable
 data class SessionResponse(val data: SessionInfo = SessionInfo())
@@ -472,8 +502,8 @@ data class OpenCodeEvent(
 )
 
 sealed interface UiPart {
-    data class Text(val text: String) : UiPart
-    data class Reasoning(val text: String) : UiPart
+    data class Text(val text: String, val id: String = "") : UiPart
+    data class Reasoning(val text: String, val id: String = "") : UiPart
     data class Tool(val tool: ToolPart) : UiPart
 }
 
@@ -589,7 +619,8 @@ private fun parsePart(element: JsonElement): UiPart? {
     }
 }
 
-private fun parseToolContent(element: JsonElement): List<ToolContent> {
+fun parseToolContent(element: JsonElement?): List<ToolContent> {
+    if (element == null) return emptyList()
     val array = element as? JsonArray ?: return emptyList()
     return array.mapNotNull { item ->
         val obj = item as? JsonObject ?: return@mapNotNull null
@@ -617,3 +648,5 @@ fun JsonObject.longOrNull(key: String): Long? =
     (this[key] as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
 fun JsonObject.intOrNull(key: String): Int? =
     (this[key] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
+fun JsonObject.doubleOrNull(key: String): Double? =
+    (this[key] as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull()

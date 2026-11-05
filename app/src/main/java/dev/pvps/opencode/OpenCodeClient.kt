@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import dev.pvps.diagnostics.Diagnostics
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -65,6 +66,34 @@ class OpenCodeClient(
         }
     }
 
+    suspend fun projects(): List<ProjectInfo> = withContext(Dispatchers.IO) {
+        withTimeout(30_000) {
+            val request = Request.Builder()
+                .url(url("/api/project"))
+                .header("Authorization", auth)
+                .header("Accept", "application/json")
+                .get()
+                .build()
+            client.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (!response.isSuccessful) throw OpenCodeException(response.code, text)
+                val element = runCatching { json.parseToJsonElement(text) }.getOrNull()
+                when (element) {
+                    is kotlinx.serialization.json.JsonArray ->
+                        json.decodeFromJsonElement(
+                            kotlinx.serialization.builtins.ListSerializer(ProjectInfo.serializer()),
+                            element
+                        )
+                    is JsonObject -> json.decodeFromJsonElement(
+                        ProjectsResponse.serializer(),
+                        element
+                    ).data
+                    else -> emptyList()
+                }
+            }
+        }
+    }
+
     suspend fun createSession(directory: String?): SessionInfo = withContext(Dispatchers.IO) {
         withTimeout(30_000) {
             val body = buildJsonObject {
@@ -96,6 +125,29 @@ class OpenCodeClient(
                 ).data.asReversed()
             }
         }
+
+    /**
+     * Active context is the message set after the last compaction. This is the
+     * authoritative view for the context-window meter; using the full message
+     * list overcounts after /compact and makes the percentage drift.
+     */
+    suspend fun context(sessionId: String): List<MessageDto> = withContext(Dispatchers.IO) {
+        withTimeout(30_000) {
+            json.decodeFromJsonElement(
+                MessagesResponse.serializer(),
+                get("/api/session/$sessionId/context")
+            ).data
+        }
+    }
+
+    /** Sessions with a foreground drain owned by this server process. */
+    suspend fun activeSessions(): Set<String> = withContext(Dispatchers.IO) {
+        withTimeout(20_000) {
+            val element = get("/api/session/active")
+            val data = (element as? JsonObject)?.get("data") as? JsonObject ?: return@withTimeout emptySet()
+            data.keys
+        }
+    }
 
     suspend fun prompt(
         sessionId: String,
@@ -492,12 +544,18 @@ class OpenCodeClient(
         } else {
             builder.method(method, ByteArray(0).toRequestBody(null))
         }
-        client.newCall(builder.build()).execute().use { response ->
-            val text = response.body?.string().orEmpty()
-            if (!response.isSuccessful) throw OpenCodeException(response.code, text)
-            if (text.isBlank()) return JsonObject(emptyMap())
-            return runCatching { json.parseToJsonElement(text).jsonObject }
-                .getOrElse { throw OpenCodeException(response.code, "Invalid JSON: ${text.take(300)}") }
+        val started = System.nanoTime()
+        try {
+            client.newCall(builder.build()).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (!response.isSuccessful) throw OpenCodeException(response.code, text)
+                if (text.isBlank()) return JsonObject(emptyMap())
+                return runCatching { json.parseToJsonElement(text).jsonObject }
+                    .getOrElse { throw OpenCodeException(response.code, "Invalid JSON: ${text.take(300)}") }
+            }
+        } finally {
+            val ms = (System.nanoTime() - started) / 1_000_000
+            Diagnostics.event("http", "$method $path ${ms}ms")
         }
     }
 

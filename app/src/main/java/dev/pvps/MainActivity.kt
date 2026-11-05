@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleNavigationIntent(intent)
         enableEdgeToEdge()
         setContent {
             val appearance = viewModel.settings.collectAsStateValue()
@@ -75,6 +76,18 @@ class MainActivity : ComponentActivity() {
                 AppShell(viewModel)
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNavigationIntent(intent)
+    }
+
+    private fun handleNavigationIntent(intent: Intent?) {
+        val sessionId = intent?.getStringExtra(AppNotifications.EXTRA_SESSION_ID) ?: return
+        viewModel.requestOpenSession(sessionId)
+        intent.removeExtra(AppNotifications.EXTRA_SESSION_ID)
     }
 
     override fun onResume() {

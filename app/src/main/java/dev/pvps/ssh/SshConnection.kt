@@ -167,9 +167,9 @@ class SshConnection(
         return (s.openChannel("sftp") as ChannelSftp).apply { connect(15_000) }
     }
 
-    fun openForward(remoteHost: String, remotePort: Int): LocalForward {
+    fun openForward(remoteHost: String, remotePort: Int, localPort: Int = 0): LocalForward {
         val s = session ?: error("SSH session is not connected")
-        return LocalForward(s, remoteHost, remotePort).also { it.start() }
+        return LocalForward(s, remoteHost, remotePort).also { it.start(localPort) }
     }
 
     fun disconnect() {

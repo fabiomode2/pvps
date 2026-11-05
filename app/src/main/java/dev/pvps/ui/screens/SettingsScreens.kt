@@ -1,5 +1,9 @@
 package dev.pvps.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -51,15 +55,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.pvps.BuildConfig
 import dev.pvps.data.model.AppSettings
+import dev.pvps.diagnostics.Diagnostics
 import dev.pvps.terminal.TerminalPalettes
 import dev.pvps.ui.AppViewModel
 import dev.pvps.ui.components.ConfirmDialog
+import dev.pvps.ui.components.MonospaceBox
 import dev.pvps.ui.components.ScreenHeader
 import dev.pvps.ui.components.SectionCard
 import dev.pvps.ui.components.SectionLabel
@@ -243,8 +250,13 @@ fun SettingsScreen(
     onAudit: () -> Unit
 ) {
     val settings = viewModel.settings.collectAsStateValue()
+    val context = LocalContext.current
     var showClearAudit by remember { mutableStateOf(false) }
+    var showClearDiagnostics by remember { mutableStateOf(false) }
     var showThemeMenu by remember { mutableStateOf(false) }
+    var showDiagnostics by remember { mutableStateOf(false) }
+    var diagnosticsText by remember { mutableStateOf("") }
+    var diagnosticsNotice by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -412,6 +424,59 @@ fun SettingsScreen(
                 }
             }
             item {
+                SectionCard(title = "Diagnostics") {
+                    Text(
+                        "Redacted app, SSH, tunnel, SSE and queue events. Stored in a small rotating on-device log; secrets are removed before writing.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        TextButton(onClick = {
+                            diagnosticsText = Diagnostics.snapshot()
+                            showDiagnostics = !showDiagnostics
+                        }) {
+                            Text(if (showDiagnostics) "Hide log" else "Show log")
+                        }
+                        TextButton(onClick = {
+                            val text = Diagnostics.exportText()
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("PVPS diagnostics", text))
+                            diagnosticsNotice = "Copied ${text.length} characters"
+                        }) {
+                            Text("Copy")
+                        }
+                        TextButton(onClick = {
+                            val text = Diagnostics.exportText()
+                            val send = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_SUBJECT, "PVPS diagnostics")
+                                putExtra(Intent.EXTRA_TEXT, text)
+                            }
+                            context.startActivity(Intent.createChooser(send, "Export diagnostics"))
+                        }) {
+                            Text("Export")
+                        }
+                        TextButton(onClick = { showClearDiagnostics = true }) {
+                            Text("Clear", color = Danger)
+                        }
+                    }
+                    diagnosticsNotice?.let {
+                        Text(it, style = MaterialTheme.typography.labelSmall, color = Success)
+                    }
+                    if (showDiagnostics) {
+                        Spacer(Modifier.height(6.dp))
+                        MonospaceBox(diagnosticsText.takeLast(30_000))
+                        Text(
+                            "${diagnosticsText.lines().size} lines",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextFaint,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                }
+            }
+            item {
                 SectionCard(title = "Data") {
                     Text(
                         "The vault (hosts, keys and OpenCode passwords) is encrypted with an Android Keystore AES-GCM key. It is excluded from backups.",
@@ -446,6 +511,22 @@ fun SettingsScreen(
             destructive = true,
             onConfirm = { viewModel.clearAudit() },
             onDismiss = { showClearAudit = false }
+        )
+    }
+    if (showClearDiagnostics) {
+        ConfirmDialog(
+            title = "Clear diagnostics?",
+            message = "Removes the in-memory and rotating diagnostic logs from this device.",
+            confirmLabel = "Clear",
+            destructive = true,
+            onConfirm = {
+                Diagnostics.clear()
+                diagnosticsText = ""
+                showDiagnostics = false
+                diagnosticsNotice = "Diagnostics cleared"
+                showClearDiagnostics = false
+            },
+            onDismiss = { showClearDiagnostics = false }
         )
     }
 }

@@ -1,28 +1,36 @@
 package dev.pvps.ui.screens
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Color as AndroidColor
+import android.graphics.pdf.PdfRenderer
+import android.media.MediaPlayer
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
+import android.widget.MediaController
+import android.widget.VideoView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image as ComposeImage
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -33,12 +41,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
@@ -46,15 +56,18 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.AudioFile
+import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.Image
@@ -74,10 +87,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -85,6 +101,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -93,36 +110,44 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import coil.compose.SubcomposeAsyncImage
+import coil.request.CachePolicy
+import coil.request.ImageRequest
 import dev.pvps.data.model.ConnectionState
 import dev.pvps.ssh.RemoteFile
 import dev.pvps.ssh.SftpClient
 import dev.pvps.ui.AppViewModel
 import dev.pvps.ui.components.ConfirmDialog
 import dev.pvps.ui.components.ErrorBanner
-import dev.pvps.ui.components.MonospaceBox
 import dev.pvps.ui.components.PvpsTextField
 import dev.pvps.ui.components.collectAsStateValue
 import dev.pvps.ui.components.formatBytes
 import dev.pvps.ui.theme.Accent
 import dev.pvps.ui.theme.Danger
 import dev.pvps.ui.theme.MonoFont
+import dev.pvps.ui.theme.OnAccent
 import dev.pvps.ui.theme.OutlineDark
 import dev.pvps.ui.theme.OutlineSoft
+import dev.pvps.ui.theme.Success
 import dev.pvps.ui.theme.SurfaceDark
 import dev.pvps.ui.theme.SurfaceHigh
-import dev.pvps.ui.theme.Success
 import dev.pvps.ui.theme.SurfaceRaised
 import dev.pvps.ui.theme.TextFaint
 import dev.pvps.ui.theme.TextPrimary
 import dev.pvps.ui.theme.TextSecondary
 import dev.pvps.ui.theme.Violet
 import dev.pvps.ui.theme.Warning
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
+import kotlin.math.roundToInt
 
 private enum class FileAction { DOWNLOAD, RENAME, DELETE, TAR, EXTRACT }
 
@@ -139,10 +164,6 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var refresh by remember { mutableIntStateOf(0) }
     var preview by remember { mutableStateOf<RemoteFile?>(null) }
-    var previewText by remember { mutableStateOf<String?>(null) }
-    var previewImage by remember { mutableStateOf<File?>(null) }
-    var previewTar by remember { mutableStateOf<List<String>?>(null) }
-    var previewLoading by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<RemoteFile?>(null) }
     var deleteTarget by remember { mutableStateOf<RemoteFile?>(null) }
     var tarTarget by remember { mutableStateOf<RemoteFile?>(null) }
@@ -168,6 +189,10 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
 
     LaunchedEffect(host?.id, connected, currentPath, refresh, connection) {
         if (connected && sftp != null) load()
+    }
+
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) { cleanupStalePreviewFiles(context.cacheDir) }
     }
 
     val visibleEntries = remember(entries, settings.showHiddenFiles) {
@@ -218,31 +243,6 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
 
     fun openPreview(file: RemoteFile) {
         preview = file
-        previewText = null
-        previewImage = null
-        previewTar = null
-        previewLoading = true
-        scope.launch {
-            runCatching {
-                val client = sftp ?: error("SSH not connected")
-                when {
-                    file.name.endsWith(".tar.gz") || file.name.endsWith(".tgz") -> {
-                        previewTar = client.listTar(file.path)
-                    }
-                    file.name.substringAfterLast('.', "").lowercase(Locale.US) in setOf(
-                        "png", "jpg", "jpeg", "webp", "gif", "bmp"
-                    ) -> {
-                        val temp = File(context.cacheDir, "preview-${file.name}")
-                        withContext(Dispatchers.IO) { client.download(file.path, temp) }
-                        previewImage = temp
-                    }
-                    else -> {
-                        previewText = withContext(Dispatchers.IO) { client.readText(file.path) }
-                    }
-                }
-            }.onFailure { error = it.message }
-            previewLoading = false
-        }
     }
 
     Scaffold(
@@ -277,31 +277,44 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
         ) {
             PathStrip(currentPath) { path -> currentPath = path }
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(36.dp)
+                    .padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     "${visibleEntries.size} items",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
                     color = TextFaint,
-                    modifier = Modifier.weight(1f).padding(start = 8.dp)
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 8.dp)
                 )
-                IconButton(onClick = {
-                    viewModel.updateSettings { it.copy(fileGridView = !it.fileGridView) }
-                }) {
+                IconButton(
+                    onClick = {
+                        viewModel.updateSettings { it.copy(fileGridView = !it.fileGridView) }
+                    },
+                    modifier = Modifier.size(32.dp)
+                ) {
                     Icon(
                         if (settings.fileGridView) Icons.Default.ViewList else Icons.Default.GridView,
                         contentDescription = "Toggle grid view",
-                        tint = TextSecondary
+                        tint = TextSecondary,
+                        modifier = Modifier.size(17.dp)
                     )
                 }
-                IconButton(onClick = {
-                    viewModel.updateSettings { it.copy(showHiddenFiles = !it.showHiddenFiles) }
-                }) {
+                IconButton(
+                    onClick = {
+                        viewModel.updateSettings { it.copy(showHiddenFiles = !it.showHiddenFiles) }
+                    },
+                    modifier = Modifier.size(32.dp)
+                ) {
                     Icon(
                         if (settings.showHiddenFiles) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                         contentDescription = "Toggle hidden files",
-                        tint = if (settings.showHiddenFiles) Accent else TextSecondary
+                        tint = if (settings.showHiddenFiles) Accent else TextSecondary,
+                        modifier = Modifier.size(17.dp)
                     )
                 }
             }
@@ -337,11 +350,11 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                 }
                 if (settings.fileGridView) {
                     LazyVerticalGrid(
-                        columns = GridCells.Adaptive(150.dp),
+                        columns = GridCells.Adaptive(100.dp),
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 88.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 88.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         gridItems(visibleEntries, key = { it.path }) { file ->
                             FileTile(
@@ -356,7 +369,6 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = 88.dp)
                     ) {
-                        item(key = "file-list-header") { FileListHeader() }
                         items(visibleEntries, key = { it.path }) { file ->
                             FileRow(
                                 file = file,
@@ -472,53 +484,23 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
         )
     }
     preview?.let { file ->
-        AlertDialog(
-            onDismissRequest = { preview = null; previewImage?.delete() },
-            containerColor = SurfaceHigh,
-            shape = RoundedCornerShape(20.dp),
-            titleContentColor = TextPrimary,
-            textContentColor = TextSecondary,
-            title = {
-                Text(
-                    file.name,
-                    color = TextPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+        FilePreviewDialog(
+            file = file,
+            sftp = sftp,
+            cacheDir = context.cacheDir,
+            onDismiss = { preview = null },
+            onDownload = {
+                preview = null
+                pendingDownload = file
+                downloadLauncher.launch(file.name)
             },
-            text = {
-                Column(
-                    modifier = Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())
-                ) {
-                    if (previewLoading) {
-                        CircularProgressIndicator(color = Accent)
-                    } else if (previewImage != null) {
-                        AsyncImage(
-                            model = previewImage,
-                            contentDescription = file.name,
-                            modifier = Modifier.fillMaxWidth(),
-                            contentScale = ContentScale.Fit
-                        )
-                    } else if (previewTar != null) {
-                        Text("Archive contents (${previewTar!!.size})", color = TextSecondary)
-                        Spacer(Modifier.height(6.dp))
-                        MonospaceBox(previewTar!!.joinToString("\n"))
-                    } else {
-                        MonospaceBox(previewText.orEmpty())
-                    }
+            onExtract = if (isTarArchive(file.name)) {
+                {
+                    preview = null
+                    extractTarget = file
                 }
-            },
-            confirmButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (file.name.endsWith(".tar.gz") || file.name.endsWith(".tgz")) {
-                        TextButton(onClick = { extractTarget = file; preview = null }) {
-                            Text("Extract", color = Accent)
-                        }
-                    }
-                    TextButton(onClick = { preview = null; previewImage?.delete() }) {
-                        Text("Close", color = Accent)
-                    }
-                }
+            } else {
+                null
             }
         )
     }
@@ -538,7 +520,7 @@ private fun FilesTopBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp)
+                .height(52.dp)
                 .padding(start = 6.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -632,8 +614,17 @@ private fun CompactIconButton(
 
 @Composable
 private fun PathStrip(path: String, onNavigate: (String) -> Unit) {
-    val scroll = rememberScrollState()
-    val parts = path.split('/').filter { it.isNotBlank() }
+    var showPathMenu by remember(path) { mutableStateOf(false) }
+    val ancestors = remember(path) {
+        buildList {
+            add("/")
+            var accumulated = ""
+            path.split('/').filter { it.isNotBlank() }.forEach { part ->
+                accumulated += "/$part"
+                add(accumulated)
+            }
+        }
+    }
     Surface(
         color = SurfaceDark.copy(alpha = 0.72f),
         contentColor = TextPrimary
@@ -642,17 +633,16 @@ private fun PathStrip(path: String, onNavigate: (String) -> Unit) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
-                    .padding(horizontal = 6.dp),
+                    .height(40.dp)
+                    .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (path != "/") {
                     Row(
                         modifier = Modifier
-                            .fillMaxHeight()
                             .clip(RoundedCornerShape(8.dp))
                             .clickable { onNavigate(parentOf(path)) }
-                            .padding(horizontal = 10.dp),
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
@@ -661,11 +651,11 @@ private fun PathStrip(path: String, onNavigate: (String) -> Unit) {
                             tint = TextSecondary,
                             modifier = Modifier.size(14.dp)
                         )
-                        Spacer(Modifier.width(6.dp))
+                        Spacer(Modifier.width(5.dp))
                         Text(
                             "..",
                             style = MaterialTheme.typography.labelMedium.copy(
-                                fontSize = 11.5.sp,
+                                fontSize = 11.sp,
                                 letterSpacing = 0.2.sp
                             ),
                             color = TextSecondary,
@@ -674,38 +664,58 @@ private fun PathStrip(path: String, onNavigate: (String) -> Unit) {
                     }
                     Box(
                         modifier = Modifier
-                            .padding(horizontal = 6.dp)
+                            .padding(horizontal = 4.dp)
                             .width(1.dp)
                             .height(16.dp)
                             .background(OutlineDark)
                     )
                 }
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .horizontalScroll(scroll),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    CrumbSegment(
-                        label = "/",
-                        selected = path == "/",
-                        onClick = { onNavigate("/") }
+                Icon(
+                    Icons.Outlined.Folder,
+                    contentDescription = null,
+                    tint = Accent.copy(alpha = 0.85f),
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(Modifier.width(6.dp))
+                Box(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = path.ifBlank { "/" },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { showPathMenu = true }
+                            .padding(vertical = 6.dp, horizontal = 2.dp),
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontSize = 11.5.sp,
+                            letterSpacing = 0.1.sp
+                        ),
+                        color = TextSecondary,
+                        fontFamily = MonoFont,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    var accumulated = ""
-                    parts.forEach { part ->
-                        accumulated += "/$part"
-                        val target = accumulated
-                        Icon(
-                            Icons.Default.ChevronRight,
-                            contentDescription = null,
-                            tint = TextFaint,
-                            modifier = Modifier.size(13.dp)
-                        )
-                        CrumbSegment(
-                            label = part,
-                            selected = target.trimEnd('/') == path.trimEnd('/'),
-                            onClick = { onNavigate(target) }
-                        )
+                    DropdownMenu(
+                        expanded = showPathMenu,
+                        onDismissRequest = { showPathMenu = false }
+                    ) {
+                        ancestors.forEach { target ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = target,
+                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                        color = if (target == path) Accent else TextPrimary,
+                                        fontFamily = MonoFont,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
+                                onClick = {
+                                    showPathMenu = false
+                                    onNavigate(target)
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -718,76 +728,76 @@ private fun PathStrip(path: String, onNavigate: (String) -> Unit) {
 }
 
 @Composable
-private fun CrumbSegment(label: String, selected: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxHeight()
-            .clip(RoundedCornerShape(7.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium.copy(
-                fontSize = 11.5.sp,
-                letterSpacing = 0.2.sp,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
-            ),
-            color = if (selected) Accent else TextSecondary,
-            fontFamily = MonoFont,
-            maxLines = 1
-        )
-    }
-}
-
-@Composable
 private fun FileTile(
     file: RemoteFile,
     onOpen: () -> Unit,
     onAction: (FileAction) -> Unit
 ) {
     var menu by remember { mutableStateOf(false) }
-    Surface(
-        color = SurfaceRaised.copy(alpha = 0.44f),
-        shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(1.dp, if (file.isDirectory) Warning.copy(alpha = 0.16f) else OutlineDark.copy(alpha = 0.62f)),
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).clickable(onClick = onOpen)
-    ) {
-        Column(Modifier.padding(start = 12.dp, end = 6.dp, top = 10.dp, bottom = 12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                FileGlyph(file)
-                Spacer(Modifier.weight(1f))
-                Box(
-                    modifier = Modifier.size(30.dp).clip(CircleShape).clickable { menu = true },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Default.MoreVert,
-                        contentDescription = "Actions for ${file.name}",
-                        tint = TextSecondary,
-                        modifier = Modifier.size(17.dp)
+    val shape = RoundedCornerShape(12.dp)
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Surface(
+            color = SurfaceRaised.copy(alpha = 0.44f),
+            shape = shape,
+            border = BorderStroke(
+                0.5.dp,
+                if (file.isDirectory) Warning.copy(alpha = 0.16f) else OutlineDark.copy(alpha = 0.62f)
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .clickable(onClick = onOpen)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 82.dp)
+                    .padding(start = 5.dp, end = 5.dp, top = 10.dp, bottom = 7.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                FileGlyph(file, size = 28.dp)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    file.name,
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontSize = 11.sp,
+                        lineHeight = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    ),
+                    color = TextPrimary,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (!file.isDirectory) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        formatBytes(file.size),
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.5.sp),
+                        color = TextFaint,
+                        fontFamily = MonoFont,
+                        maxLines = 1
                     )
-                    FileActionMenu(file = file, expanded = menu, onDismiss = { menu = false }, onAction = onAction)
                 }
             }
-            Spacer(Modifier.height(9.dp))
-            Text(
-                file.name,
-                style = MaterialTheme.typography.titleSmall,
-                color = TextPrimary,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                fileSizeLabel(file),
-                style = MaterialTheme.typography.labelSmall,
-                color = TextFaint,
-                fontFamily = MonoFont,
-                maxLines = 1
+        }
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(2.dp)
+                .size(24.dp)
+                .clip(CircleShape)
+                .clickable { menu = true },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Default.MoreVert,
+                contentDescription = "Actions for ${file.name}",
+                tint = TextSecondary,
+                modifier = Modifier.size(14.dp)
             )
         }
+        FileActionMenu(file = file, expanded = menu, onDismiss = { menu = false }, onAction = onAction)
     }
 }
 
@@ -818,7 +828,7 @@ private fun FileActionMenu(
                 onClick = { onDismiss(); onAction(FileAction.TAR) }
             )
         }
-        if (file.name.endsWith(".tar.gz") || file.name.endsWith(".tgz")) {
+        if (isTarArchive(file.name)) {
             DropdownMenuItem(
                 text = { Text("Extract", color = TextPrimary) },
                 leadingIcon = { Icon(Icons.Default.Unarchive, contentDescription = null, tint = TextSecondary) },
@@ -834,24 +844,6 @@ private fun FileActionMenu(
 }
 
 @Composable
-private fun FileListHeader() {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 16.dp, end = 50.dp, top = 4.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            "NAME",
-            style = MaterialTheme.typography.labelSmall,
-            color = TextFaint,
-            modifier = Modifier.weight(1f)
-        )
-        Text("SIZE", style = MaterialTheme.typography.labelSmall, color = TextFaint)
-    }
-}
-
-@Composable
 private fun FileRow(
     file: RemoteFile,
     onOpen: () -> Unit,
@@ -861,17 +853,18 @@ private fun FileRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 54.dp)
+            .heightIn(min = 46.dp)
             .clickable(onClick = onOpen)
-            .padding(start = 14.dp, end = 2.dp, top = 6.dp, bottom = 6.dp),
+            .padding(start = 12.dp, end = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        FileGlyph(file, size = 30.dp)
-        Spacer(Modifier.width(11.dp))
+        FileGlyph(file, size = 28.dp)
+        Spacer(Modifier.width(10.dp))
         Text(
             text = file.name,
             style = MaterialTheme.typography.titleSmall.copy(
-                fontSize = 14.5.sp,
+                fontSize = 13.5.sp,
+                lineHeight = 18.sp,
                 fontWeight = FontWeight.Medium
             ),
             color = MaterialTheme.colorScheme.onSurface,
@@ -882,7 +875,7 @@ private fun FileRow(
         Spacer(Modifier.width(8.dp))
         Text(
             text = fileSizeLabel(file),
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
             color = TextFaint,
             fontFamily = MonoFont,
             maxLines = 1
@@ -892,12 +885,12 @@ private fun FileRow(
                 Icons.Default.ChevronRight,
                 contentDescription = null,
                 tint = TextFaint,
-                modifier = Modifier.size(14.dp)
+                modifier = Modifier.size(13.dp)
             )
         }
         Box(
             modifier = Modifier
-                .size(42.dp)
+                .size(36.dp)
                 .clip(CircleShape)
                 .clickable { menu = true },
             contentAlignment = Alignment.Center
@@ -906,15 +899,15 @@ private fun FileRow(
                 Icons.Default.MoreVert,
                 contentDescription = "Actions for ${file.name}",
                 tint = TextSecondary,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier.size(16.dp)
             )
             FileActionMenu(file = file, expanded = menu, onDismiss = { menu = false }, onAction = onAction)
         }
     }
     HorizontalDivider(
-        modifier = Modifier.padding(start = 55.dp, end = 14.dp),
+        modifier = Modifier.padding(start = 50.dp, end = 12.dp),
         thickness = 0.5.dp,
-        color = OutlineDark.copy(alpha = 0.45f)
+        color = OutlineDark.copy(alpha = 0.35f)
     )
 }
 
@@ -961,8 +954,11 @@ private fun isImageFile(name: String): Boolean =
     name.substringAfterLast('.', "").lowercase(Locale.US) in
         setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "heic")
 
+private fun isTarArchive(name: String): Boolean =
+    name.endsWith(".tar.gz", true) || name.endsWith(".tgz", true)
+
 private fun isArchiveFile(name: String): Boolean =
-    name.endsWith(".tar.gz", true) || name.endsWith(".tgz", true) ||
+    isTarArchive(name) ||
         name.substringAfterLast('.', "").lowercase(Locale.US) in
         setOf("zip", "gz", "bz2", "xz", "7z", "rar", "tar")
 
@@ -973,6 +969,17 @@ private fun isCodeFile(name: String): Boolean =
         "toml", "xml", "html", "css", "scss", "sql", "md", "gradle", "properties"
     )
 
+private fun isTextFile(name: String): Boolean =
+    isCodeFile(name) ||
+        name.substringAfterLast('.', "").lowercase(Locale.US) in setOf(
+            "txt", "log", "csv", "tsv", "ini", "conf", "cfg", "env", "service",
+            "rst", "tex", "diff", "patch"
+        ) ||
+        name.lowercase(Locale.US) in setOf(
+            "dockerfile", "makefile", "readme", "license", "procfile",
+            ".gitignore", ".gitattributes", ".env"
+        )
+
 private fun isVideoFile(name: String): Boolean =
     name.substringAfterLast('.', "").lowercase(Locale.US) in
         setOf("mp4", "mkv", "mov", "webm", "avi", "m4v")
@@ -980,6 +987,816 @@ private fun isVideoFile(name: String): Boolean =
 private fun isAudioFile(name: String): Boolean =
     name.substringAfterLast('.', "").lowercase(Locale.US) in
         setOf("mp3", "flac", "wav", "ogg", "m4a", "aac", "opus")
+
+private const val MAX_TEXT_PREVIEW_BYTES = 256 * 1024
+private const val PREVIEW_CACHE_PREFIX = "pvps-preview-"
+private const val PREVIEW_CACHE_MAX_AGE_MS = 24L * 60L * 60L * 1000L
+
+private enum class PreviewKind { IMAGE, PDF, VIDEO, AUDIO, TEXT, ARCHIVE, UNSUPPORTED }
+
+private sealed interface PreviewContent {
+    data object Loading : PreviewContent
+    data class Error(val message: String) : PreviewContent
+    data class Image(val file: File) : PreviewContent
+    data class Pdf(val file: File, val pageCount: Int) : PreviewContent
+    data class Video(val file: File) : PreviewContent
+    data class Audio(val file: File) : PreviewContent
+    data class Text(val body: String, val truncated: Boolean) : PreviewContent
+    data class Archive(val entries: List<String>) : PreviewContent
+    data class Unsupported(val message: String) : PreviewContent
+}
+
+private sealed interface PdfPageRender {
+    data object Loading : PdfPageRender
+    data class Ready(val bitmap: Bitmap) : PdfPageRender
+    data class Failed(val message: String) : PdfPageRender
+}
+
+private fun previewKind(file: RemoteFile): PreviewKind = when {
+    file.isDirectory -> PreviewKind.UNSUPPORTED
+    isImageFile(file.name) -> PreviewKind.IMAGE
+    file.name.endsWith(".pdf", true) -> PreviewKind.PDF
+    isVideoFile(file.name) -> PreviewKind.VIDEO
+    isAudioFile(file.name) -> PreviewKind.AUDIO
+    isTarArchive(file.name) -> PreviewKind.ARCHIVE
+    isTextFile(file.name) -> PreviewKind.TEXT
+    else -> PreviewKind.UNSUPPORTED
+}
+
+private fun previewKindLabel(kind: PreviewKind): String = when (kind) {
+    PreviewKind.IMAGE -> "IMAGE"
+    PreviewKind.PDF -> "PDF"
+    PreviewKind.VIDEO -> "VIDEO"
+    PreviewKind.AUDIO -> "AUDIO"
+    PreviewKind.TEXT -> "TEXT"
+    PreviewKind.ARCHIVE -> "ARCHIVE"
+    PreviewKind.UNSUPPORTED -> "FILE"
+}
+
+private fun previewUnsupportedMessage(file: RemoteFile): String =
+    if (isArchiveFile(file.name)) {
+        "Inline preview is not available for this archive format. Download it to inspect it on this device."
+    } else {
+        "This file type has no inline preview. Download it to open it with another app."
+    }
+
+private fun previewCacheKey(file: RemoteFile): String {
+    val raw = "${file.path}|${file.size}|${file.modified}"
+    return Integer.toHexString(raw.hashCode()) + "-" + file.size + "-" + file.modified
+}
+
+private fun previewTempFile(cacheDir: File, file: RemoteFile): File {
+    val extension = file.name.substringAfterLast('.', "").lowercase(Locale.US)
+        .takeIf { it.length in 1..6 && it.all { ch -> ch.isLetterOrDigit() } }
+        ?: "bin"
+    val prefix = "$PREVIEW_CACHE_PREFIX${previewCacheKey(file)}-"
+    return runCatching { File.createTempFile(prefix, ".$extension", cacheDir) }
+        .getOrElse { File(cacheDir, "$prefix${System.nanoTime()}.$extension") }
+}
+
+private fun cleanupStalePreviewFiles(cacheDir: File) {
+    val cutoff = System.currentTimeMillis() - PREVIEW_CACHE_MAX_AGE_MS
+    cacheDir.listFiles()?.forEach { file ->
+        if (file.isFile && file.name.startsWith(PREVIEW_CACHE_PREFIX) && file.lastModified() < cutoff) {
+            runCatching { file.delete() }
+        }
+    }
+}
+
+private suspend fun loadPdfPageCount(file: File): Int = withContext(Dispatchers.IO) {
+    ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+        PdfRenderer(descriptor).use { renderer -> renderer.pageCount }
+    }
+}
+
+@Composable
+private fun FilePreviewDialog(
+    file: RemoteFile,
+    sftp: SftpClient?,
+    cacheDir: File,
+    onDismiss: () -> Unit,
+    onDownload: () -> Unit,
+    onExtract: (() -> Unit)?
+) {
+    val kind = remember(file.path, file.size, file.modified) { previewKind(file) }
+    val cacheKey = remember(file.path, file.size, file.modified) { previewCacheKey(file) }
+    var attempt by remember(file.path, file.size, file.modified) { mutableIntStateOf(0) }
+    var content by remember(file.path, file.size, file.modified) {
+        mutableStateOf<PreviewContent>(PreviewContent.Loading)
+    }
+    val scope = rememberCoroutineScope()
+
+    DisposableEffect(file.path, file.size, file.modified, attempt) {
+        content = PreviewContent.Loading
+        val temp = previewTempFile(cacheDir, file)
+        val job = scope.launch {
+            val client = sftp
+            if (client == null) {
+                content = PreviewContent.Error("SSH is not connected.")
+                return@launch
+            }
+            content = runCatching {
+                when (kind) {
+                    PreviewKind.UNSUPPORTED -> PreviewContent.Unsupported(previewUnsupportedMessage(file))
+                    PreviewKind.TEXT -> {
+                        val body = client.readText(file.path, MAX_TEXT_PREVIEW_BYTES)
+                        PreviewContent.Text(body, file.size > MAX_TEXT_PREVIEW_BYTES)
+                    }
+                    PreviewKind.ARCHIVE -> PreviewContent.Archive(client.listTar(file.path))
+                    PreviewKind.IMAGE -> {
+                        client.download(file.path, temp)
+                        PreviewContent.Image(temp)
+                    }
+                    PreviewKind.PDF -> {
+                        client.download(file.path, temp)
+                        PreviewContent.Pdf(temp, loadPdfPageCount(temp))
+                    }
+                    PreviewKind.VIDEO -> {
+                        client.download(file.path, temp)
+                        PreviewContent.Video(temp)
+                    }
+                    PreviewKind.AUDIO -> {
+                        client.download(file.path, temp)
+                        PreviewContent.Audio(temp)
+                    }
+                }
+            }.getOrElse { throwable ->
+                if (throwable is CancellationException) throw throwable
+                PreviewContent.Error(throwable.message ?: "Preview failed.")
+            }
+        }
+        onDispose {
+            job.cancel()
+            runCatching { temp.delete() }
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            dismissOnBackPress = true,
+            dismissOnClickOutside = false,
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(SurfaceDark)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .safeDrawingPadding()
+            ) {
+                PreviewTopBar(
+                    file = file,
+                    kind = kind,
+                    onDismiss = onDismiss,
+                    onDownload = onDownload,
+                    onExtract = onExtract
+                )
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = OutlineDark.copy(alpha = 0.9f)
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) {
+                    when (val state = content) {
+                        PreviewContent.Loading -> PreviewLoading()
+                        is PreviewContent.Error -> PreviewStateMessage(
+                            icon = Icons.Outlined.ErrorOutline,
+                            title = "Preview failed",
+                            message = state.message,
+                            primaryLabel = "RETRY",
+                            onPrimary = {
+                                content = PreviewContent.Loading
+                                attempt++
+                            },
+                            secondaryLabel = "DOWNLOAD",
+                            onSecondary = onDownload
+                        )
+                        is PreviewContent.Image -> PreviewImage(
+                            file = state.file,
+                            cacheKey = cacheKey,
+                            name = file.name
+                        )
+                        is PreviewContent.Pdf -> PdfPreview(
+                            file = state.file,
+                            pageCount = state.pageCount
+                        )
+                        is PreviewContent.Video -> VideoPreview(state.file)
+                        is PreviewContent.Audio -> AudioPreview(state.file)
+                        is PreviewContent.Text -> TextPreview(
+                            body = state.body,
+                            truncated = state.truncated,
+                            fileSize = file.size
+                        )
+                        is PreviewContent.Archive -> ArchivePreview(state.entries)
+                        is PreviewContent.Unsupported -> PreviewStateMessage(
+                            icon = Icons.Outlined.Description,
+                            title = "No preview available",
+                            message = state.message,
+                            primaryLabel = "DOWNLOAD",
+                            onPrimary = onDownload
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PreviewTopBar(
+    file: RemoteFile,
+    kind: PreviewKind,
+    onDismiss: () -> Unit,
+    onDownload: () -> Unit,
+    onExtract: (() -> Unit)?
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .padding(start = 4.dp, end = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        CompactIconButton(
+            icon = Icons.Default.Close,
+            contentDescription = "Close preview",
+            tint = TextPrimary,
+            onClick = onDismiss
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 8.dp)
+        ) {
+            Text(
+                text = file.name,
+                style = MaterialTheme.typography.titleSmall.copy(
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold
+                ),
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "${previewKindLabel(kind)} · ${fileSizeLabel(file)}",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.5.sp),
+                color = TextFaint,
+                fontFamily = MonoFont,
+                maxLines = 1
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (onExtract != null) {
+                CompactIconButton(
+                    icon = Icons.Default.Unarchive,
+                    contentDescription = "Extract archive",
+                    onClick = onExtract
+                )
+            }
+            CompactIconButton(
+                icon = Icons.Default.Download,
+                contentDescription = "Download file",
+                onClick = onDownload
+            )
+        }
+    }
+}
+
+@Composable
+private fun PreviewLoading() {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator(color = Accent, strokeWidth = 2.dp)
+            Spacer(Modifier.height(14.dp))
+            Text(
+                "Preparing preview...",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary
+            )
+        }
+    }
+}
+
+@Composable
+private fun PreviewStateMessage(
+    icon: ImageVector,
+    title: String,
+    message: String,
+    primaryLabel: String? = null,
+    onPrimary: (() -> Unit)? = null,
+    secondaryLabel: String? = null,
+    onSecondary: (() -> Unit)? = null
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(SurfaceRaised.copy(alpha = 0.55f))
+                .border(0.5.dp, OutlineDark, RoundedCornerShape(14.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = TextFaint,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleLarge,
+            color = TextPrimary,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodySmall,
+            color = TextSecondary,
+            textAlign = TextAlign.Center
+        )
+        if (primaryLabel != null && onPrimary != null) {
+            Spacer(Modifier.height(16.dp))
+            TextButton(onClick = onPrimary) {
+                Text(primaryLabel, color = Accent, style = MaterialTheme.typography.labelLarge)
+            }
+        }
+        if (secondaryLabel != null && onSecondary != null) {
+            TextButton(onClick = onSecondary) {
+                Text(secondaryLabel, color = TextSecondary, style = MaterialTheme.typography.labelLarge)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PreviewImage(file: File, cacheKey: String, name: String) {
+    val context = LocalContext.current
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+        contentAlignment = Alignment.Center
+    ) {
+        SubcomposeAsyncImage(
+            model = ImageRequest.Builder(context)
+                .data(file)
+                .memoryCacheKey("preview-$cacheKey")
+                .diskCacheKey("preview-$cacheKey")
+                .memoryCachePolicy(CachePolicy.DISABLED)
+                .diskCachePolicy(CachePolicy.DISABLED)
+                .crossfade(true)
+                .build(),
+            contentDescription = name,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(4.dp),
+            contentScale = ContentScale.Fit,
+            loading = {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp)
+                }
+            },
+            error = {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "Could not decode this image.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.78f),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun PdfPreview(file: File, pageCount: Int) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0A0A0B)),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        items(pageCount) { index ->
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                    PdfPageImage(
+                        file = file,
+                        pageIndex = index,
+                        targetWidthPx = constraints.maxWidth.coerceAtLeast(320)
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "${index + 1} / $pageCount",
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.5.sp),
+                    color = TextFaint,
+                    fontFamily = MonoFont
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PdfPageImage(file: File, pageIndex: Int, targetWidthPx: Int) {
+    val render by produceState<PdfPageRender>(
+        PdfPageRender.Loading,
+        file.absolutePath,
+        pageIndex,
+        targetWidthPx
+    ) {
+        value = withContext(Dispatchers.IO) { renderPdfPage(file, pageIndex, targetWidthPx) }
+    }
+    Surface(
+        color = Color.White,
+        shape = RoundedCornerShape(4.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        when (val state = render) {
+            PdfPageRender.Loading -> Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(280.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = Accent, strokeWidth = 2.dp)
+            }
+            is PdfPageRender.Ready -> ComposeImage(
+                bitmap = state.bitmap.asImageBitmap(),
+                contentDescription = "PDF page ${pageIndex + 1}",
+                modifier = Modifier.fillMaxWidth(),
+                contentScale = ContentScale.FillWidth
+            )
+            is PdfPageRender.Failed -> Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(140.dp)
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = state.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF8A8D80),
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    }
+}
+
+private fun renderPdfPage(file: File, pageIndex: Int, targetWidthPx: Int): PdfPageRender = try {
+    ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+        PdfRenderer(descriptor).use { renderer ->
+            if (pageIndex !in 0 until renderer.pageCount) {
+                PdfPageRender.Failed("Page ${pageIndex + 1} is not available.")
+            } else {
+                renderer.openPage(pageIndex).use { page ->
+                    val sourceWidth = page.width.coerceAtLeast(1)
+                    val sourceHeight = page.height.coerceAtLeast(1)
+                    var scale = targetWidthPx.toFloat() / sourceWidth
+                    val maxHeight = 4096f
+                    if (sourceHeight * scale > maxHeight) scale = maxHeight / sourceHeight
+                    val bitmapWidth = (sourceWidth * scale).roundToInt().coerceAtLeast(1)
+                    val bitmapHeight = (sourceHeight * scale).roundToInt().coerceAtLeast(1)
+                    val bitmap = Bitmap.createBitmap(bitmapWidth, bitmapHeight, Bitmap.Config.ARGB_8888)
+                    bitmap.eraseColor(AndroidColor.WHITE)
+                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    PdfPageRender.Ready(bitmap)
+                }
+            }
+        }
+    }
+} catch (error: Exception) {
+    PdfPageRender.Failed(error.message ?: "Could not render this page.")
+} catch (error: OutOfMemoryError) {
+    PdfPageRender.Failed("This page is too large to render.")
+}
+
+@Composable
+private fun VideoPreview(file: File) {
+    val context = LocalContext.current
+    var playbackError by remember(file.absolutePath) { mutableStateOf<String?>(null) }
+    val videoView = remember(file.absolutePath) { VideoView(context) }
+
+    DisposableEffect(videoView, file.absolutePath) {
+        val controller = MediaController(context)
+        controller.setAnchorView(videoView)
+        videoView.setMediaController(controller)
+        videoView.setOnPreparedListener { player ->
+            player.setVolume(1f, 1f)
+            videoView.start()
+        }
+        videoView.setOnErrorListener { _, what, extra ->
+            playbackError = "Video playback failed ($what/$extra)."
+            true
+        }
+        runCatching { videoView.setVideoPath(file.absolutePath) }
+            .onFailure { playbackError = it.message ?: "Could not open this video." }
+        onDispose {
+            runCatching { videoView.setMediaController(null) }
+            runCatching { videoView.stopPlayback() }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        AndroidView(
+            factory = { videoView },
+            modifier = Modifier.fillMaxSize()
+        )
+        playbackError?.let { message ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.78f),
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AudioPreview(file: File) {
+    val player = remember(file.absolutePath) { MediaPlayer() }
+    var prepared by remember(file.absolutePath) { mutableStateOf(false) }
+    var playing by remember(file.absolutePath) { mutableStateOf(false) }
+    var durationMs by remember(file.absolutePath) { mutableLongStateOf(0L) }
+    var positionMs by remember(file.absolutePath) { mutableLongStateOf(0L) }
+    var playbackError by remember(file.absolutePath) { mutableStateOf<String?>(null) }
+
+    DisposableEffect(player, file.absolutePath) {
+        player.setOnPreparedListener { mediaPlayer ->
+            prepared = true
+            durationMs = mediaPlayer.duration.coerceAtLeast(0).toLong()
+            mediaPlayer.start()
+            playing = true
+        }
+        player.setOnCompletionListener {
+            playing = false
+            positionMs = durationMs
+        }
+        player.setOnErrorListener { _, what, extra ->
+            playbackError = "Audio playback failed ($what/$extra)."
+            true
+        }
+        runCatching {
+            player.setDataSource(file.absolutePath)
+            player.prepareAsync()
+        }.onFailure { playbackError = it.message ?: "Could not open this audio file." }
+        onDispose {
+            player.setOnPreparedListener(null)
+            player.setOnCompletionListener(null)
+            player.setOnErrorListener(null)
+            runCatching { if (player.isPlaying) player.stop() }
+            runCatching { player.reset() }
+            runCatching { player.release() }
+        }
+    }
+
+    LaunchedEffect(playing, prepared) {
+        while (playing) {
+            positionMs = runCatching { player.currentPosition.toLong() }.getOrDefault(positionMs)
+            delay(350)
+        }
+    }
+
+    val progress = if (durationMs > 0L) {
+        (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(SurfaceDark),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Violet.copy(alpha = 0.10f))
+                    .border(0.5.dp, Violet.copy(alpha = 0.24f), RoundedCornerShape(20.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Outlined.AudioFile,
+                    contentDescription = null,
+                    tint = Violet,
+                    modifier = Modifier.size(30.dp)
+                )
+            }
+            Spacer(Modifier.height(14.dp))
+            Text(
+                text = file.name,
+                style = MaterialTheme.typography.titleMedium,
+                color = TextPrimary,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = when {
+                    playbackError != null -> playbackError!!
+                    !prepared -> "Preparing audio..."
+                    else -> "${formatDuration(positionMs)} / ${formatDuration(durationMs)}"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = if (playbackError != null) Danger else TextFaint,
+                fontFamily = MonoFont,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(20.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .clip(CircleShape)
+                    .background(OutlineDark)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(progress)
+                        .height(3.dp)
+                        .background(Accent)
+                )
+            }
+            Spacer(Modifier.height(18.dp))
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(if (prepared && playbackError == null) Accent else Accent.copy(alpha = 0.35f))
+                    .clickable(enabled = prepared && playbackError == null) {
+                        runCatching {
+                            if (playing) {
+                                player.pause()
+                                playing = false
+                            } else {
+                                if (durationMs > 0L && positionMs >= durationMs) {
+                                    player.seekTo(0)
+                                    positionMs = 0L
+                                }
+                                player.start()
+                                playing = true
+                            }
+                        }.onFailure {
+                            playbackError = it.message ?: "Playback failed."
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (playing) "Pause" else "Play",
+                    tint = OnAccent,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TextPreview(body: String, truncated: Boolean, fileSize: Long) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        if (truncated) {
+            Surface(
+                color = Warning.copy(alpha = 0.10f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "Showing first ${formatBytes(MAX_TEXT_PREVIEW_BYTES.toLong())} of ${formatBytes(fileSize)}",
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                    color = Warning,
+                    fontFamily = MonoFont
+                )
+            }
+            HorizontalDivider(
+                thickness = 0.5.dp,
+                color = OutlineDark.copy(alpha = 0.6f)
+            )
+        }
+        SelectionContainer(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    text = body.ifEmpty { "(empty file)" },
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = MonoFont,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp
+                    ),
+                    color = TextPrimary
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ArchivePreview(entries: List<String>) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+    ) {
+        item {
+            Text(
+                text = if (entries.isEmpty()) "Empty archive" else "${entries.size} entries",
+                modifier = Modifier.padding(bottom = 6.dp),
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                color = TextFaint,
+                fontFamily = MonoFont
+            )
+        }
+        items(entries) { entry ->
+            Text(
+                text = entry,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 5.dp),
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
+                fontFamily = MonoFont,
+                color = TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            HorizontalDivider(
+                thickness = 0.5.dp,
+                color = OutlineSoft.copy(alpha = 0.6f)
+            )
+        }
+    }
+}
+
+private fun formatDuration(milliseconds: Long): String {
+    val totalSeconds = (milliseconds / 1000L).coerceAtLeast(0L)
+    val minutes = totalSeconds / 60L
+    val seconds = totalSeconds % 60L
+    return String.format(Locale.US, "%d:%02d", minutes, seconds)
+}
 
 @Composable
 private fun DirectoryEmpty(modifier: Modifier = Modifier) {

@@ -21,6 +21,8 @@ import dev.pvps.R
  */
 object AppNotifications {
 
+    const val EXTRA_SESSION_ID = "opencode_session"
+
     private const val CHANNEL_ID = "opencode_events"
     private const val GROUP = "dev.pvps.opencode"
     private var appContext: Context? = null
@@ -83,7 +85,7 @@ object AppNotifications {
         }
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("opencode_session", sessionId)
+            putExtra(EXTRA_SESSION_ID, sessionId)
         }
         val pending = PendingIntent.getActivity(
             context,

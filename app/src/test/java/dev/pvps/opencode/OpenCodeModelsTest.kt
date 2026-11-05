@@ -69,6 +69,35 @@ class OpenCodeModelsTest {
     }
 
     @Test
+    fun terminalOutcomeOverridesStaleBusyTimestamp() {
+        val staleSucceeded = SessionInfo(
+            time = SessionTime(busy = 30, idle = 20),
+            outcome = "succeeded"
+        )
+        val active = SessionInfo(
+            time = SessionTime(busy = 30, idle = 20),
+            outcome = "running"
+        )
+        assertEquals(false, staleSucceeded.isRunning)
+        assertEquals(true, active.isRunning)
+    }
+
+    @Test
+    fun projectArrayParsesCanonicalDisplayName() {
+        val raw = """
+            [{"id":"prj_1","canonical":"/home/ubuntu/work/",
+              "name":"Work","vcs":"git","time":{"created":1,"updated":2},
+              "sandboxes":[]}]
+        """.trimIndent()
+        val projects = json.decodeFromString(
+            kotlinx.serialization.builtins.ListSerializer(ProjectInfo.serializer()),
+            raw
+        )
+        assertEquals("Work", projects.single().displayName)
+        assertEquals("git", projects.single().vcs)
+    }
+
+    @Test
     fun latestMessagePageKeepsCursorAndStreamingTiming() {
         val raw = """
             {

@@ -103,6 +103,7 @@ fun AppRoot(viewModel: AppViewModel) {
         route in setOf("home", "chat", "files", "terminal", "more") &&
         !imeVisible
     val settings = viewModel.settings.collectAsStateValue()
+    val pendingOpenSession = viewModel.pendingOpenSession.collectAsStateValue()
     val updateState = viewModel.updateState.collectAsStateValue()
     val needsUnknownSources = viewModel.needsUnknownSources.collectAsStateValue()
     val pendingHost = hosts.firstOrNull {
@@ -113,6 +114,14 @@ fun AppRoot(viewModel: AppViewModel) {
     LaunchedEffect(Unit) {
         // A debug APK cannot install a release-signed APK. Only auto-check in release.
         if (!BuildConfig.DEBUG) viewModel.checkForUpdates()
+    }
+
+    LaunchedEffect(pendingOpenSession) {
+        if (pendingOpenSession != null) {
+            navController.navigate("chat") {
+                launchSingleTop = true
+            }
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {

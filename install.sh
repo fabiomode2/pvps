@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 #
-# PVPS VPS bootstrap for Ubuntu/Debian.
+# PVPS bootstrap for Ubuntu/Debian.
 #
 # Installs OpenCode v2 as a per-user systemd service on 127.0.0.1:49374,
-# stores its basic-auth password in /etc/pvps/opencode.env, and prints a
-# pvps-setup: code that can be pasted into the Android app.
+# stores its basic-auth password in /etc/pvps/opencode.env (root:root 0600),
+# adds the phone's SSH public key to ~/.ssh/authorized_keys, and prints a
+# single-line PVPS1 setup code (pvps-setup: prefix) that the app imports.
 #
 # Run as your normal user (the script uses sudo where needed), NOT as root:
 #   curl -fsSL https://github.com/fabiomode2/pvps/releases/latest/download/install.sh | bash
 #
-# Optional:
+# The only interactive question is the phone SSH public key. It can be pasted
+# from the app or given as a path to a .pub file. For unattended installs use:
 #   PVPS_SSH_PUBKEY="$(cat phone.pub)" bash install.sh
+#
+# Optional:
 #   PVPS_HOST=203.0.113.10 bash install.sh
 #   PVPS_SSH_PORT=2222 bash install.sh
 #   bash install.sh --tailscale
@@ -23,6 +27,10 @@
 # signed into the same tailnet. Use --tailscale (or PVPS_HOST) when the phone
 # is on the tailnet and the public SSH port is not exposed.
 #
+# The setup code contains the OpenCode password. It is printed to the terminal,
+# or written to ~/.pvps-setup-code (0600) when no terminal is attached. Treat
+# the code as secret.
+#
 set -euo pipefail
 
 OC_PORT=49374
@@ -32,14 +40,17 @@ ENV_DIR=/etc/pvps
 ENV_FILE="${ENV_DIR}/opencode.env"
 UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}"
 SSHD_DROPIN=/etc/ssh/sshd_config.d/99-pvps.conf
+KEY_MARKER=pvps
 
 REPLACE=0
 ENABLE_SWAP=0
 HARDEN_SSH=0
 PREFER_TAILSCALE="${PVPS_PREFER_TAILSCALE:-0}"
+NONINTERACTIVE="${PVPS_NONINTERACTIVE:-0}"
 UNIT_CHANGED=0
 PASSWORD=""
 SSH_PORT=""
+SSH_KEY_TEXT=""
 
 usage() {
   cat <<'EOF'
@@ -54,12 +65,13 @@ Usage: install.sh [--tailscale] [--swap] [--harden-ssh] [--replace]
                 holding port 49374. Never kills an unknown process.
 
 Environment:
-  PVPS_SSH_PUBKEY         Public key to append to ~/.ssh/authorized_keys
-                          (marker: pvps).
+  PVPS_SSH_PUBKEY         Phone public key text, or a path to a .pub file.
+                          Prompted on a terminal when unset.
   PVPS_HOST               Host/IP to put in the setup code (overrides detection).
   PVPS_SSH_PORT           SSH port to put in the setup code (default: detected
                           from sshd, otherwise 22).
   PVPS_PREFER_TAILSCALE   Set to 1 for the same effect as --tailscale.
+  PVPS_NONINTERACTIVE     Set to 1 to never prompt (for CI/unattended runs).
 EOF
 }
 
@@ -67,9 +79,18 @@ say() { printf '\n==> %s\n' "$*"; }
 warn() { printf 'WARNING: %s\n' "$*" >&2; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
-if [[ "${EUID}" -eq 0 ]]; then
-  die "Run as your normal user, not root. The script uses sudo where needed."
-fi
+is_true() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+has_tty() {
+  # /dev/tty exists even without a controlling terminal; opening it is the
+  # reliable check. Do not rely on -r/-w mode bits, which are always set.
+  ( exec 3<>/dev/tty ) 2>/dev/null
+}
 
 while (( $# > 0 )); do
   case "$1" in
@@ -82,6 +103,10 @@ while (( $# > 0 )); do
   esac
   shift
 done
+
+if [[ "${EUID}" -eq 0 ]]; then
+  die "Run as your normal user, not root. The script uses sudo where needed."
+fi
 
 RUN_USER="$(id -un)"
 HOME="${HOME%/}"
@@ -100,57 +125,159 @@ trap 'rm -rf "${WORK_DIR}"' EXIT
 
 if ! sudo -n true 2>/dev/null; then
   say "sudo is required; you may be asked for your password"
-  sudo -v
+  sudo -v || die "sudo authentication failed."
 fi
 
-say "Installing base packages"
-APT_OPTS=(-o DPkg::Lock::Timeout=300 -o Acquire::Retries=3)
-sudo apt-get "${APT_OPTS[@]}" update
-sudo env DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" install -y --no-install-recommends \
-  curl ca-certificates tmux openssl python3 unzip
+install_base_packages() {
+  local pkg status missing=()
+
+  for pkg in curl ca-certificates tmux openssl python3 unzip; do
+    status="$(dpkg-query -W -f='${Status}' "${pkg}" 2>/dev/null || true)"
+    if [[ "${status}" != *"ok installed"* ]]; then
+      missing+=("${pkg}")
+    fi
+  done
+
+  if (( ${#missing[@]} == 0 )); then
+    say "Base packages are already installed"
+    return 0
+  fi
+
+  say "Installing base packages: ${missing[*]}"
+  local APT_OPTS=(-o DPkg::Lock::Timeout=300 -o Acquire::Retries=3)
+  sudo apt-get "${APT_OPTS[@]}" update
+  sudo env DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" install -y --no-install-recommends \
+    "${missing[@]}"
+}
+
+expand_path() {
+  local tilde='~'
+  case "${1:-}" in
+    "${tilde}") printf '%s' "${HOME}" ;;
+    "${tilde}/"*) printf '%s/%s' "${HOME}" "${1#"${tilde}/"}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+strip_quotes() {
+  local value="${1:-}"
+  value="${value%\"}"; value="${value#\"}"
+  value="${value%\'}"; value="${value#\'}"
+  printf '%s' "${value}"
+}
+
+trim_value() {
+  local value="${1:-}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "${value}"
+}
+
+resolve_key_input() {
+  local value="${1:-}"
+
+  [[ -n "${value}" ]] || return 0
+  if [[ -f "${value}" ]]; then
+    cat -- "${value}"
+    return 0
+  fi
+  case "${value}" in
+    ssh-*|ecdsa-*|sk-*) printf '%s' "${value}" ;;
+    *) warn "Not a public key or readable file: ${value}" ;;
+  esac
+}
+
+read_phone_key_from_tty() {
+  local value=""
+
+  exec 3<>/dev/tty || return 0
+  printf '\nPhone SSH public key\n' >&3
+  printf 'In the app: SSH keys -> + -> copy the public key.\n' >&3
+  printf 'Paste the key or a path to a .pub file (Enter to skip): ' >&3
+  IFS= read -r value <&3 || value=""
+  exec 3>&-
+  value="$(trim_value "$(strip_quotes "${value}")")"
+  value="$(expand_path "${value}")"
+  SSH_KEY_TEXT="$(resolve_key_input "${value}")"
+}
+
+collect_phone_key() {
+  local value=""
+
+  # An explicitly set (even empty) PVPS_SSH_PUBKEY wins over prompting.
+  if [[ ${PVPS_SSH_PUBKEY+x} ]]; then
+    value="$(trim_value "$(strip_quotes "${PVPS_SSH_PUBKEY}")")"
+    value="$(expand_path "${value}")"
+    SSH_KEY_TEXT="$(resolve_key_input "${value}")"
+    return 0
+  fi
+
+  if is_true "${NONINTERACTIVE}"; then
+    SSH_KEY_TEXT=""
+    return 0
+  fi
+
+  if has_tty; then
+    read_phone_key_from_tty
+  fi
+}
 
 install_ssh_key() {
-  local raw key_type key_data _rest entry added=0
+  local raw key_type key_data rest entry added=0
 
-  if [[ -z "${PVPS_SSH_PUBKEY:-}" ]]; then
+  if [[ -z "${SSH_KEY_TEXT}" ]]; then
     cat <<'EOF'
-No PVPS_SSH_PUBKEY was provided. Add the phone key manually:
+No phone SSH key was installed. Add it later with:
 
   mkdir -p ~/.ssh && chmod 700 ~/.ssh
   echo 'ssh-ed25519 AAAA... pvps' >> ~/.ssh/authorized_keys
   chmod 600 ~/.ssh/authorized_keys
 
-Or re-run with:
+Or re-run:
   PVPS_SSH_PUBKEY="$(cat phone-key.pub)" bash install.sh
 
-If a phone key is already authorized, nothing else is needed.
+If the phone key is already authorized, nothing else is needed.
 EOF
     return 0
   fi
 
   install -d -m 700 "${HOME}/.ssh"
-  touch "${HOME}/.ssh/authorized_keys"
+  chmod 700 "${HOME}/.ssh"
+  if [[ ! -e "${HOME}/.ssh/authorized_keys" ]]; then
+    install -m 600 /dev/null "${HOME}/.ssh/authorized_keys"
+  fi
   chmod 600 "${HOME}/.ssh/authorized_keys"
 
   while IFS= read -r raw || [[ -n "${raw}" ]]; do
     raw="${raw%$'\r'}"
+    # Trim surrounding whitespace without touching the key material.
+    raw="${raw#"${raw%%[![:space:]]*}"}"
+    raw="${raw%"${raw##*[![:space:]]}"}"
     [[ -n "${raw}" ]] || continue
-    if [[ "${raw}" == \#* ]]; then
-      continue
-    fi
+    [[ "${raw}" == \#* ]] && continue
 
-    read -r key_type key_data _rest <<< "${raw}" || true
-    if [[ -z "${key_data:-}" ]]; then
-      warn "Ignoring a malformed line in PVPS_SSH_PUBKEY."
+    key_type="${raw%%[[:space:]]*}"
+    if [[ "${key_type}" == "${raw}" ]]; then
+      warn "Ignoring a malformed SSH key line (missing key data)."
       continue
     fi
+    rest="${raw#"${key_type}"}"
+    rest="${rest#"${rest%%[![:space:]]*}"}"
+    key_data="${rest%%[[:space:]]*}"
+
     case "${key_type}" in
-      ssh-*|ecdsa-*|sk-ssh-*|sk-ecdsa-*) ;;
+      ssh-ed25519|ssh-rsa|ecdsa-*|sk-ssh-*|sk-ecdsa-*) ;;
       *) warn "Ignoring unsupported SSH key type: ${key_type}"; continue ;;
     esac
+    if [[ -z "${key_data}" || ! "${key_data}" =~ ^[A-Za-z0-9+/]+={0,2}$ ]] || \
+       (( ${#key_data} < 32 || ${#key_data} % 4 != 0 )) || \
+       ! printf '%s' "${key_data}" | base64 -d >/dev/null 2>&1; then
+      warn "Ignoring a malformed ${key_type} public key."
+      continue
+    fi
 
     if grep -qF -- "${key_data}" "${HOME}/.ssh/authorized_keys"; then
-      say "SSH key already present in ~/.ssh/authorized_keys"
+      say "SSH key is already authorized in ~/.ssh/authorized_keys"
       continue
     fi
 
@@ -158,14 +285,15 @@ EOF
        [[ "$(tail -c 1 "${HOME}/.ssh/authorized_keys" | od -An -tu1 | tr -d ' \n')" != "10" ]]; then
       printf '\n' >> "${HOME}/.ssh/authorized_keys"
     fi
-    entry="${key_type} ${key_data} pvps"
+    entry="${key_type} ${key_data} ${KEY_MARKER}"
     printf '%s\n' "${entry}" >> "${HOME}/.ssh/authorized_keys"
-    say "Added SSH key to ~/.ssh/authorized_keys (marker: pvps)"
+    say "Added phone SSH key to ~/.ssh/authorized_keys (marker: ${KEY_MARKER})"
     added=$((added + 1))
-  done <<< "${PVPS_SSH_PUBKEY}"
+  done <<< "${SSH_KEY_TEXT}"
 
+  chmod 600 "${HOME}/.ssh/authorized_keys"
   if (( added == 0 )); then
-    warn "No new key was added from PVPS_SSH_PUBKEY (empty, malformed, or already present)."
+    warn "No new SSH key was added (empty, malformed, or already present)."
   fi
 }
 
@@ -195,8 +323,7 @@ install_opencode() {
 
   say "Installing OpenCode v2"
   # https://opencode.ai/install is the v1 installer and refuses 2.x by design.
-  # The v2 installer is https://opencode.ai/v2/install (documented by the v1
-  # installer itself when it is asked for a 2.x version).
+  # The v2 installer is https://opencode.ai/v2/install.
   if ! curl -fsSL https://opencode.ai/v2/install | bash -s -- --no-modify-path; then
     cat >&2 <<'EOF'
 OpenCode v2 install failed. Manual fallback:
@@ -219,13 +346,15 @@ EOF
 write_env_file() {
   local src dst
 
-  src="$(mktemp)"
-  dst="$(mktemp)"
+  src="$(mktemp "${WORK_DIR}/env.XXXXXX")"
+  dst="$(mktemp "${WORK_DIR}/env.XXXXXX")"
   chmod 600 "${src}" "${dst}"
-  # shellcheck disable=SC2024 # redirect target is the user-owned temporary file
+  # shellcheck disable=SC2024 # redirect target is a user-owned temporary file
   sudo cat "${ENV_FILE}" > "${src}" 2>/dev/null || true
   PVPS_ENV_PASSWORD="${PASSWORD}" awk '
-    /^OPENCODE_PASSWORD=/ { print "OPENCODE_PASSWORD=" ENVIRON["PVPS_ENV_PASSWORD"]; done=1; next }
+    /^[[:space:]]*(export[[:space:]]+)?OPENCODE_PASSWORD[[:space:]]*=/ {
+      print "OPENCODE_PASSWORD=" ENVIRON["PVPS_ENV_PASSWORD"]; done=1; next
+    }
     { print }
     END { if (!done) print "OPENCODE_PASSWORD=" ENVIRON["PVPS_ENV_PASSWORD"] }
   ' "${src}" > "${dst}"
@@ -239,7 +368,8 @@ write_env() {
   sudo install -d -m 755 -o root -g root "${ENV_DIR}"
 
   if sudo test -f "${ENV_FILE}"; then
-    existing="$(sudo awk '/^OPENCODE_PASSWORD=/{sub(/^[^=]*=/,""); print; exit}' "${ENV_FILE}" | tr -d '\r"')"
+    existing="$(sudo awk '/^[[:space:]]*(export[[:space:]]+)?OPENCODE_PASSWORD[[:space:]]*=/{sub(/^[^=]*=/,""); print; exit}' "${ENV_FILE}" | tr -d '\r"')"
+    existing="$(trim_value "${existing//$'\n'/}")"
   fi
 
   if [[ -n "${existing}" ]]; then
@@ -269,6 +399,7 @@ Type=simple
 User=${RUN_USER}
 WorkingDirectory=${HOME}
 Environment=HOME=${HOME}
+Environment=PATH=${HOME}/.opencode/bin:${HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 EnvironmentFile=${ENV_FILE}
 ExecStart=${OPENCODE_BIN} serve --hostname 127.0.0.1 --port ${OC_PORT}
 Restart=always
@@ -308,6 +439,16 @@ sys.exit(0)
 PY
 }
 
+curl_api() {
+  local timeout="$1" url="$2" user password
+  user="${OC_USER//\\/\\\\}"; user="${user//\"/\\\"}"
+  password="${PASSWORD//\\/\\\\}"; password="${password//\"/\\\"}"
+  # Keep the password out of curl's argv so other local users cannot see it
+  # with ps/proc. The config is supplied on stdin, never written to disk.
+  printf 'user = "%s:%s"\n' "${user}" "${password}" |
+    curl -fsS --max-time "${timeout}" --config - "${url}"
+}
+
 stop_old_opencode() {
   say "Stopping old OpenCode service(s) because --replace was given"
   warn "This may terminate an active OpenCode chat hosted by that service."
@@ -320,11 +461,15 @@ stop_old_opencode() {
     systemctl --user stop opencode.service 2>/dev/null || true
     systemctl --user disable opencode.service 2>/dev/null || true
   fi
+  if systemctl cat "${SERVICE_NAME}" >/dev/null 2>&1; then
+    sudo systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
+  fi
   if [[ -x "${OPENCODE_BIN}" ]]; then
     "${OPENCODE_BIN}" service stop 2>/dev/null || true
   fi
   if command -v pkill >/dev/null 2>&1; then
-    pkill -f 'opencode serve --service' 2>/dev/null || true
+    pkill -u "${RUN_USER}" -f 'opencode serve --service' 2>/dev/null || true
+    pkill -u "${RUN_USER}" -f "opencode serve --hostname 127.0.0.1 --port ${OC_PORT}" 2>/dev/null || true
   fi
 
   for _ in {1..10}; do
@@ -338,6 +483,10 @@ stop_old_opencode() {
 
 resolve_port() {
   if ! port_in_use; then
+    if (( REPLACE == 1 )) && systemctl cat opencode.service >/dev/null 2>&1; then
+      say "Disabling old opencode.service because --replace was given"
+      sudo systemctl disable --now opencode.service 2>/dev/null || true
+    fi
     if systemctl cat opencode.service >/dev/null 2>&1 && \
        systemctl is-enabled --quiet opencode.service 2>/dev/null; then
       warn "An existing opencode.service is enabled. If it also uses port ${OC_PORT}, disable it (sudo systemctl disable --now opencode.service) to avoid a reboot conflict."
@@ -377,8 +526,7 @@ start_service() {
   sudo systemctl enable "${SERVICE_NAME}" >/dev/null
 
   if systemctl is-active --quiet "${SERVICE_NAME}" && (( UNIT_CHANGED == 0 )); then
-    if curl -fsS --max-time 2 -u "${OC_USER}:${PASSWORD}" \
-      "http://127.0.0.1:${OC_PORT}/api/info" >/dev/null 2>&1; then
+    if curl_api 2 "http://127.0.0.1:${OC_PORT}/api/info" >/dev/null 2>&1; then
       say "${SERVICE_NAME} is already running and healthy"
       return 0
     fi
@@ -397,8 +545,7 @@ verify_service() {
 
   # First start on a small VPS can be slow (npm/opencode cold start, swap-less box).
   for _ in {1..45}; do
-    if response="$(curl -fsS --max-time 3 -u "${OC_USER}:${PASSWORD}" \
-      "http://127.0.0.1:${OC_PORT}/api/info" 2>/dev/null)"; then
+    if response="$(curl_api 3 "http://127.0.0.1:${OC_PORT}/api/info" 2>/dev/null)"; then
       printf '%s\n' "${response}"
       return 0
     fi
@@ -435,7 +582,10 @@ enable_swap() {
       fi
     fi
     sudo chmod 600 /swapfile
-    sudo mkswap /swapfile >/dev/null
+    if ! sudo mkswap /swapfile >/dev/null; then
+      sudo rm -f /swapfile
+      die "Could not format /swapfile."
+    fi
     if ! sudo swapon /swapfile; then
       warn "Could not activate /swapfile (the filesystem may not support swap files); removing it."
       sudo rm -f /swapfile
@@ -562,6 +712,7 @@ detect_host() {
   local host="" public="" tailscale="" lan=""
 
   if [[ -n "${PVPS_HOST:-}" ]]; then
+    [[ "${PVPS_HOST}" != *[[:space:]]* ]] || die "PVPS_HOST must not contain whitespace."
     printf '%s' "${PVPS_HOST}"
     return 0
   fi
@@ -570,26 +721,30 @@ detect_host() {
   tailscale="$(detect_tailscale_ipv4 || true)"
   lan="$(detect_lan_ipv4 || true)"
 
-  if [[ "${PREFER_TAILSCALE}" == "1" ]]; then
+  if is_true "${PREFER_TAILSCALE}"; then
     host="${tailscale:-${public}}"
   else
     host="${public:-${tailscale}}"
   fi
   [[ -n "${host}" ]] || host="${lan}"
+
   if [[ -z "${host}" ]]; then
+    warn "Could not detect an IP address; falling back to the hostname."
     host="$(hostname 2>/dev/null || true)"
   fi
+  [[ -n "${host}" ]] || host="unknown"
 
   if [[ -n "${public}" && "${host}" != "${public}" ]]; then
     warn "Public IPv4 ${public} was detected but not used. The phone must be able to reach ${host}."
   fi
-  if [[ -n "${tailscale}" && "${host}" != "${tailscale}" ]]; then
+  if [[ -n "${tailscale}" && "${host}" == "${tailscale}" ]]; then
+    warn "Using Tailscale address ${host}; the phone must be signed into the same tailnet."
+  elif [[ -n "${tailscale}" ]]; then
     warn "Tailscale address ${tailscale} was detected but not used; phones outside the tailnet cannot reach it."
     warn "If the phone is on the same tailnet, rerun with --tailscale or PVPS_HOST=${tailscale}."
   fi
-  if [[ -z "${host}" ]]; then
-    warn "Could not detect an IP address; falling back to the hostname."
-    host="unknown"
+  if [[ -n "${lan}" && "${host}" == "${lan}" && "${host}" != "${public}" && "${host}" != "${tailscale}" ]]; then
+    warn "Using LAN address ${host}; the phone must be on the same network."
   fi
 
   printf '%s' "${host}"
@@ -611,46 +766,111 @@ detect_ssh_port() {
     printf '%s' "${port}"
     return 0
   fi
+  warn "Could not detect the sshd port; assuming 22. Set PVPS_SSH_PORT if SSH uses another port."
   printf '22'
 }
 
 make_setup_code() {
-  local host
+  local host="$1"
 
-  host="$(detect_host)"
-  [[ -n "${SSH_PORT}" ]] || SSH_PORT="$(detect_ssh_port)"
-  say "Setup code will use ${host}:${SSH_PORT}"
-
-  PVPS_SETUP_PASSWORD="${PASSWORD}" python3 - "${host}" "${RUN_USER}" "${HOME}" "${OC_PORT}" "${OC_USER}" "${SSH_PORT}" <<'PY'
+  # The wire payload is the PVPS1 format. The Android app currently requires
+  # the "pvps-setup:" prefix (see SetupCode.kt), so keep that prefix for
+  # compatibility; the decoded JSON is identical.
+  #
+  # The app requires ocPassword to import a host. The password is passed on
+  # stdin, never as an argv or environment value, and the finished code is not
+  # written to disk by this script.
+  printf '%s' "${PASSWORD}" | python3 -c '
 import base64
 import json
-import os
 import sys
 
-host, user, directory, oc_port, oc_user, ssh_port = sys.argv[1:7]
-password = os.environ["PVPS_SETUP_PASSWORD"]
+host, port, user, oc_port, oc_user, directory = sys.argv[1:7]
+password = sys.stdin.read()
 payload = {
     "v": 1,
+    "format": "PVPS1",
     "name": "vps",
     "host": host,
-    "port": int(ssh_port),
+    "port": int(port),
     "user": user,
     "ocPort": int(oc_port),
     "ocUser": oc_user,
     "ocPassword": password,
     "mode": "tunnel",
     "directory": directory,
+    "auth": "ssh-key",
+    "secretRef": "/etc/pvps/opencode.env",
 }
 raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
 print("pvps-setup:" + base64.urlsafe_b64encode(raw).decode("ascii").rstrip("="))
-PY
+' "${host}" "${SSH_PORT}" "${RUN_USER}" "${OC_PORT}" "${OC_USER}" "${HOME}"
 }
 
+print_setup_code() {
+  local host="$1" out="/dev/stdout" file tmp
+
+  if [[ ! -t 1 ]]; then
+    if has_tty; then
+      out="/dev/tty"
+    else
+      # Never put the secret in CI logs or redirected output. A 0600 file is
+      # readable only by the installing user and can be removed after import.
+      file="${HOME}/.pvps-setup-code"
+      if ! tmp="$(mktemp "${HOME}/.pvps-setup-code.XXXXXX")"; then
+        die "Could not create a temporary file for the setup code in ${HOME}."
+      fi
+      if ! printf '%s\n' "${SETUP_CODE}" > "${tmp}"; then
+        rm -f "${tmp}"
+        die "Could not write the setup code to ${file}."
+      fi
+      chmod 600 "${tmp}"
+      if ! mv -f "${tmp}" "${file}"; then
+        rm -f "${tmp}"
+        die "Could not replace ${file}."
+      fi
+      printf '\nSSH target: %s@%s:%s    OpenCode: 127.0.0.1:%s (SSH tunnel)\n' \
+        "${RUN_USER}" "${host}" "${SSH_PORT}" "${OC_PORT}"
+      printf 'PVPS setup code written to %s (mode 0600).\n' "${file}"
+      printf 'Import it in the app, then delete the file:\n'
+      printf '  rm -f %s\n' "${file}"
+      return 0
+    fi
+  fi
+
+  {
+    printf '\n'
+    printf '================ PVPS SETUP CODE ================\n'
+    printf 'SSH: %s@%s:%s    OpenCode: 127.0.0.1:%s (SSH tunnel)\n' \
+      "${RUN_USER}" "${host}" "${SSH_PORT}" "${OC_PORT}"
+    printf '\n'
+    printf '%s\n' "${SETUP_CODE}"
+    printf '=================================================\n'
+    cat <<'EOF'
+Paste the whole pvps-setup: line into the app:
+  Add host -> Paste setup code.
+
+It contains the OpenCode password. Treat it like a password and do not paste
+it into chats, tickets or logs. The code is printed once and is not written to
+disk by this script. Re-run the installer to print it again; the existing
+password is reused.
+EOF
+  } > "${out}"
+}
+
+install_base_packages
+SSH_PORT="$(detect_ssh_port)"
+collect_phone_key
 install_ssh_key
 install_opencode
 write_env
 write_unit
 resolve_port
+
+if (( ENABLE_SWAP == 1 )); then
+  enable_swap
+fi
+
 start_service
 
 say "Service status"
@@ -661,18 +881,11 @@ if ! verify_service; then
   die "${SERVICE_NAME} did not answer on 127.0.0.1:${OC_PORT}. Check the logs above."
 fi
 
-if (( ENABLE_SWAP == 1 )); then
-  enable_swap
-fi
-
 if (( HARDEN_SSH == 1 )); then
   harden_ssh
 fi
 
-SETUP_CODE="$(make_setup_code)"
-
-printf '\n'
-printf '================ PVPS SETUP CODE ================\n'
-printf '%s\n' "${SETUP_CODE}"
-printf '=================================================\n'
-printf 'Paste this into the Android app. It contains the OpenCode password; treat it like a secret.\n'
+SSH_HOST="$(detect_host)"
+say "Setup code target: ${RUN_USER}@${SSH_HOST}:${SSH_PORT}"
+SETUP_CODE="$(make_setup_code "${SSH_HOST}")" || die "Could not build the setup code."
+print_setup_code "${SSH_HOST}"

@@ -10,6 +10,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
@@ -96,8 +97,12 @@ val Paper = PvpsPalette(
 
 val Themes = listOf(Graphite, Midnight, EmberTheme, Paper)
 
-@Volatile
-private var activePalette: PvpsPalette = Graphite
+// Snapshot-backed so every composable that reads one of the palette color
+// getters is invalidated immediately when the user changes theme at runtime.
+private val activePaletteState = mutableStateOf(Graphite)
+private var activePalette: PvpsPalette
+    get() = activePaletteState.value
+    set(value) { activePaletteState.value = value }
 
 fun paletteFor(id: String): PvpsPalette = Themes.firstOrNull { it.id == id } ?: Graphite
 
@@ -140,7 +145,7 @@ fun PvpsTheme(
     content: @Composable () -> Unit
 ) {
     val palette = paletteFor(themeId)
-    activePalette = palette
+    SideEffect { activePalette = palette }
     val scheme = if (palette.isLight) {
         lightColorScheme(
             primary = palette.accent,

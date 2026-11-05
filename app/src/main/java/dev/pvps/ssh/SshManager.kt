@@ -37,6 +37,8 @@ class SshManager(
     private val desired = ConcurrentHashMap.newKeySet<String>()
     private val retryAt = ConcurrentHashMap<String, Long>()
     private val probing = ConcurrentHashMap.newKeySet<String>()
+    private val probeFailures = ConcurrentHashMap<String, Int>()
+    private val tunnelPorts = ConcurrentHashMap<String, Int>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     init {
@@ -44,7 +46,7 @@ class SshManager(
         // watchdog silently re-dials sessions the user asked to keep open.
         scope.launch {
             while (isActive) {
-                delay(15_000)
+                delay(10_000)
                 verifyConnections()
             }
         }
@@ -60,16 +62,23 @@ class SshManager(
                     // JSch's session.isConnected can stay true after a dead
                     // mobile socket. A cheap exec is the only reliable probe.
                     val alive = if (connection?.isConnected == true) {
-                        runCatching { connection.exec("true", 8_000).isSuccess }
+                        runCatching { connection.exec("true", 5_000).isSuccess }
                             .getOrDefault(false)
                     } else {
                         false
                     }
                     if (!alive) {
+                        // A single 5s exec can fail during a mobile handoff while
+                        // the SSH socket is still usable. Require two consecutive
+                        // failures so the watchdog does not create its own flapping.
+                        val failures = (probeFailures[hostId] ?: 0) + 1
+                        probeFailures[hostId] = failures
+                        if (failures < 2) return@launch
                         if (stateFor(hostId).status == ConnectionState.Status.CONNECTING) return@launch
                         if (now < (retryAt[hostId] ?: 0L)) return@launch
                         reconnect(hostId)
                     } else {
+                        probeFailures.remove(hostId)
                         // The SSH control socket can survive while the forwarding
                         // listener was closed; rebuild it before OpenCode reconnects.
                         val host = vault.host(hostId) ?: return@launch
@@ -89,9 +98,13 @@ class SshManager(
     }
 
     private suspend fun reconnect(hostId: String) {
-        retryAt[hostId] = System.currentTimeMillis() + 15_000
+        // Reconnect quickly after a mobile handoff. The old 15s cooldown made a
+        // brief network change feel like a permanently dead session.
+        retryAt[hostId] = System.currentTimeMillis() + 2_000
+        probeFailures.remove(hostId)
         forwards.remove(hostId)?.close()
         connections.remove(hostId)?.disconnect()
+        dev.pvps.diagnostics.Diagnostics.event("ssh", "reconnect host=$hostId")
         runCatching { connect(hostId) }
     }
 
@@ -118,6 +131,8 @@ class SshManager(
         }
 
         setState(ConnectionState(hostId, ConnectionState.Status.CONNECTING, "Connecting to ${host.sshHost}:${host.sshPort}"))
+        val started = System.nanoTime()
+        dev.pvps.diagnostics.Diagnostics.event("ssh", "connect host=${host.name} ${host.sshHost}:${host.sshPort}")
         val attempt = attemptSeq.incrementAndGet()
         activeAttempts[hostId] = attempt
         val connection = SshConnection(
@@ -147,11 +162,17 @@ class SshManager(
                 connections[hostId] = connection
                 desired += hostId
                 retryAt.remove(hostId)
+                probeFailures.remove(hostId)
                 if (host.hostKeySha256.isNullOrBlank() && outcome.hostKeySha256.isNotBlank()) {
                     vault.setHostKey(hostId, outcome.hostKeySha256)
                 }
                 vault.markConnected(hostId)
                 val tunnelMessage = startTunnelIfNeeded(host, connection)
+                val elapsed = (System.nanoTime() - started) / 1_000_000
+                dev.pvps.diagnostics.Diagnostics.event(
+                    "ssh",
+                    "connected host=${host.name} ${elapsed}ms $tunnelMessage"
+                )
                 val state = ConnectionState(
                     hostId = hostId,
                     status = ConnectionState.Status.CONNECTED,
@@ -190,6 +211,11 @@ class SshManager(
             }
             is ConnectOutcome.Failed -> {
                 connection.disconnect()
+                val elapsed = (System.nanoTime() - started) / 1_000_000
+                dev.pvps.diagnostics.Diagnostics.event(
+                    "ssh",
+                    "connect failed host=${host.name} ${elapsed}ms ${outcome.message}"
+                )
                 fail(hostId, outcome.message)
             }
         }
@@ -206,6 +232,7 @@ class SshManager(
         // Invalidate any connect attempt that is still suspended.
         desired.remove(hostId)
         retryAt.remove(hostId)
+        probeFailures.remove(hostId)
         activeAttempts.remove(hostId)
         forwards.remove(hostId)?.close()
         connections.remove(hostId)?.disconnect()
@@ -225,6 +252,7 @@ class SshManager(
     fun disconnectAll() {
         desired.clear()
         retryAt.clear()
+        probeFailures.clear()
         activeAttempts.clear()
         forwards.keys.toList().forEach { forwards.remove(it)?.close() }
         connections.keys.toList().forEach { connections.remove(it)?.disconnect() }
@@ -257,10 +285,23 @@ class SshManager(
 
     private fun startTunnelIfNeeded(host: Host, connection: SshConnection): String {
         if (host.openCodeMode != OpenCodeMode.SSH_TUNNEL) return "SSH connected"
+        val existing = forwards[host.id]
+        if (existing?.isOpen == true) {
+            return "SSH connected · OpenCode tunnel :${existing.port}"
+        }
         return runCatching {
             forwards.remove(host.id)?.close()
-            val forward = connection.openForward("127.0.0.1", host.openCodePort)
+            // Reuse the previous local port after a tunnel rebuild. The
+            // OpenCode client (and its SSE stream) can then survive a network
+            // handoff without the repository wiping its transcript.
+            val preferred = tunnelPorts[host.id] ?: 0
+            val forward = connection.openForward("127.0.0.1", host.openCodePort, preferred)
+            tunnelPorts[host.id] = forward.port
             forwards[host.id] = forward
+            dev.pvps.diagnostics.Diagnostics.event(
+                "ssh",
+                "tunnel host=${host.name} local=${forward.port} remote=${host.openCodePort}"
+            )
             "SSH connected · OpenCode tunnel :${forward.port}"
         }.getOrElse { error ->
             "SSH connected · OpenCode tunnel failed: ${error.message}"

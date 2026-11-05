@@ -33,8 +33,23 @@ class LocalForward(
 
     val isOpen: Boolean get() = !closed.get() && serverSocket?.isClosed == false
 
-    fun start() {
-        val server = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
+    fun start(preferredPort: Int = 0) {
+        val address = InetAddress.getByName("127.0.0.1")
+        val server = run {
+            if (preferredPort > 0) {
+                runCatching {
+                    ServerSocket().apply {
+                        reuseAddress = true
+                        bind(java.net.InetSocketAddress(address, preferredPort), 50)
+                    }
+                }.getOrNull()
+            } else {
+                null
+            }
+        } ?: ServerSocket().apply {
+            reuseAddress = true
+            bind(java.net.InetSocketAddress(address, 0), 50)
+        }
         serverSocket = server
         port = server.localPort
         acceptThread = thread(name = "ssh-forward-$port", isDaemon = true) {
