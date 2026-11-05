@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -85,6 +86,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
+import dev.pvps.opencode.FormField
+import dev.pvps.opencode.FormInfo
+import dev.pvps.opencode.FormOption
+import dev.pvps.opencode.ModelVariant
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import dev.pvps.data.model.ConnectionState
 import dev.pvps.opencode.AgentInfo
 import dev.pvps.opencode.FileAttachment
@@ -129,13 +143,13 @@ import java.util.Locale
 @Composable
 fun ChatScreen(
     viewModel: AppViewModel,
-    onBack: () -> Unit,
-    onOpenTerminal: () -> Unit
+    onBack: () -> Unit
 ) {
     val host = viewModel.selectedHost.collectAsStateValue()
     val states = viewModel.connectionStates.collectAsStateValue()
     val connection = host?.let { states[it.id] }
     val chat = viewModel.openCodeState.collectAsStateValue()
+    val settings = viewModel.settings.collectAsStateValue()
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     var composer by remember { mutableStateOf("") }
@@ -149,10 +163,6 @@ fun ChatScreen(
         if (host != null && connection?.status == ConnectionState.Status.CONNECTED) {
             viewModel.connectOpenCode(host)
         }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose { viewModel.disconnectOpenCode() }
     }
 
     val now by produceState(System.currentTimeMillis(), chat.busy) {
@@ -177,16 +187,26 @@ fun ChatScreen(
     val session = chat.activeSession
     val lastUsage = chat.messages.lastOrNull { it.isAssistant && it.tokens != null }?.tokens
     val contextUsed = lastUsage?.let { it.input + it.cache.read + it.cache.write }
-    val contextLimit = session?.model?.let { ref ->
+    val modelInfo = session?.model?.let { ref ->
         chat.models.firstOrNull {
             it.modelID == ref.id && it.providerID == ref.providerID
-        }?.limit?.context
-    } ?: 0L
+        }
+    }
+    val contextLimit = modelInfo?.limit?.context?.takeIf { it > 0 }
+        ?: modelInfo?.limit?.input?.takeIf { it > 0 }
+        ?: 0L
     val contextFraction = if (contextUsed != null && contextLimit > 0) {
         (contextUsed.toDouble() / contextLimit).coerceIn(0.0, 1.0)
     } else null
     val tps = tokensPerSecond(chat.messages, now)
     val runningSubagents = chat.subagents.count { it.isRunning }
+    val goMeter = chat.usage?.go?.rolling
+    val spentValue = when {
+        (session?.cost ?: 0.0) > 0.0 -> formatCost(session?.cost ?: 0.0)
+        goMeter != null -> "${goMeter.percent.toInt()}%"
+        else -> "—"
+    }
+    val spentLabel = if ((session?.cost ?: 0.0) > 0.0) "SPENT" else "GO PLAN"
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -217,9 +237,6 @@ fun ChatScreen(
                         enabled = chat.connected && !chat.connecting
                     ) {
                         Icon(Icons.Default.Add, contentDescription = "New session", tint = Accent)
-                    }
-                    IconButton(onClick = onOpenTerminal) {
-                        Icon(Icons.Default.Terminal, contentDescription = "Terminal", tint = TextSecondary)
                     }
                 }
             )
@@ -277,7 +294,9 @@ fun ChatScreen(
                 session = session,
                 contextFraction = contextFraction,
                 contextUsed = contextUsed,
-                cost = session?.cost ?: 0.0,
+                spentLabel = spentLabel,
+                spentValue = spentValue,
+                spentDetail = if (spentLabel == "GO PLAN") "rolling" else session?.tokens?.let { "${compactTokens(it.input)} in" },
                 tps = tps,
                 subagents = chat.subagents.size,
                 runningSubagents = runningSubagents,
@@ -352,6 +371,8 @@ fun ChatScreen(
                                     expanded = if (id in expanded) expanded - id else expanded + id
                                 },
                                 openCode = viewModel.container.openCode,
+                                showReasoning = settings.showReasoning,
+                                compactTools = settings.compactToolCards,
                                 onOpenSubagent = { childId ->
                                     scope.launch { viewModel.container.openCode.selectSession(childId) }
                                 }
@@ -362,6 +383,18 @@ fun ChatScreen(
                         }
                     }
                 }
+            }
+
+            chat.forms.firstOrNull()?.let { form ->
+                FormCard(
+                    form = form,
+                    onSubmit = { answer ->
+                        scope.launch { viewModel.container.openCode.replyForm(form, answer) }
+                    },
+                    onCancel = {
+                        scope.launch { viewModel.container.openCode.cancelForm(form) }
+                    }
+                )
             }
 
             if (chat.permissions.isNotEmpty()) {
@@ -380,27 +413,23 @@ fun ChatScreen(
                 onValueChange = { composer = it },
                 busy = chat.busy,
                 connected = chat.connected,
-                model = session?.model,
+                modelLabel = modelLabel(session?.model, chat.models),
                 agent = session?.agent,
-                models = chat.models,
                 agents = chat.agents,
                 queued = chat.queued,
-                showModels = showModels,
                 showAgents = showAgents,
                 onShowModels = { showModels = true },
                 onShowAgents = { showAgents = true },
-                onDismissModels = { showModels = false },
                 onDismissAgents = { showAgents = false },
-                onSelectModel = { model ->
-                    showModels = false
-                    scope.launch { viewModel.container.openCode.switchModel(model) }
-                },
                 onSelectAgent = { agent ->
                     showAgents = false
                     scope.launch { viewModel.container.openCode.switchAgent(agent) }
                 },
                 onCancelQueued = { id ->
                     scope.launch { viewModel.container.openCode.cancelQueued(id) }
+                },
+                onSendQueuedNow = { item ->
+                    scope.launch { viewModel.container.openCode.sendQueuedNow(item) }
                 },
                 onSend = {
                     val text = composer.trim()
@@ -430,9 +459,21 @@ fun ChatScreen(
             onDismiss = { showSessions = false }
         )
     }
+    if (showModels) {
+        ModelPickerDialog(
+            models = chat.models,
+            selected = session?.model,
+            onSelect = { model, variant ->
+                showModels = false
+                scope.launch { viewModel.container.openCode.switchModel(model, variant) }
+            },
+            onDismiss = { showModels = false }
+        )
+    }
     if (showStats) {
         StatsDialog(
             session = session,
+            usage = chat.usage,
             parent = chat.parentSession,
             messages = chat.messages,
             models = chat.models,
@@ -459,7 +500,9 @@ private fun SessionPulse(
     session: SessionInfo?,
     contextFraction: Double?,
     contextUsed: Long?,
-    cost: Double,
+    spentLabel: String,
+    spentValue: String,
+    spentDetail: String?,
     tps: Double?,
     subagents: Int,
     runningSubagents: Int,
@@ -494,9 +537,9 @@ private fun SessionPulse(
             )
             PulseDivider()
             PulseCell(
-                label = "SPENT",
-                value = formatCost(cost),
-                detail = session?.tokens?.let { "${compactTokens(it.input)} in" },
+                label = spentLabel,
+                value = spentValue,
+                detail = spentDetail,
                 color = TextPrimary,
                 modifier = Modifier.weight(1f)
             )
@@ -585,6 +628,8 @@ private fun MessageBubble(
     expanded: Set<String>,
     onToggle: (String) -> Unit,
     openCode: OpenCodeRepository,
+    showReasoning: Boolean,
+    compactTools: Boolean,
     onOpenSubagent: (String) -> Unit
 ) {
     when {
@@ -658,27 +703,22 @@ private fun MessageBubble(
                 }
                 Spacer(Modifier.height(7.dp))
                 if (message.error != null) ErrorBanner(message.error)
-                message.parts.forEachIndexed { index, part ->
-                    when (part) {
-                        is UiPart.Text -> MarkdownText(part.text)
-                        is UiPart.Reasoning -> {
-                            val key = "${message.id}-reasoning-$index"
-                            ReasoningBlock(
-                                text = part.text,
-                                expanded = key in expanded,
-                                onToggle = { onToggle(key) }
-                            )
-                        }
-                        is UiPart.Tool -> {
-                            val key = "${message.id}-tool-${part.tool.id}"
-                            ToolCard(
-                                tool = part.tool,
-                                expanded = key in expanded,
-                                onToggle = { onToggle(key) },
-                                openCode = openCode,
-                                onOpenSubagent = onOpenSubagent
-                            )
-                        }
+                val segments = remember(message.id, message.parts, showReasoning, compactTools) {
+                    buildMessageSegments(message.parts, showReasoning, compactTools)
+                }
+                segments.forEachIndexed { index, segment ->
+                    if (segment.text != null) {
+                        MarkdownText(segment.text)
+                    } else {
+                        val key = "${message.id}-activity-$index"
+                        ActivityGroup(
+                            parts = segment.activity,
+                            groupKey = key,
+                            expanded = expanded,
+                            onToggle = onToggle,
+                            openCode = openCode,
+                            onOpenSubagent = onOpenSubagent
+                        )
                     }
                 }
                 if (message.parts.isEmpty() && message.text.isNotBlank()) {
@@ -694,6 +734,146 @@ private fun MessageBubble(
                     color = TextFaint,
                     modifier = Modifier.padding(vertical = 2.dp)
                 )
+            }
+        }
+    }
+}
+
+private data class MessageSegment(
+    val text: String? = null,
+    val activity: List<UiPart> = emptyList()
+)
+
+private fun buildMessageSegments(
+    parts: List<UiPart>,
+    showReasoning: Boolean,
+    compactTools: Boolean
+): List<MessageSegment> {
+    val visible = parts.filter { showReasoning || it !is UiPart.Reasoning }
+    if (!compactTools) {
+        return visible.map { part ->
+            when (part) {
+                is UiPart.Text -> MessageSegment(text = part.text)
+                else -> MessageSegment(activity = listOf(part))
+            }
+        }
+    }
+    val out = mutableListOf<MessageSegment>()
+    val activity = mutableListOf<UiPart>()
+    fun flush() {
+        if (activity.isNotEmpty()) {
+            out += MessageSegment(activity = activity.toList())
+            activity.clear()
+        }
+    }
+    visible.forEach { part ->
+        if (part is UiPart.Text) {
+            flush()
+            out += MessageSegment(text = part.text)
+        } else {
+            activity += part
+        }
+    }
+    flush()
+    return out
+}
+
+@Composable
+private fun ActivityGroup(
+    parts: List<UiPart>,
+    groupKey: String,
+    expanded: Set<String>,
+    onToggle: (String) -> Unit,
+    openCode: OpenCodeRepository,
+    onOpenSubagent: (String) -> Unit
+) {
+    val tools = parts.filterIsInstance<UiPart.Tool>().map { it.tool }
+    val reasoning = parts.filterIsInstance<UiPart.Reasoning>()
+    val running = tools.any { it.status == "running" || it.status == "streaming" }
+    val failed = tools.any { it.status == "error" || it.status == "failed" }
+    val summary = buildString {
+        append(
+            when {
+                running -> "Working"
+                failed -> "Failed"
+                tools.isEmpty() -> "Thought"
+                else -> "Activity"
+            }
+        )
+        if (tools.isNotEmpty()) {
+            append(" · ")
+            append(tools.size)
+            append(if (tools.size == 1) " tool" else " tools")
+        }
+        if (reasoning.isNotEmpty()) append(" · reasoning")
+        if (tools.size == 1) {
+            val name = tools.first().name
+            if (name.isNotBlank()) append(" · ").append(name)
+        }
+    }
+    Surface(
+        color = SurfaceRaised.copy(alpha = 0.30f),
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.55f)),
+        modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { onToggle(groupKey) }
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (running) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(13.dp),
+                        color = Warning,
+                        strokeWidth = 1.5.dp
+                    )
+                } else {
+                    StatusDot(if (failed) Danger else Accent, 6)
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    summary,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (failed) Danger else TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    if (groupKey in expanded) "HIDE" else "DETAIL",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextFaint
+                )
+                Icon(
+                    if (groupKey in expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    tint = TextFaint,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+            if (groupKey in expanded) {
+                Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)) {
+                    parts.forEachIndexed { index, part ->
+                        val key = "$groupKey-$index"
+                        when (part) {
+                            is UiPart.Reasoning -> ReasoningBlock(
+                                text = part.text,
+                                expanded = key in expanded,
+                                onToggle = { onToggle(key) }
+                            )
+                            is UiPart.Tool -> ToolCard(
+                                tool = part.tool,
+                                expanded = key in expanded,
+                                onToggle = { onToggle(key) },
+                                openCode = openCode,
+                                onOpenSubagent = onOpenSubagent
+                            )
+                            is UiPart.Text -> MarkdownText(part.text)
+                        }
+                    }
+                }
             }
         }
     }
@@ -934,37 +1114,24 @@ private fun Composer(
     onValueChange: (String) -> Unit,
     busy: Boolean,
     connected: Boolean,
-    model: ModelRef?,
+    modelLabel: String,
     agent: String?,
-    models: List<ModelInfo>,
     agents: List<AgentInfo>,
     queued: List<OpenCodeRepository.QueuedPrompt>,
-    showModels: Boolean,
     showAgents: Boolean,
     onShowModels: () -> Unit,
     onShowAgents: () -> Unit,
-    onDismissModels: () -> Unit,
     onDismissAgents: () -> Unit,
-    onSelectModel: (ModelInfo) -> Unit,
     onSelectAgent: (AgentInfo) -> Unit,
     onCancelQueued: (String) -> Unit,
+    onSendQueuedNow: (OpenCodeRepository.QueuedPrompt) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit
 ) {
     Surface(color = DeepBackground.copy(alpha = 0.97f)) {
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box {
-                    TinyAction(model?.id ?: "model", onShowModels)
-                    DropdownMenu(expanded = showModels, onDismissRequest = onDismissModels) {
-                        models.take(40).forEach { item ->
-                            DropdownMenuItem(
-                                text = { Text(item.label, color = TextPrimary) },
-                                onClick = { onSelectModel(item) }
-                            )
-                        }
-                    }
-                }
+                TinyAction(modelLabel, onShowModels)
                 Box {
                     TinyAction(agent ?: "agent", onShowAgents)
                     DropdownMenu(expanded = showAgents, onDismissRequest = onDismissAgents) {
@@ -1012,6 +1179,15 @@ private fun Composer(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    "SEND NOW",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Accent,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable { onSendQueuedNow(item) }
+                                        .padding(horizontal = 7.dp, vertical = 5.dp)
                                 )
                                 IconButton(
                                     onClick = { onCancelQueued(item.id) },
@@ -1105,6 +1281,386 @@ private fun CircleAction(
 }
 
 @Composable
+private fun ModelPickerDialog(
+    models: List<ModelInfo>,
+    selected: ModelRef?,
+    onSelect: (ModelInfo, ModelVariant?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(models, query) {
+        val needle = query.trim().lowercase()
+        if (needle.isBlank()) models else models.filter {
+            it.label.lowercase().contains(needle) ||
+                it.providerID.lowercase().contains(needle) ||
+                it.modelID.lowercase().contains(needle)
+        }
+    }
+    val grouped = remember(filtered) {
+        filtered.filter { it.enabled }.groupBy { it.providerID.ifBlank { "local" } }.toList()
+            .sortedBy { it.first }
+    }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(modifier = Modifier.fillMaxSize(), color = DeepBackground) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Models", style = MaterialTheme.typography.headlineSmall, color = TextPrimary)
+                        Text(
+                            "${filtered.size} available · pick provider, model and reasoning effort",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+                    }
+                }
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    placeholder = { Text("Search models or providers", color = TextFaint) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextFaint) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Accent.copy(alpha = 0.55f),
+                        unfocusedBorderColor = OutlineDark,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        cursorColor = Accent
+                    )
+                )
+                Spacer(Modifier.height(10.dp))
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        start = 14.dp, end = 14.dp, top = 4.dp, bottom = 24.dp
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    grouped.forEach { (provider, list) ->
+                        item(key = "provider-$provider") {
+                            Text(
+                                provider.uppercase(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Accent,
+                                modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 2.dp)
+                            )
+                        }
+                        items(list, key = { "${it.providerID}/${it.modelID}" }) { model ->
+                            val isSelected = selected?.id == model.modelID &&
+                                selected.providerID == model.providerID
+                            ModelPickerRow(
+                                model = model,
+                                selected = isSelected,
+                                selectedVariant = if (isSelected) selected?.variant else null,
+                                onSelect = { variant -> onSelect(model, variant) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModelPickerRow(
+    model: ModelInfo,
+    selected: Boolean,
+    selectedVariant: String?,
+    onSelect: (ModelVariant?) -> Unit
+) {
+    val variants = model.variants.ifEmpty { listOf(ModelVariant(id = "default")) }
+    Surface(
+        color = if (selected) Accent.copy(alpha = 0.08f) else SurfaceRaised.copy(alpha = 0.55f),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, if (selected) Accent.copy(alpha = 0.35f) else OutlineDark.copy(alpha = 0.7f))
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(model.label, style = MaterialTheme.typography.titleSmall, color = TextPrimary)
+                    Text(
+                        buildString {
+                            append(model.providerID)
+                            append(" / ")
+                            append(model.modelID)
+                            model.limit?.context?.takeIf { it > 0 }?.let {
+                                append(" · ").append(model.contextLabel).append(" ctx")
+                            }
+                            model.firstCost?.let {
+                                append(" · $").append(String.format(Locale.US, "%.2f", it.input)).append("/M in")
+                            }
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextFaint,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                if (selected) {
+                    Text("ACTIVE", style = MaterialTheme.typography.labelSmall, color = Accent)
+                }
+            }
+            if (model.variants.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    variants.forEach { variant ->
+                        val activeVariant = selected && (
+                            selectedVariant == variant.id ||
+                                (selectedVariant.isNullOrBlank() && variant.id == "default")
+                            )
+                        Surface(
+                            color = if (activeVariant) Accent else SurfaceHigh,
+                            shape = RoundedCornerShape(50),
+                            modifier = Modifier.clip(RoundedCornerShape(50)).clickable { onSelect(variant) }
+                        ) {
+                            Text(
+                                variant.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (activeVariant) Void else TextSecondary,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                }
+            } else {
+                Spacer(Modifier.height(8.dp))
+                Surface(
+                    color = if (selected) Accent else SurfaceHigh,
+                    shape = RoundedCornerShape(50),
+                    modifier = Modifier.clip(RoundedCornerShape(50)).clickable { onSelect(null) }
+                ) {
+                    Text(
+                        "default",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (selected) Void else TextSecondary,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FormCard(
+    form: FormInfo,
+    onSubmit: (Map<String, JsonElement>) -> Unit,
+    onCancel: () -> Unit
+) {
+    var answers by remember(form.id) { mutableStateOf(defaultFormAnswers(form.fields)) }
+    var error by remember(form.id) { mutableStateOf<String?>(null) }
+    Surface(
+        color = Violet.copy(alpha = 0.09f),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, Violet.copy(alpha = 0.28f)),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .heightIn(max = 430.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text("OPENCODE ASKS", style = MaterialTheme.typography.labelSmall, color = Violet)
+            Text(
+                form.title.ifBlank { "Question" },
+                style = MaterialTheme.typography.titleMedium,
+                color = TextPrimary
+            )
+            form.fields.filter { fieldVisible(it, answers) }.forEach { field ->
+                when (field.type) {
+                    "boolean" -> Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            val key = field.key
+                            val current = answers[key]?.let { (it as? JsonPrimitive)?.booleanOrNull } ?: false
+                            answers = answers + (key to JsonPrimitive(!current))
+                        }
+                    ) {
+                        Checkbox(
+                            checked = answers[field.key]?.let { (it as? JsonPrimitive)?.booleanOrNull } ?: false,
+                            onCheckedChange = { checked -> answers = answers + (field.key to JsonPrimitive(checked)) }
+                        )
+                        Text(field.label, color = TextPrimary, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    "multiselect" -> {
+                        FormLabel(field)
+                        field.options.forEach { option ->
+                            val current = (answers[field.key] as? JsonArray)
+                                ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                                ?: emptyList()
+                            val active = option.value in current
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    val next = if (active) current - option.value else current + option.value
+                                    answers = answers + (field.key to JsonArray(next.map { JsonPrimitive(it) }))
+                                }
+                            ) {
+                                Checkbox(checked = active, onCheckedChange = null)
+                                Text(
+                                    option.label.ifBlank { option.value },
+                                    color = TextPrimary,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+                    "external" -> {
+                        FormLabel(field)
+                        Text(field.url.orEmpty(), color = Accent, style = MaterialTheme.typography.bodySmall)
+                    }
+                    else -> {
+                        FormLabel(field)
+                        if (field.options.isNotEmpty()) {
+                            field.options.forEach { option ->
+                                val current = (answers[field.key] as? JsonPrimitive)?.contentOrNull.orEmpty()
+                                FormChoice(
+                                    option = option,
+                                    active = current == option.value,
+                                    onClick = { answers = answers + (field.key to JsonPrimitive(option.value)) }
+                                )
+                            }
+                        } else {
+                            OutlinedTextField(
+                                value = (answers[field.key] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                                onValueChange = { answers = answers + (field.key to JsonPrimitive(it)) },
+                                modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text(field.placeholder ?: field.description ?: "", color = TextFaint) },
+                                singleLine = field.type != "string",
+                                keyboardOptions = if (field.type == "number" || field.type == "integer") {
+                                    KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
+                                } else KeyboardOptions.Default,
+                                shape = RoundedCornerShape(12.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = Violet.copy(alpha = 0.55f),
+                                    unfocusedBorderColor = OutlineDark,
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary,
+                                    cursorColor = Violet
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+            error?.let { Text(it, color = Danger, style = MaterialTheme.typography.bodySmall) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = {
+                        val visible = form.fields.filter { fieldVisible(it, answers) }
+                        val missing = visible.any { field ->
+                            field.required && when (field.type) {
+                                "boolean" -> false
+                                "multiselect" -> ((answers[field.key] as? JsonArray)?.isEmpty() ?: true)
+                                "external" -> false
+                                else -> (answers[field.key] as? JsonPrimitive)?.contentOrNull.isNullOrBlank()
+                            }
+                        }
+                        if (missing) {
+                            error = "Fill the required fields"
+                        } else {
+                            val payload = visible.mapNotNull { field ->
+                                val value = answers[field.key] ?: return@mapNotNull null
+                                if (field.type == "external") return@mapNotNull null
+                                val raw = (value as? JsonPrimitive)?.contentOrNull
+                                if (value is JsonPrimitive && raw.isNullOrBlank()) return@mapNotNull null
+                                val typed: JsonElement = when (field.type) {
+                                    "number" -> raw?.toDoubleOrNull()?.let { JsonPrimitive(it) } ?: value
+                                    "integer" -> raw?.toLongOrNull()?.let { JsonPrimitive(it) } ?: value
+                                    else -> value
+                                }
+                                field.key to typed
+                            }.toMap()
+                            onSubmit(payload)
+                        }
+                    }
+                ) { Text("Submit answer") }
+                TextButton(onClick = onCancel) { Text("Skip", color = TextSecondary) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FormLabel(field: FormField) {
+    Column {
+        Text(
+            field.label + if (field.required) " *" else "",
+            color = TextPrimary,
+            style = MaterialTheme.typography.bodyMedium
+        )
+        field.description?.takeIf { it.isNotBlank() }?.let {
+            Text(it, color = TextFaint, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@Composable
+private fun FormChoice(option: FormOption, active: Boolean, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(9.dp))
+            .background(if (active) Violet.copy(alpha = 0.14f) else SurfaceRaised.copy(alpha = 0.35f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 8.dp)
+    ) {
+        StatusDot(if (active) Violet else TextFaint, 7)
+        Spacer(Modifier.width(9.dp))
+        Column {
+            Text(option.label.ifBlank { option.value }, color = TextPrimary, style = MaterialTheme.typography.bodySmall)
+            option.description?.takeIf { it.isNotBlank() }?.let {
+                Text(it, color = TextFaint, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+}
+
+private fun defaultFormAnswers(fields: List<FormField>): Map<String, JsonElement> =
+    fields.mapNotNull { field ->
+        when (field.type) {
+            "boolean" -> field.key to JsonPrimitive(
+                (field.default as? JsonPrimitive)?.booleanOrNull ?: false
+            )
+            "multiselect" -> field.key to (field.default ?: JsonArray(emptyList()))
+            else -> field.default?.let { field.key to it }
+        }
+    }.toMap()
+
+private fun fieldVisible(field: FormField, answers: Map<String, JsonElement>): Boolean {
+    if (field.hidden) return false
+    return field.conditions.all { condition ->
+        val value = answers[condition.key]?.let { element ->
+            if (element is JsonArray) element.joinToString(",") {
+                (it as? JsonPrimitive)?.contentOrNull.orEmpty()
+            }
+            else (element as? JsonPrimitive)?.contentOrNull.orEmpty()
+        }.orEmpty()
+        val expected = (condition.value as? JsonPrimitive)?.contentOrNull.orEmpty()
+        if (condition.op == "neq") value != expected else value == expected
+    }
+}
+
+@Composable
 private fun SessionDialog(
     sessions: List<SessionInfo>,
     allSessions: List<SessionInfo>,
@@ -1113,39 +1669,86 @@ private fun SessionDialog(
     onNew: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(sessions, query) {
+        val needle = query.trim().lowercase()
+        if (needle.isBlank()) sessions else sessions.filter {
+            it.displayTitle.lowercase().contains(needle) || (it.agent ?: "").contains(needle, true)
+        }
+    }
+    Dialog(
         onDismissRequest = onDismiss,
-        containerColor = SurfaceHigh,
-        title = { Text("Sessions", color = TextPrimary) },
-        text = {
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(Modifier.fillMaxSize(), color = DeepBackground) {
             Column(
-                modifier = Modifier
-                    .heightIn(max = 520.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()
             ) {
-                sessions.forEach { session ->
-                    val children = allSessions.filter { it.parentID == session.id }
-                    SessionRow(
-                        session = session,
-                        active = session.id == activeId,
-                        indent = false,
-                        onClick = { onSelect(session.id) }
-                    )
-                    children.forEach { child ->
-                        SessionRow(
-                            session = child,
-                            active = child.id == activeId,
-                            indent = true,
-                            onClick = { onSelect(child.id) }
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Sessions", style = MaterialTheme.typography.headlineSmall, color = TextPrimary)
+                        Text(
+                            "${allSessions.size} sessions · ${allSessions.count { it.isRunning }} running",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
                         )
+                    }
+                    IconButton(onClick = onNew) {
+                        Icon(Icons.Default.Add, contentDescription = "New session", tint = Accent)
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+                    }
+                }
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    placeholder = { Text("Search sessions", color = TextFaint) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextFaint) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Accent.copy(alpha = 0.55f),
+                        unfocusedBorderColor = OutlineDark,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        cursorColor = Accent
+                    )
+                )
+                Spacer(Modifier.height(10.dp))
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        start = 14.dp, end = 14.dp, bottom = 24.dp
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    filtered.forEach { session ->
+                        item(key = session.id) {
+                            SessionRow(
+                                session = session,
+                                active = session.id == activeId,
+                                indent = false,
+                                onClick = { onSelect(session.id) }
+                            )
+                        }
+                        items(allSessions.filter { it.parentID == session.id }, key = { it.id }) { child ->
+                            SessionRow(
+                                session = child,
+                                active = child.id == activeId,
+                                indent = true,
+                                onClick = { onSelect(child.id) }
+                            )
+                        }
                     }
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = onNew) { Text("New session", color = Accent) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Close", color = TextSecondary) } }
-    )
+        }
+    }
 }
 
 @Composable
@@ -1207,6 +1810,7 @@ private fun SessionRow(
 @Composable
 private fun StatsDialog(
     session: SessionInfo?,
+    usage: dev.pvps.opencode.UsageLimits?,
     parent: SessionInfo?,
     messages: List<UiMessage>,
     models: List<ModelInfo>,
@@ -1276,6 +1880,14 @@ private fun StatsDialog(
                     tps = tps,
                     messages = messages.size
                 )
+                usage?.go?.let { go ->
+                    Text("OPENCODE GO ALLOWANCE", style = MaterialTheme.typography.labelSmall, color = TextFaint)
+                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        StatBox("ROLLING", "${go.rolling.percent.toInt()}%", Modifier.weight(1f))
+                        StatBox("WEEKLY", "${go.weekly.percent.toInt()}%", Modifier.weight(1f))
+                        StatBox("MONTHLY", "${go.monthly.percent.toInt()}%", Modifier.weight(1f))
+                    }
+                }
 
                 if (subagents.isNotEmpty()) {
                     Text("SUBAGENTS", style = MaterialTheme.typography.labelSmall, color = TextFaint)
@@ -1470,15 +2082,32 @@ private fun extractJsonString(json: String, key: String): String? {
 
 private fun tokensPerSecond(messages: List<UiMessage>, now: Long): Double? {
     val message = messages.lastOrNull {
-        it.isAssistant && it.tokens != null && (it.streamed != null || it.created > 0)
+        it.isAssistant && it.tokens != null && it.created > 0
     } ?: return null
     val tokens = message.tokens ?: return null
-    val start = message.streamed ?: message.created
+    // time.streamed is the first token and is often only a few ms after
+    // time.created for cached responses. Measuring streamed→completed produced
+    // absurd values like 341000 tok/s. Whole-request duration is stable.
+    val start = message.created
     val end = message.completed ?: now
-    val seconds = ((end - start).coerceAtLeast(1L)) / 1000.0
+    val elapsedMs = (end - start).coerceAtLeast(400L)
+    val seconds = elapsedMs / 1000.0
     val output = tokens.output + tokens.reasoning
     if (output <= 0 || seconds <= 0) return null
-    return output / seconds
+    return (output / seconds).coerceIn(0.1, 4000.0)
+}
+
+private fun modelLabel(ref: ModelRef?, models: List<ModelInfo>): String {
+    if (ref == null) return "model"
+    val info = models.firstOrNull { it.modelID == ref.id && it.providerID == ref.providerID }
+    val name = info?.label ?: ref.id
+    val provider = ref.providerID.takeIf { it.isNotBlank() }
+    val variant = ref.variant?.takeIf { it.isNotBlank() && it != "default" }
+    return buildString {
+        append(name)
+        provider?.let { append(" · ").append(it) }
+        variant?.let { append(" · ").append(it) }
+    }
 }
 
 private fun formatCost(cost: Double): String = when {

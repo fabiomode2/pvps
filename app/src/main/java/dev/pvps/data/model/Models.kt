@@ -60,7 +60,16 @@ data class AppSettings(
     val keepScreenOnTerminal: Boolean = true,
     val showReasoning: Boolean = true,
     val compactToolCards: Boolean = true,
-    val strictHostKeys: Boolean = true
+    val strictHostKeys: Boolean = true,
+    val uiTheme: String = "graphite",
+    val fontScale: Float = 1f,
+    val fileGridView: Boolean = true,
+    val showHiddenFiles: Boolean = false,
+    val notifyResponses: Boolean = true,
+    val lastModelProvider: String = "",
+    val lastModelId: String = "",
+    val lastModelVariant: String = "",
+    val lastAgentId: String = ""
 )
 
 @Serializable

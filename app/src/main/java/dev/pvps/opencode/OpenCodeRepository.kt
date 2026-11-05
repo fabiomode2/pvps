@@ -5,6 +5,8 @@ import android.util.LruCache
 import dev.pvps.data.model.AuditEntry
 import dev.pvps.data.model.Host
 import dev.pvps.data.store.AuditStore
+import dev.pvps.data.store.SettingsStore
+import dev.pvps.service.AppNotifications
 import dev.pvps.ssh.SshManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,12 +19,17 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.put
 
 class OpenCodeRepository(
     private val ssh: SshManager,
-    private val audit: AuditStore
+    private val audit: AuditStore,
+    private val settings: SettingsStore
 ) {
     data class QueuedPrompt(
         val id: String,
@@ -43,6 +50,8 @@ class OpenCodeRepository(
         val permissions: List<PermissionRequest> = emptyList(),
         val models: List<ModelInfo> = emptyList(),
         val agents: List<AgentInfo> = emptyList(),
+        val forms: List<FormInfo> = emptyList(),
+        val usage: UsageLimits? = null,
         val busy: Boolean = false,
         val error: String? = null
     ) {
@@ -72,6 +81,8 @@ class OpenCodeRepository(
     private var mediaCache = LruCache<String, ByteArray>(24)
     private val optimisticIds = mutableSetOf<String>()
     private val optimisticLock = Any()
+    private var lastNotifiedMessageId: String? = null
+    private var lastNotifiedFormId: String? = null
 
     suspend fun connect(host: Host) {
         if (this.host?.id == host.id && _state.value.connected) return
@@ -101,6 +112,7 @@ class OpenCodeRepository(
             val sessions = newClient.listSessions()
             val models = runCatching { newClient.models(host.openCodeDirectory) }.getOrDefault(emptyList())
             val agents = runCatching { newClient.agents(host.openCodeDirectory) }.getOrDefault(emptyList())
+            val usage = runCatching { newClient.usageLimits(host.openCodeDirectory) }.getOrNull()
             _state.value = _state.value.copy(
                 connecting = false,
                 connected = true,
@@ -108,6 +120,7 @@ class OpenCodeRepository(
                 sessions = sessions,
                 models = models,
                 agents = agents,
+                usage = usage,
                 error = null
             )
             val active = sessions.firstOrNull { it.parentID == null }
@@ -170,11 +183,16 @@ class OpenCodeRepository(
             messages = emptyList(),
             queued = emptyList(),
             permissions = emptyList(),
+            forms = emptyList(),
             busy = _state.value.sessions.firstOrNull { it.id == sessionId }?.isRunning == true
         )
         refreshMessages()
         refreshInbox()
         refreshPermissions()
+        refreshForms()
+        // A queue left behind by a previous app process must not stay parked
+        // when the session is already idle.
+        if (_state.value.activeSession?.isRunning != true) promoteQueued()
     }
 
     suspend fun newSession() {
@@ -182,6 +200,20 @@ class OpenCodeRepository(
         val h = host ?: return
         runCatching {
             val session = c.createSession(h.openCodeDirectory.takeIf { it.isNotBlank() })
+            val saved = settings.settings.value
+            if (saved.lastModelId.isNotBlank() && saved.lastModelProvider.isNotBlank()) {
+                runCatching {
+                    c.switchModel(
+                        session.id,
+                        ModelRef(
+                            id = saved.lastModelId,
+                            providerID = saved.lastModelProvider,
+                            variant = saved.lastModelVariant.takeIf { it.isNotBlank() }
+                        )
+                    )
+                    if (saved.lastAgentId.isNotBlank()) c.switchAgent(session.id, saved.lastAgentId)
+                }
+            }
             refreshSessions()
             selectSession(session.id)
         }.onFailure {
@@ -257,6 +289,53 @@ class OpenCodeRepository(
         }
     }
 
+    suspend fun refreshForms() {
+        val c = client ?: return
+        val id = _state.value.activeSessionId ?: return
+        runCatching {
+            val forms = c.forms(id)
+            if (_state.value.activeSessionId == id) {
+                _state.value = _state.value.copy(forms = forms)
+            }
+        }.onFailure {
+            // Forms are optional while a session is starting.
+        }
+    }
+
+    suspend fun refreshUsage() {
+        val c = client ?: return
+        runCatching {
+            val usage = c.usageLimits(host?.openCodeDirectory)
+            _state.value = _state.value.copy(usage = usage)
+        }.onFailure {
+            // Usage is a nice-to-have; never surface it as a chat error.
+        }
+    }
+
+    suspend fun replyForm(form: FormInfo, answer: Map<String, JsonElement>) {
+        val c = client ?: return
+        val id = _state.value.activeSessionId ?: return
+        runCatching {
+            c.replyForm(id, form.id, JsonObject(answer))
+            refreshForms()
+            refreshMessages()
+            scheduleRefresh()
+        }.onFailure {
+            _state.value = _state.value.copy(error = it.message ?: "Could not submit answer")
+        }
+    }
+
+    suspend fun cancelForm(form: FormInfo, message: String? = null) {
+        val c = client ?: return
+        val id = _state.value.activeSessionId ?: return
+        runCatching {
+            c.cancelForm(id, form.id, message)
+            refreshForms()
+        }.onFailure {
+            _state.value = _state.value.copy(error = it.message ?: "Could not cancel form")
+        }
+    }
+
     suspend fun refreshModelsAndAgents() {
         val c = client ?: return
         val directory = host?.openCodeDirectory
@@ -278,18 +357,25 @@ class OpenCodeRepository(
             _state.value.activeSessionId
         } ?: return
 
-        val wasBusy = _state.value.busy
+        // Never trust the cached busy flag: it can be stale after a missed SSE
+        // event. Ask the server for the session's real running state.
+        refreshSessions()
+        val actualBusy = _state.value.sessions
+            .firstOrNull { it.id == id }?.isRunning == true
         _state.value = _state.value.copy(error = null, busy = true)
 
         runCatching {
-            // While OpenCode is working, enqueue instead of aborting/steering.
-            // The server delivers one queued prompt at the next idle boundary.
-            val ack = c.prompt(id, prompt, delivery = if (wasBusy) "queue" else null)
-            if (ack.id.isNotBlank() && !wasBusy) {
+            // A prompt sent while the agent is working must be queued, not
+            // steered (steering aborts the current turn). When idle, deliver it
+            // immediately and let the server start the loop.
+            val ack = c.prompt(id, prompt, delivery = if (actualBusy) "queue" else "steer")
+            val created = ack.time.created.takeIf { it > 0 } ?: System.currentTimeMillis()
+            val ackId = ack.id.ifBlank { "local-${System.currentTimeMillis()}" }
+            if (!actualBusy) {
                 val optimistic = UiMessage(
-                    id = ack.id,
+                    id = ackId,
                     type = "user",
-                    created = ack.time.created.takeIf { it > 0 } ?: System.currentTimeMillis(),
+                    created = created,
                     text = prompt,
                     files = ack.payload.files,
                     parts = emptyList(),
@@ -305,20 +391,19 @@ class OpenCodeRepository(
                     outcome = null
                 )
                 synchronized(optimisticLock) {
-                    optimisticIds += ack.id
+                    optimisticIds += ackId
                     _state.value = _state.value.copy(
                         messages = (_state.value.messages + optimistic)
                             .distinctBy { it.id }
                             .sortedBy { it.created }
                     )
                 }
-            }
-            if (wasBusy) {
+            } else {
                 _state.value = _state.value.copy(
                     queued = (_state.value.queued + QueuedPrompt(
-                        id = ack.id.ifBlank { "local-${System.currentTimeMillis()}" },
+                        id = ackId,
                         text = prompt,
-                        created = ack.time.created.takeIf { it > 0 } ?: System.currentTimeMillis(),
+                        created = created,
                         delivery = ack.delivery
                     )).distinctBy { it.id }
                 )
@@ -326,10 +411,36 @@ class OpenCodeRepository(
             scheduleRefresh()
         }.onFailure {
             _state.value = _state.value.copy(
-                busy = if (wasBusy) _state.value.busy else false,
+                busy = actualBusy,
                 error = it.message ?: "Prompt failed"
             )
         }
+    }
+
+    /**
+     * A queued prompt stays in the server inbox until the current turn ends.
+     * Promote it to "steer" at the idle boundary so the agent actually resumes
+     * instead of leaving the message parked forever.
+     */
+    private suspend fun promoteQueued() {
+        val c = client ?: return
+        val id = _state.value.activeSessionId ?: return
+        refreshInbox()
+        val pending = _state.value.queued.filter { it.delivery == "queue" }
+        if (pending.isEmpty()) return
+        pending.forEach { item ->
+            runCatching { c.updateInboxDelivery(id, item.id, "steer") }
+        }
+        refreshInbox()
+        scheduleRefresh()
+    }
+
+    suspend fun sendQueuedNow(item: QueuedPrompt) {
+        val c = client ?: return
+        val id = _state.value.activeSessionId ?: return
+        runCatching { c.updateInboxDelivery(id, item.id, "steer") }
+            .onFailure { _state.value = _state.value.copy(error = it.message) }
+        refreshInbox()
     }
 
     suspend fun cancelQueued(id: String) {
@@ -366,11 +477,22 @@ class OpenCodeRepository(
         }
     }
 
-    suspend fun switchModel(model: ModelInfo) {
+    suspend fun switchModel(model: ModelInfo, variant: ModelVariant? = null) {
         val c = client ?: return
         val id = _state.value.activeSessionId ?: return
+        val variantId = variant?.id?.takeIf { it.isNotBlank() }
         runCatching {
-            c.switchModel(id, ModelRef(id = model.modelID, providerID = model.providerID))
+            c.switchModel(
+                id,
+                ModelRef(id = model.modelID, providerID = model.providerID, variant = variantId)
+            )
+            settings.update {
+                it.copy(
+                    lastModelProvider = model.providerID,
+                    lastModelId = model.modelID,
+                    lastModelVariant = variantId.orEmpty()
+                )
+            }
             refreshSessions()
         }.onFailure {
             _state.value = _state.value.copy(error = it.message)
@@ -382,6 +504,7 @@ class OpenCodeRepository(
         val id = _state.value.activeSessionId ?: return
         runCatching {
             c.switchAgent(id, agent.id)
+            settings.update { it.copy(lastAgentId = agent.id) }
             refreshSessions()
         }.onFailure {
             _state.value = _state.value.copy(error = it.message)
@@ -429,14 +552,47 @@ class OpenCodeRepository(
     }
 
     private suspend fun onEvent(event: OpenCodeEvent) {
+        val active = _state.value.activeSessionId
+        val eventSession = (event.data["sessionID"] as? JsonPrimitive)?.contentOrNull
         when (event.type) {
             "server.connected" -> refreshAll()
-            "permission.asked", "permission.replied" -> refreshPermissions()
+            "permission.asked" -> {
+                refreshPermissions()
+                if ((eventSession == null || eventSession == active) &&
+                    settings.settings.value.notifyResponses
+                ) {
+                    val permission = _state.value.permissions.firstOrNull()
+                    AppNotifications.permission(
+                        sessionId = active.orEmpty(),
+                        sessionTitle = sessionTitle(active),
+                        action = permission?.action.orEmpty()
+                    )
+                }
+            }
+            "permission.replied" -> refreshPermissions()
+            "form.created", "form.replied", "form.cancelled" -> {
+                if (eventSession == null || eventSession == active) {
+                    refreshForms()
+                    if (event.type == "form.created" && settings.settings.value.notifyResponses) {
+                        val form = _state.value.forms.firstOrNull()
+                        if (form != null && form.id != lastNotifiedFormId) {
+                            lastNotifiedFormId = form.id
+                            AppNotifications.form(
+                                sessionId = active.orEmpty(),
+                                sessionTitle = sessionTitle(active),
+                                title = form.title
+                            )
+                        }
+                    }
+                }
+            }
             "session.inbox.enqueued", "session.inbox.delivered",
             "session.inbox.cancelled", "session.inbox.delivery.changed" -> {
                 refreshInbox()
                 scheduleRefresh()
             }
+            "session.usage.updated" -> refreshUsage()
+            "session.model.selected", "session.agent.selected" -> refreshSessions()
             "session.created", "session.deleted", "session.renamed", "session.moved",
             "session.archived", "session.unarchived" -> refreshSessions()
             "session.idle", "session.execution.succeeded", "session.execution.failed",
@@ -444,19 +600,44 @@ class OpenCodeRepository(
                 _state.value = _state.value.copy(busy = false)
                 refreshMessages()
                 refreshPermissions()
+                refreshForms()
                 refreshSessions()
                 refreshInbox()
+                refreshUsage()
+                if (event.type == "session.idle" || event.type.startsWith("session.execution.")) {
+                    notifyLatestAssistant()
+                    // Delivering existing queue is what makes the "queued
+                    // message" feature actually progress after a turn. Only do
+                    // it when the active session itself is idle, not when a
+                    // subagent finished while its parent is still working.
+                    if (_state.value.activeSession?.isRunning != true) promoteQueued()
+                }
             }
             else -> {
                 if (event.type.startsWith("session.") || event.type.startsWith("permission.")) {
-                    val eventSession = (event.data["sessionID"] as? JsonPrimitive)?.contentOrNull
-                    if (eventSession == null || eventSession == _state.value.activeSessionId) {
+                    if (eventSession == null || eventSession == active) {
                         if (event.type.contains("inbox")) refreshInbox()
                         scheduleRefresh()
                     }
                 }
             }
         }
+    }
+
+    private fun sessionTitle(sessionId: String?): String =
+        _state.value.sessions.firstOrNull { it.id == sessionId }?.displayTitle.orEmpty()
+
+    private fun notifyLatestAssistant() {
+        if (!settings.settings.value.notifyResponses) return
+        val message = _state.value.messages.lastOrNull {
+            it.isAssistant && it.text.isNotBlank() && it.id != lastNotifiedMessageId
+        } ?: return
+        lastNotifiedMessageId = message.id
+        AppNotifications.response(
+            sessionId = _state.value.activeSessionId.orEmpty(),
+            sessionTitle = sessionTitle(_state.value.activeSessionId),
+            text = message.text
+        )
     }
 
     private fun scheduleRefresh() {
@@ -476,6 +657,8 @@ class OpenCodeRepository(
         refreshMessages()
         refreshInbox()
         refreshPermissions()
+        refreshForms()
+        refreshUsage()
     }
 
     fun close() {

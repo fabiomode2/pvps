@@ -17,7 +17,7 @@ class AppContainer(context: Context) {
     val settings = SettingsStore(context)
     val audit = AuditStore(context)
     val ssh = SshManager(vault, audit, settings)
-    val openCode = OpenCodeRepository(ssh, audit)
+    val openCode = OpenCodeRepository(ssh, audit, settings)
     val system = SystemRepository(ssh, audit, vault)
     val updates = UpdateRepository(context)
 }

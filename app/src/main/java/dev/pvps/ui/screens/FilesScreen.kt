@@ -26,6 +26,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -41,9 +44,13 @@ import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Unarchive
+import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Folder
@@ -53,6 +60,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -116,6 +124,7 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
     val host = viewModel.selectedHost.collectAsStateValue()
     val states = viewModel.connectionStates.collectAsStateValue()
+    val settings = viewModel.settings.collectAsStateValue()
     val connected = host != null && states[host.id]?.status == ConnectionState.Status.CONNECTED
     var currentPath by remember(host?.id) { mutableStateOf("/home/${host?.sshUser ?: "ubuntu"}") }
     var entries by remember { mutableStateOf<List<RemoteFile>>(emptyList()) }
@@ -152,6 +161,10 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
 
     LaunchedEffect(host?.id, connected, currentPath, refresh, connection) {
         if (connected && sftp != null) load()
+    }
+
+    val visibleEntries = remember(entries, settings.showHiddenFiles) {
+        if (settings.showHiddenFiles) entries else entries.filterNot { it.name.startsWith(".") }
     }
 
     val uploadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -256,6 +269,35 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                 .padding(padding)
         ) {
             PathStrip(currentPath) { path -> currentPath = path }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "${visibleEntries.size} items",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextFaint,
+                    modifier = Modifier.weight(1f).padding(start = 8.dp)
+                )
+                IconButton(onClick = {
+                    viewModel.updateSettings { it.copy(fileGridView = !it.fileGridView) }
+                }) {
+                    Icon(
+                        if (settings.fileGridView) Icons.Default.ViewList else Icons.Default.GridView,
+                        contentDescription = "Toggle grid view",
+                        tint = TextSecondary
+                    )
+                }
+                IconButton(onClick = {
+                    viewModel.updateSettings { it.copy(showHiddenFiles = !it.showHiddenFiles) }
+                }) {
+                    Icon(
+                        if (settings.showHiddenFiles) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                        contentDescription = "Toggle hidden files",
+                        tint = if (settings.showHiddenFiles) Accent else TextSecondary
+                    )
+                }
+            }
             if (loading) {
                 LinearProgressIndicator(
                     modifier = Modifier
@@ -271,36 +313,52 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                     .fillMaxWidth()
                     .weight(1f)
             ) {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 88.dp)
-                ) {
-                    items(entries, key = { it.path }) { file ->
-                        FileRow(
-                            file = file,
-                            onOpen = {
-                                if (file.isDirectory) {
-                                    currentPath = file.path
-                                } else {
-                                    openPreview(file)
-                                }
-                            },
-                            onAction = { action ->
-                                when (action) {
-                                    FileAction.DOWNLOAD -> {
-                                        pendingDownload = file
-                                        downloadLauncher.launch(file.name)
-                                    }
-                                    FileAction.RENAME -> renameTarget = file
-                                    FileAction.DELETE -> deleteTarget = file
-                                    FileAction.TAR -> tarTarget = file
-                                    FileAction.EXTRACT -> extractTarget = file
-                                }
-                            }
-                        )
+                val onOpen: (RemoteFile) -> Unit = { file ->
+                    if (file.isDirectory) currentPath = file.path else openPreview(file)
+                }
+                val onAction: (RemoteFile, FileAction) -> Unit = { file, action ->
+                    when (action) {
+                        FileAction.DOWNLOAD -> {
+                            pendingDownload = file
+                            downloadLauncher.launch(file.name)
+                        }
+                        FileAction.RENAME -> renameTarget = file
+                        FileAction.DELETE -> deleteTarget = file
+                        FileAction.TAR -> tarTarget = file
+                        FileAction.EXTRACT -> extractTarget = file
                     }
                 }
-                if (entries.isEmpty() && !loading && error == null) {
+                if (settings.fileGridView) {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(150.dp),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 88.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        gridItems(visibleEntries, key = { it.path }) { file ->
+                            FileTile(
+                                file = file,
+                                onOpen = { onOpen(file) },
+                                onAction = { action -> onAction(file, action) }
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 88.dp)
+                    ) {
+                        items(visibleEntries, key = { it.path }) { file ->
+                            FileRow(
+                                file = file,
+                                onOpen = { onOpen(file) },
+                                onAction = { action -> onAction(file, action) }
+                            )
+                        }
+                    }
+                }
+                if (visibleEntries.isEmpty() && !loading && error == null) {
                     DirectoryEmpty(
                         modifier = Modifier
                             .align(Alignment.Center)
@@ -671,6 +729,99 @@ private fun CrumbSegment(label: String, selected: Boolean, onClick: () -> Unit) 
             color = if (selected) Accent else TextSecondary,
             fontFamily = MonoFont,
             maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun FileTile(
+    file: RemoteFile,
+    onOpen: () -> Unit,
+    onAction: (FileAction) -> Unit
+) {
+    var menu by remember { mutableStateOf(false) }
+    Surface(
+        color = SurfaceRaised.copy(alpha = 0.55f),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, if (file.isDirectory) Warning.copy(alpha = 0.18f) else OutlineDark.copy(alpha = 0.7f)),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onOpen)
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                FileGlyph(isDirectory = file.isDirectory)
+                Spacer(Modifier.weight(1f))
+                Box(
+                    modifier = Modifier.size(32.dp).clip(CircleShape).clickable { menu = true },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.MoreVert,
+                        contentDescription = "Actions for ${file.name}",
+                        tint = TextSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    FileActionMenu(file = file, expanded = menu, onDismiss = { menu = false }, onAction = onAction)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                file.name,
+                style = MaterialTheme.typography.titleSmall,
+                color = TextPrimary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                fileMetadata(file),
+                style = MaterialTheme.typography.labelSmall,
+                color = TextFaint,
+                fontFamily = MonoFont,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun FileActionMenu(
+    file: RemoteFile,
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    onAction: (FileAction) -> Unit
+) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        if (!file.isDirectory) {
+            DropdownMenuItem(
+                text = { Text("Download", color = TextPrimary) },
+                leadingIcon = { Icon(Icons.Default.Download, contentDescription = null, tint = TextSecondary) },
+                onClick = { onDismiss(); onAction(FileAction.DOWNLOAD) }
+            )
+        }
+        DropdownMenuItem(
+            text = { Text("Rename", color = TextPrimary) },
+            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = TextSecondary) },
+            onClick = { onDismiss(); onAction(FileAction.RENAME) }
+        )
+        if (file.isDirectory) {
+            DropdownMenuItem(
+                text = { Text("Create tar.gz", color = TextPrimary) },
+                leadingIcon = { Icon(Icons.Default.Archive, contentDescription = null, tint = TextSecondary) },
+                onClick = { onDismiss(); onAction(FileAction.TAR) }
+            )
+        }
+        if (file.name.endsWith(".tar.gz") || file.name.endsWith(".tgz")) {
+            DropdownMenuItem(
+                text = { Text("Extract", color = TextPrimary) },
+                leadingIcon = { Icon(Icons.Default.Unarchive, contentDescription = null, tint = TextSecondary) },
+                onClick = { onDismiss(); onAction(FileAction.EXTRACT) }
+            )
+        }
+        DropdownMenuItem(
+            text = { Text("Delete", color = Danger) },
+            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = Danger) },
+            onClick = { onDismiss(); onAction(FileAction.DELETE) }
         )
     }
 }

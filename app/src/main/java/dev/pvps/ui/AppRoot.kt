@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -98,7 +100,7 @@ fun AppRoot(viewModel: AppViewModel) {
     val states = viewModel.connectionStates.collectAsStateValue()
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val showBottomBar = hosts.isNotEmpty() &&
-        route in setOf("home", "chat", "files", "more") &&
+        route in setOf("home", "chat", "files", "terminal", "more") &&
         !imeVisible
     val settings = viewModel.settings.collectAsStateValue()
     val updateState = viewModel.updateState.collectAsStateValue()
@@ -164,8 +166,7 @@ fun AppRoot(viewModel: AppViewModel) {
                 composable("chat") {
                     ChatScreen(
                         viewModel = viewModel,
-                        onBack = { navController.navigate("home") { launchSingleTop = true } },
-                        onOpenTerminal = { navController.navigate("terminal") }
+                        onBack = { navController.navigate("home") { launchSingleTop = true } }
                     )
                 }
                 composable("files") {
@@ -304,37 +305,51 @@ fun AppRoot(viewModel: AppViewModel) {
 
 @Composable
 private fun PvpsDock(route: String, onSelect: (String) -> Unit) {
-    NavigationBar(
-        containerColor = SurfaceHigh.copy(alpha = 0.98f),
-        tonalElevation = 0.dp
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 14.dp, vertical = 7.dp)
     ) {
-        bottomItems.forEach { item ->
-            val selected = route == item.route
-            NavigationBarItem(
-                selected = selected,
-                onClick = { onSelect(item.route) },
-                icon = {
-                    Icon(
-                        imageVector = item.icon,
-                        contentDescription = item.label,
-                        modifier = Modifier.size(21.dp)
-                    )
-                },
-                label = {
-                    Text(
-                        item.label.uppercase(),
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1
-                    )
-                },
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = Accent,
-                    selectedTextColor = Accent,
-                    indicatorColor = Accent.copy(alpha = 0.10f),
-                    unselectedIconColor = TextSecondary,
-                    unselectedTextColor = TextFaint
-                )
-            )
+        Surface(
+            color = SurfaceHigh.copy(alpha = 0.94f),
+            shape = RoundedCornerShape(24.dp),
+            border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.75f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().height(62.dp).padding(horizontal = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                bottomItems.forEach { item ->
+                    val selected = route == item.route
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(50.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (selected) Accent.copy(alpha = 0.11f) else Color.Transparent)
+                            .clickable { onSelect(item.route) }
+                    ) {
+                        Icon(
+                            imageVector = item.icon,
+                            contentDescription = item.label,
+                            tint = if (selected) Accent else TextSecondary,
+                            modifier = Modifier.size(21.dp)
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            item.label.uppercase(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (selected) Accent else TextFaint,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
         }
     }
 }

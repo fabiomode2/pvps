@@ -134,11 +134,81 @@ class OpenCodeClient(
         Unit
     }
 
+    suspend fun updateInboxDelivery(
+        sessionId: String,
+        inboxId: String,
+        delivery: String
+    ) = withContext(Dispatchers.IO) {
+        withTimeout(30_000) {
+            request(
+                "PATCH",
+                "/api/session/$sessionId/inbox/$inboxId",
+                emptyList(),
+                buildJsonObject { put("delivery", delivery) }
+            )
+        }
+        Unit
+    }
+
     suspend fun interrupt(sessionId: String) = withContext(Dispatchers.IO) {
         withTimeout(30_000) {
             post("/api/session/$sessionId/interrupt", buildJsonObject { })
         }
         Unit
+    }
+
+    suspend fun forms(sessionId: String): List<FormInfo> = withContext(Dispatchers.IO) {
+        withTimeout(30_000) {
+            json.decodeFromJsonElement(
+                FormsResponse.serializer(),
+                get("/api/session/$sessionId/form")
+            ).data
+        }
+    }
+
+    suspend fun form(sessionId: String, formId: String): FormDetail = withContext(Dispatchers.IO) {
+        withTimeout(30_000) {
+            json.decodeFromJsonElement(
+                FormResponse.serializer(),
+                get("/api/session/$sessionId/form/$formId")
+            ).data
+        }
+    }
+
+    suspend fun replyForm(sessionId: String, formId: String, answer: JsonObject) =
+        withContext(Dispatchers.IO) {
+            withTimeout(30_000) {
+                post(
+                    "/api/session/$sessionId/form/$formId/reply",
+                    buildJsonObject { put("answer", answer) }
+                )
+            }
+            Unit
+        }
+
+    suspend fun cancelForm(sessionId: String, formId: String, message: String? = null) =
+        withContext(Dispatchers.IO) {
+            withTimeout(30_000) {
+                request(
+                    "DELETE",
+                    "/api/session/$sessionId/form/$formId",
+                    if (message.isNullOrBlank()) emptyList() else listOf("message" to message),
+                    null
+                )
+            }
+            Unit
+        }
+
+    suspend fun usageLimits(directory: String?): UsageLimits? = withContext(Dispatchers.IO) {
+        withTimeout(30_000) {
+            val query = if (directory.isNullOrBlank()) emptyList() else {
+                listOf("location[directory]" to directory)
+            }
+            json.decodeFromJsonElement(
+                UsageLimitsResponse.serializer(),
+                get("/api/experimental/usage/limits", query)
+            ).data
+        }
     }
 
     suspend fun permissions(sessionId: String): List<PermissionRequest> = withContext(Dispatchers.IO) {

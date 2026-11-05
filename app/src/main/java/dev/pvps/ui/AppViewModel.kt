@@ -56,7 +56,16 @@ class AppViewModel(val container: AppContainer) : ViewModel() {
         ConnectionService.start(container.appContext)
         viewModelScope.launch {
             val state = container.ssh.connect(hostId)
-            if (state.status != dev.pvps.data.model.ConnectionState.Status.CONNECTED) {
+            if (state.status == dev.pvps.data.model.ConnectionState.Status.CONNECTED) {
+                val connected = container.ssh.states.value.values.count {
+                    it.status == dev.pvps.data.model.ConnectionState.Status.CONNECTED
+                }
+                val name = container.vault.host(hostId)?.name ?: "host"
+                ConnectionService.update(
+                    container.appContext,
+                    "$name · tunnel ready · $connected connected"
+                )
+            } else {
                 stopServiceIfNoConnectedHost()
             }
         }
@@ -162,6 +171,8 @@ class AppViewModel(val container: AppContainer) : ViewModel() {
     }
 
     fun onResume() {
+        // Reconnect any session that died while the app was backgrounded.
+        container.ssh.verifyConnections()
         container.updates.refreshUnknownSources()
         if (container.updates.state.value is dev.pvps.update.UpdateState.ReadyToInstall &&
             !container.updates.needsUnknownSources.value
@@ -182,11 +193,9 @@ class AppViewModel(val container: AppContainer) : ViewModel() {
 
     override fun onCleared() {
         super.onCleared()
-        container.ssh.disconnectAll()
-        // The OpenCode repository lives in the application container. Cancelling its
-        // scope here would leave a dead repository when the Activity is recreated.
-        container.openCode.disconnect()
-        ConnectionService.stop(container.appContext)
+        // SSH and OpenCode are application-scoped on purpose: an Activity
+        // recreation, rotation, or backgrounding must not kill long-lived
+        // tunnels or the SSE event stream.
     }
 }
 

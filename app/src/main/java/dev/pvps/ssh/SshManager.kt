@@ -8,10 +8,15 @@ import dev.pvps.data.store.AuditStore
 import dev.pvps.data.store.SettingsStore
 import dev.pvps.data.store.VaultRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -29,6 +34,47 @@ class SshManager(
     private val forwards = ConcurrentHashMap<String, LocalForward>()
     private val attemptSeq = AtomicLong()
     private val activeAttempts = ConcurrentHashMap<String, Long>()
+    private val desired = ConcurrentHashMap.newKeySet<String>()
+    private val retryAt = ConcurrentHashMap<String, Long>()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        // Mobile networks drop idle sockets even with JSch keepalives. This
+        // watchdog silently re-dials sessions the user asked to keep open.
+        scope.launch {
+            while (isActive) {
+                delay(15_000)
+                verifyConnections()
+            }
+        }
+    }
+
+    fun verifyConnections() {
+        val now = System.currentTimeMillis()
+        desired.forEach { hostId ->
+            val connection = connections[hostId]
+            val alive = connection?.isConnected == true
+            if (!alive) {
+                if (stateFor(hostId).status == ConnectionState.Status.CONNECTING) return@forEach
+                if (now < (retryAt[hostId] ?: 0L)) return@forEach
+                retryAt[hostId] = now + 15_000
+                scope.launch {
+                    runCatching { connect(hostId) }
+                }
+            } else {
+                // The SSH control socket can survive while the forwarding
+                // listener was closed; rebuild it before OpenCode reconnects.
+                val host = vault.host(hostId) ?: return@forEach
+                if (host.openCodeMode == OpenCodeMode.SSH_TUNNEL) {
+                    val forward = forwards[hostId]
+                    if (forward == null || !forward.isOpen) {
+                        val message = startTunnelIfNeeded(host, connection)
+                        setState(stateFor(hostId).copy(message = message))
+                    }
+                }
+            }
+        }
+    }
 
     fun stateFor(hostId: String): ConnectionState =
         _states.value[hostId] ?: ConnectionState(hostId, ConnectionState.Status.DISCONNECTED)
@@ -80,6 +126,8 @@ class SshManager(
         return when (outcome) {
             is ConnectOutcome.Connected -> {
                 connections[hostId] = connection
+                desired += hostId
+                retryAt.remove(hostId)
                 if (host.hostKeySha256.isNullOrBlank() && outcome.hostKeySha256.isNotBlank()) {
                     vault.setHostKey(hostId, outcome.hostKeySha256)
                 }
@@ -137,6 +185,8 @@ class SshManager(
 
     fun disconnect(hostId: String) {
         // Invalidate any connect attempt that is still suspended.
+        desired.remove(hostId)
+        retryAt.remove(hostId)
         activeAttempts.remove(hostId)
         forwards.remove(hostId)?.close()
         connections.remove(hostId)?.disconnect()
@@ -154,6 +204,8 @@ class SshManager(
     }
 
     fun disconnectAll() {
+        desired.clear()
+        retryAt.clear()
         activeAttempts.clear()
         forwards.keys.toList().forEach { forwards.remove(it)?.close() }
         connections.keys.toList().forEach { connections.remove(it)?.disconnect() }

@@ -120,12 +120,6 @@ fun MoreScreen(
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                     MoreTile("Processes", "CPU / RAM", Icons.Default.Memory, Danger, onProcesses, Modifier.weight(1f))
-                    MoreTile("Files", "SFTP / tar", Icons.Default.Folder, Accent, onOpenFiles, Modifier.weight(1f))
-                }
-            }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                    MoreTile("Terminal", "xterm-256", Icons.Default.Terminal, Accent, onOpenTerminal, Modifier.weight(1f))
                     MoreTile("Hosts", "SSH targets", Icons.Default.Dns, Violet, onHosts, Modifier.weight(1f))
                 }
             }
@@ -137,7 +131,6 @@ fun MoreScreen(
                 SectionCard(title = "Security") {
                     MoreRow("SSH keys", "Generate ed25519 or import existing keys", Icons.Default.Key, onKeys)
                     MoreRow("Audit log", "Connections and destructive actions", Icons.Default.Archive, onAudit)
-                    MoreRow("Hosts", "Add, edit and switch SSH targets", Icons.Default.Terminal, onHosts)
                 }
             }
             item {
@@ -291,6 +284,32 @@ fun SettingsScreen(
                 }
             }
             item {
+                SectionCard(title = "Appearance") {
+                    Text("Theme", style = MaterialTheme.typography.bodyLarge)
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        dev.pvps.ui.theme.Themes.forEach { palette ->
+                            FilterChip(
+                                selected = settings.uiTheme == palette.id,
+                                onClick = { viewModel.updateSettings { it.copy(uiTheme = palette.id) } },
+                                label = { Text(palette.label, style = MaterialTheme.typography.labelSmall) }
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "App font size: ${(settings.fontScale * 100).toInt()}%",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Slider(
+                        value = settings.fontScale,
+                        onValueChange = { value -> viewModel.updateSettings { it.copy(fontScale = value) } },
+                        valueRange = 0.8f..1.35f,
+                        steps = 10
+                    )
+                }
+            }
+            item {
                 SectionCard(title = "Terminal") {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Palette, contentDescription = null, tint = Accent)
@@ -345,9 +364,27 @@ fun SettingsScreen(
                     )
                     SettingSwitch(
                         title = "Compact tool cards",
-                        subtitle = "Show one-line summaries; expand for raw input/output",
+                        subtitle = "Collapse thinking and tool calls into one activity line",
                         checked = settings.compactToolCards,
                         onChecked = { value -> viewModel.updateSettings { it.copy(compactToolCards = value) } }
+                    )
+                    SettingSwitch(
+                        title = "Response notifications",
+                        subtitle = "Notify when an agent finishes, asks a question or needs permission",
+                        checked = settings.notifyResponses,
+                        onChecked = { value -> viewModel.updateSettings { it.copy(notifyResponses = value) } }
+                    )
+                    SettingSwitch(
+                        title = "Show hidden files",
+                        subtitle = "Dotfiles in the SFTP browser",
+                        checked = settings.showHiddenFiles,
+                        onChecked = { value -> viewModel.updateSettings { it.copy(showHiddenFiles = value) } }
+                    )
+                    SettingSwitch(
+                        title = "File grid view",
+                        subtitle = "Adaptive two-column SFTP layout",
+                        checked = settings.fileGridView,
+                        onChecked = { value -> viewModel.updateSettings { it.copy(fileGridView = value) } }
                     )
                 }
             }

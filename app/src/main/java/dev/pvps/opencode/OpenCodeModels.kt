@@ -218,13 +218,39 @@ data class PermissionRequest(
 )
 
 @Serializable
-data class ModelVariant(val id: String = "")
+data class VariantSettings(
+    val reasoningEffort: String? = null
+)
+
+@Serializable
+data class ModelVariant(
+    val id: String = "",
+    val settings: VariantSettings? = null
+) {
+    val label: String
+        get() = settings?.reasoningEffort?.takeIf { it.isNotBlank() }
+            ?: id.takeIf { it.isNotBlank() && it != "default" }
+            ?: "default"
+}
 
 @Serializable
 data class ModelLimit(
     val context: Long = 0,
     val input: Long = 0,
     val output: Long = 0
+)
+
+@Serializable
+data class ModelCost(
+    val input: Double = 0.0,
+    val output: Double = 0.0,
+    val cache: ModelCacheCost = ModelCacheCost()
+)
+
+@Serializable
+data class ModelCacheCost(
+    val read: Double = 0.0,
+    val write: Double = 0.0
 )
 
 @Serializable
@@ -236,10 +262,145 @@ data class ModelInfo(
     val variants: List<ModelVariant> = emptyList(),
     val limit: ModelLimit? = null,
     val status: String = "",
-    val enabled: Boolean = true
+    val enabled: Boolean = true,
+    val type: String = "",
+    val family: String = "",
+    val cost: List<ModelCost> = emptyList()
 ) {
     val label: String get() = if (name.isNotBlank()) name else id
+    val contextLabel: String
+        get() = limit?.context?.takeIf { it > 0 }?.let {
+            if (it >= 1_000_000) "${it / 1_000_000}M" else "${it / 1_000}K"
+        } ?: ""
+    val firstCost: ModelCost? get() = cost.firstOrNull()
 }
+
+@Serializable
+data class FormOption(
+    val value: String = "",
+    val label: String = "",
+    val description: String? = null
+)
+
+@Serializable
+data class FormWhen(
+    val key: String = "",
+    val op: String = "eq",
+    val value: JsonElement = JsonPrimitive("")
+)
+
+/**
+ * The v2 form API uses a discriminated union of field shapes. Keeping every
+ * shape in one nullable DTO is simpler than six serializers and tolerant of
+ * future fields because unknown keys are ignored.
+ */
+@Serializable
+data class FormField(
+    val key: String = "",
+    val type: String = "",
+    val title: String? = null,
+    val description: String? = null,
+    val required: Boolean = false,
+    val hidden: Boolean = false,
+    @SerialName("when") val conditions: List<FormWhen> = emptyList(),
+    val format: String? = null,
+    val minLength: Int? = null,
+    val maxLength: Int? = null,
+    val pattern: String? = null,
+    val placeholder: String? = null,
+    val minimum: JsonElement? = null,
+    val maximum: JsonElement? = null,
+    val default: JsonElement? = null,
+    val options: List<FormOption> = emptyList(),
+    val custom: Boolean = false,
+    val minItems: Int? = null,
+    val maxItems: Int? = null,
+    val url: String? = null
+) {
+    val label: String get() = title?.takeIf { it.isNotBlank() } ?: key
+    val defaultValue: JsonElement?
+        get() = default ?: when (type) {
+            "boolean" -> JsonPrimitive(false)
+            "multiselect" -> JsonArray(emptyList())
+            else -> null
+        }
+}
+
+@Serializable
+data class FormInfo(
+    val id: String = "",
+    val sessionID: String = "",
+    val title: String = "",
+    val metadata: JsonObject? = null,
+    val fields: List<FormField> = emptyList()
+)
+
+@Serializable
+data class FormState(
+    val status: String = "pending",
+    val answer: JsonObject? = null,
+    val message: String? = null
+)
+
+@Serializable
+data class FormDetail(
+    val id: String = "",
+    val sessionID: String = "",
+    val title: String = "",
+    val metadata: JsonObject? = null,
+    val fields: List<FormField> = emptyList(),
+    val state: FormState = FormState()
+) {
+    val isPending: Boolean get() = state.status == "pending"
+}
+
+@Serializable
+data class FormsResponse(val data: List<FormInfo> = emptyList())
+
+@Serializable
+data class FormResponse(val data: FormDetail = FormDetail())
+
+@Serializable
+data class UsageWorkspace(
+    val id: String = "",
+    val name: String? = null,
+    val usageURL: String = ""
+)
+
+@Serializable
+data class UsageMeter(
+    val percent: Double = 0.0,
+    val limited: Boolean = false,
+    val resetsAt: Long = 0
+)
+
+@Serializable
+data class UsageGo(
+    val rolling: UsageMeter = UsageMeter(),
+    val weekly: UsageMeter = UsageMeter(),
+    val monthly: UsageMeter = UsageMeter()
+)
+
+@Serializable
+data class UsageBudget(
+    val id: String = "",
+    val limit: Double = 0.0,
+    val spent: Double = 0.0,
+    val scope: String = "",
+    val per: String = "",
+    val coverage: String = "",
+    val resetsAt: Long = 0
+)
+
+@Serializable
+data class UsageLimits(
+    val workspace: UsageWorkspace = UsageWorkspace(),
+    val go: UsageGo? = null,
+    val budgets: List<UsageBudget> = emptyList()
+)
+
+@Serializable
+data class UsageLimitsResponse(val data: UsageLimits? = null)
 
 @Serializable
 data class AgentInfo(

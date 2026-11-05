@@ -46,6 +46,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import dev.pvps.service.AppNotifications
 import dev.pvps.ui.AppRoot
 import dev.pvps.ui.AppViewModel
 import dev.pvps.ui.AppViewModelFactory
@@ -65,7 +66,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            PvpsTheme {
+            val appearance = viewModel.settings.collectAsStateValue()
+            PvpsTheme(themeId = appearance.uiTheme, fontScale = appearance.fontScale) {
                 AppShell(viewModel)
             }
         }
@@ -73,7 +75,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        AppNotifications.appVisible = true
         viewModel.onResume()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        AppNotifications.appVisible = true
+    }
+
+    override fun onStop() {
+        AppNotifications.appVisible = false
+        super.onStop()
     }
 }
 

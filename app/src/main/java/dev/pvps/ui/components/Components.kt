@@ -100,19 +100,32 @@ import java.util.concurrent.TimeUnit
 fun PvpsBackdrop(modifier: Modifier = Modifier) {
     Canvas(modifier = modifier.fillMaxSize()) {
         drawRect(color = DeepBackground)
-        // A quiet engineering grid, not decoration: it gives the translucent
-        // instrument panels a stable optical baseline without gradients.
-        val step = 40.dp.toPx()
-        val line = OutlineSoft.copy(alpha = 0.22f)
-        var x = 0f
+        // Soft signal glow instead of a hard engineering grid: the backdrop
+        // should recede and let content carry the hierarchy.
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(Accent.copy(alpha = 0.075f), Color.Transparent),
+                center = Offset(size.width * 0.88f, size.height * 0.06f),
+                radius = size.width * 0.9f
+            )
+        )
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(Violet.copy(alpha = 0.055f), Color.Transparent),
+                center = Offset(size.width * 0.08f, size.height * 0.92f),
+                radius = size.width * 0.85f
+            )
+        )
+        val step = 28.dp.toPx()
+        val dot = OutlineSoft.copy(alpha = 0.5f)
+        var x = step / 2
         while (x <= size.width) {
-            drawLine(line, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
+            var y = step / 2
+            while (y <= size.height) {
+                drawCircle(dot, radius = 0.9f, center = Offset(x, y))
+                y += step
+            }
             x += step
-        }
-        var y = 0f
-        while (y <= size.height) {
-            drawLine(line, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
-            y += step
         }
     }
 }
@@ -173,6 +186,7 @@ fun ScreenHeader(
                         text = title,
                         style = MaterialTheme.typography.titleLarge,
                         color = TextPrimary,
+                        fontFamily = DisplayFont,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )

@@ -31,6 +31,8 @@ class LocalForward(
     var port: Int = 0
         private set
 
+    val isOpen: Boolean get() = !closed.get() && serverSocket?.isClosed == false
+
     fun start() {
         val server = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
         serverSocket = server

@@ -28,3 +28,14 @@ phone's public key is in `~/.ssh/authorized_keys`.
 - Auto-updates from GitHub Releases.
 
 Termux terminal-emulator is GPLv3; see [NOTICE](NOTICE).
+
+## Fast iteration
+
+```bash
+./scripts/dev.sh install   # incremental build + install + launch
+./scripts/dev.sh apk       # debug APK only
+./scripts/dev.sh logcat    # follow app logs
+```
+
+Gradle's daemon and build cache stay warm between runs. On ARM hosts the script
+automatically uses the local qemu-wrapped `aapt2` in `/tmp/opencode`.

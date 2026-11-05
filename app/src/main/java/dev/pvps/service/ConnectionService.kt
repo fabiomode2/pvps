@@ -59,7 +59,7 @@ class ConnectionService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun buildNotification(): Notification {
+    private fun buildNotification(text: String = "SSH session active"): Notification {
         val pending = PendingIntent.getActivity(
             this,
             0,
@@ -70,7 +70,7 @@ class ConnectionService : Service() {
             .setSmallIcon(R.drawable.ic_stat_pvps)
             .setColor(0xFF8BFFD1.toInt())
             .setContentTitle("PVPS")
-            .setContentText("SSH session active")
+            .setContentText(text)
             .setContentIntent(pending)
             .setOngoing(true)
             .setSilent(true)
@@ -87,6 +87,27 @@ class ConnectionService : Service() {
                 context,
                 Intent(context, ConnectionService::class.java)
             )
+        }
+
+        fun update(context: android.content.Context, text: String) {
+            val manager = context.getSystemService(NotificationManager::class.java)
+            val pending = PendingIntent.getActivity(
+                context,
+                0,
+                Intent(context, MainActivity::class.java),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_stat_pvps)
+                .setColor(0xFFD1FA76.toInt())
+                .setContentTitle("PVPS")
+                .setContentText(text)
+                .setContentIntent(pending)
+                .setOngoing(true)
+                .setSilent(true)
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+                .build()
+            runCatching { manager.notify(NOTIFICATION_ID, notification) }
         }
 
         fun stop(context: android.content.Context) {
