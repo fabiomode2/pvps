@@ -80,6 +80,7 @@ class OpenCodeRepository(
 
     private var client: OpenCodeClient? = null
     private var host: Host? = null
+    private var connectedBaseUrl: String? = null
     private var eventsJob: Job? = null
     private var refreshJob: Job? = null
     private var queueJob: Job? = null
@@ -89,8 +90,13 @@ class OpenCodeRepository(
     private var lastNotifiedMessageId: String? = null
     private var lastNotifiedFormId: String? = null
 
-    suspend fun connect(host: Host) {
-        if (this.host?.id == host.id && _state.value.connected) return
+    suspend fun connect(host: Host, force: Boolean = false) {
+        // The SSH tunnel can be rebuilt on a new local port after a mobile
+        // network change. Reuse the client only when it points at the same URL.
+        val desiredBase = runCatching { ssh.openCodeBaseUrl(host) }.getOrNull()
+        if (!force && this.host?.id == host.id && _state.value.connected &&
+            client != null && desiredBase != null && connectedBaseUrl == desiredBase
+        ) return
         disconnect()
         this.host = host
         _state.value = State(connecting = true, hostName = host.name)
@@ -114,6 +120,7 @@ class OpenCodeRepository(
                 return
             }
             client = newClient
+            connectedBaseUrl = baseUrl
             val sessions = newClient.listSessions()
             val models = runCatching { newClient.models(host.openCodeDirectory) }.getOrDefault(emptyList())
             val agents = runCatching { newClient.agents(host.openCodeDirectory) }.getOrDefault(emptyList())
@@ -163,6 +170,7 @@ class OpenCodeRepository(
         client?.close()
         client = null
         host = null
+        connectedBaseUrl = null
         mediaCache = LruCache(24)
         synchronized(optimisticLock) { optimisticIds.clear() }
         _state.value = State()
@@ -407,20 +415,18 @@ class OpenCodeRepository(
         Log.i("PVPSQueue", "send session=$id files=${files.size} queued=${_state.value.queued.size}")
 
         return runCatching {
-            // Always use queue delivery. The server starts the loop immediately
-            // when the session is idle and parks the prompt when a turn is
-            // running. Using "steer" here aborts an in-flight turn, and choosing
-            // between the two from a cached busy flag caused prompts to be lost
-            // whenever that flag was stale.
-            val ack = c.prompt(id, prompt, delivery = "queue", files = files)
+            // Steer delivery is injected at the next step boundary: after the
+            // current thinking/tool cycle finishes, without aborting the turn.
+            // Queue delivery waits for the whole turn to go idle, which made a
+            // message sent during tool work feel ignored until the final reply.
+            val ack = c.prompt(id, prompt, delivery = "steer", files = files)
             val created = ack.time.created.takeIf { it > 0 } ?: System.currentTimeMillis()
             val ackId = ack.id.ifBlank { "local-${System.currentTimeMillis()}" }
             Log.i("PVPSQueue", "ack id=$ackId delivery=${ack.delivery} files=${ack.payload.files.size}")
             addOptimisticUserMessage(ackId, created, prompt, ack.payload.files)
             scheduleRefresh()
-            // If the app had a stale "busy" flag, the queue drain can think the
-            // turn is still running and never promote this item. Re-check the
-            // session shortly after admission and force delivery when idle.
+            // Steer normally lands on the next step boundary. Keep a small
+            // fallback for parked items left by older app versions.
             scope.launch {
                 delay(1_500)
                 runCatching {
@@ -455,7 +461,7 @@ class OpenCodeRepository(
             if (command == "compact") {
                 c.compact(id)
             } else {
-                c.runCommand(id, command, text.trim(), delivery = "queue", files = files)
+                c.runCommand(id, command, text.trim(), delivery = "steer", files = files)
                 addOptimisticUserMessage(
                     "local-${System.currentTimeMillis()}",
                     System.currentTimeMillis(),

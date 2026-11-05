@@ -138,8 +138,8 @@ class AppViewModel(val container: AppContainer) : ViewModel() {
         container.settings.update(transform)
     }
 
-    fun connectOpenCode(host: Host) {
-        viewModelScope.launch { container.openCode.connect(host) }
+    fun connectOpenCode(host: Host, force: Boolean = false) {
+        viewModelScope.launch { container.openCode.connect(host, force) }
     }
 
     fun disconnectOpenCode() {

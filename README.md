@@ -26,7 +26,8 @@ phone's public key is in `~/.ssh/authorized_keys`.
 - OpenCode v2 sessions, streaming, tools, permissions, step-by-step inline
   questions, photo/file attachments, slash commands, markdown/tables/code
   rendering and per-session drafts.
-- Native terminal, SFTP, Docker, systemd and processes.
+- Native terminal, Dolphin-style SFTP browser, Docker, systemd and a
+  RAM/CPU process inspector.
 - Auto-updates from GitHub Releases.
 
 Termux terminal-emulator is GPLv3; see [NOTICE](NOTICE).

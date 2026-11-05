@@ -36,6 +36,7 @@ class SshManager(
     private val activeAttempts = ConcurrentHashMap<String, Long>()
     private val desired = ConcurrentHashMap.newKeySet<String>()
     private val retryAt = ConcurrentHashMap<String, Long>()
+    private val probing = ConcurrentHashMap.newKeySet<String>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     init {
@@ -52,28 +53,46 @@ class SshManager(
     fun verifyConnections() {
         val now = System.currentTimeMillis()
         desired.forEach { hostId ->
-            val connection = connections[hostId]
-            val alive = connection?.isConnected == true
-            if (!alive) {
-                if (stateFor(hostId).status == ConnectionState.Status.CONNECTING) return@forEach
-                if (now < (retryAt[hostId] ?: 0L)) return@forEach
-                retryAt[hostId] = now + 15_000
-                scope.launch {
-                    runCatching { connect(hostId) }
-                }
-            } else {
-                // The SSH control socket can survive while the forwarding
-                // listener was closed; rebuild it before OpenCode reconnects.
-                val host = vault.host(hostId) ?: return@forEach
-                if (host.openCodeMode == OpenCodeMode.SSH_TUNNEL) {
-                    val forward = forwards[hostId]
-                    if (forward == null || !forward.isOpen) {
-                        val message = startTunnelIfNeeded(host, connection)
-                        setState(stateFor(hostId).copy(message = message))
+            if (!probing.add(hostId)) return@forEach
+            scope.launch {
+                try {
+                    val connection = connections[hostId]
+                    // JSch's session.isConnected can stay true after a dead
+                    // mobile socket. A cheap exec is the only reliable probe.
+                    val alive = if (connection?.isConnected == true) {
+                        runCatching { connection.exec("true", 8_000).isSuccess }
+                            .getOrDefault(false)
+                    } else {
+                        false
                     }
+                    if (!alive) {
+                        if (stateFor(hostId).status == ConnectionState.Status.CONNECTING) return@launch
+                        if (now < (retryAt[hostId] ?: 0L)) return@launch
+                        reconnect(hostId)
+                    } else {
+                        // The SSH control socket can survive while the forwarding
+                        // listener was closed; rebuild it before OpenCode reconnects.
+                        val host = vault.host(hostId) ?: return@launch
+                        if (host.openCodeMode == OpenCodeMode.SSH_TUNNEL) {
+                            val forward = forwards[hostId]
+                            if (forward == null || !forward.isOpen) {
+                                val message = startTunnelIfNeeded(host, connection ?: return@launch)
+                                setState(stateFor(hostId).copy(message = message))
+                            }
+                        }
+                    }
+                } finally {
+                    probing.remove(hostId)
                 }
             }
         }
+    }
+
+    private suspend fun reconnect(hostId: String) {
+        retryAt[hostId] = System.currentTimeMillis() + 15_000
+        forwards.remove(hostId)?.close()
+        connections.remove(hostId)?.disconnect()
+        runCatching { connect(hostId) }
     }
 
     fun stateFor(hostId: String): ConnectionState =

@@ -63,6 +63,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -245,8 +246,10 @@ fun ChatScreen(
         ActivityResultContracts.PickMultipleVisualMedia(MAX_ATTACHMENTS)
     ) { uris -> importUris(uris) }
 
-    LaunchedEffect(host?.id, connection?.status) {
+    LaunchedEffect(host?.id, connection?.status, connection?.message) {
         if (host != null && connection?.status == ConnectionState.Status.CONNECTED) {
+            // The repository compares the current tunnel URL and reconnects
+            // only when the SSH watchdog rebuilt the forward on a new port.
             viewModel.connectOpenCode(host)
         }
     }
@@ -1101,6 +1104,16 @@ private fun ActivityGroup(
     val reasoning = parts.filterIsInstance<UiPart.Reasoning>()
     val running = tools.any { it.status == "running" || it.status == "streaming" }
     val failed = tools.any { it.status == "error" || it.status == "failed" }
+    var showHistory by remember(groupKey) { mutableStateOf(false) }
+    val activeIndex = remember(parts) {
+        parts.indexOfLast {
+            it is UiPart.Tool && (it.tool.status == "running" || it.tool.status == "streaming")
+        }.takeIf { it >= 0 }
+            ?: parts.indexOfLast { it is UiPart.Tool }.takeIf { it >= 0 }
+            ?: parts.lastIndex
+    }
+    val activePart = parts.getOrNull(activeIndex)
+    val previousCount = parts.size - if (activePart == null) 0 else 1
     val summary = buildString {
         val noun = if (tools.size == 1) "tool call" else "tool calls"
         when {
@@ -1153,26 +1166,130 @@ private fun ActivityGroup(
         }
         if (groupKey in expanded) {
             Column(modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)) {
-                parts.forEachIndexed { index, part ->
-                    val key = "$groupKey-$index"
-                    when (part) {
-                        is UiPart.Reasoning -> ReasoningBlock(
-                            text = part.text,
-                            expanded = key in expanded,
-                            onToggle = { onToggle(key) }
+                activePart?.let { part ->
+                    Text(
+                        if (running) "CURRENT STEP" else "LATEST STEP",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (running) Warning else TextFaint,
+                        modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 1.dp)
+                    )
+                    ActivityPartView(
+                        part = part,
+                        partKey = "$groupKey-$activeIndex",
+                        expanded = true,
+                        onToggle = { onToggle("$groupKey-$activeIndex") },
+                        openCode = openCode,
+                        onOpenSubagent = onOpenSubagent
+                    )
+                }
+                if (previousCount > 0) {
+                    TextButton(
+                        onClick = { showHistory = true },
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                            horizontal = 6.dp,
+                            vertical = 4.dp
                         )
-                        is UiPart.Tool -> ToolCard(
-                            tool = part.tool,
-                            expanded = key in expanded,
-                            onToggle = { onToggle(key) },
-                            openCode = openCode,
-                            onOpenSubagent = onOpenSubagent
+                    ) {
+                        Icon(
+                            Icons.Default.List,
+                            contentDescription = null,
+                            tint = TextFaint,
+                            modifier = Modifier.size(14.dp)
                         )
-                        is UiPart.Text -> MarkdownText(part.text)
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            "Show previous · $previousCount",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary
+                        )
                     }
                 }
             }
         }
+    }
+    if (showHistory) {
+        Dialog(
+            onDismissRequest = { showHistory = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp)
+                    .heightIn(max = 680.dp),
+                color = SurfaceHigh,
+                shape = RoundedCornerShape(22.dp),
+                border = BorderStroke(1.dp, OutlineDark)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "ACTIVITY HISTORY · $previousCount",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = { showHistory = false },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Close history",
+                                tint = TextFaint,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                    }
+                    HorizontalDivider(color = OutlineDark.copy(alpha = 0.7f))
+                    Column(
+                        modifier = Modifier
+                            .verticalScroll(rememberScrollState())
+                            .padding(top = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        parts.forEachIndexed { index, part ->
+                            if (index != activeIndex) {
+                                ActivityPartView(
+                                    part = part,
+                                    partKey = "$groupKey-$index",
+                                    expanded = "$groupKey-$index" in expanded,
+                                    onToggle = { onToggle("$groupKey-$index") },
+                                    openCode = openCode,
+                                    onOpenSubagent = onOpenSubagent
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActivityPartView(
+    part: UiPart,
+    partKey: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    openCode: OpenCodeRepository,
+    onOpenSubagent: (String) -> Unit
+) {
+    when (part) {
+        is UiPart.Reasoning -> ReasoningBlock(
+            text = part.text,
+            expanded = expanded,
+            onToggle = onToggle
+        )
+        is UiPart.Tool -> ToolCard(
+            tool = part.tool,
+            expanded = expanded,
+            onToggle = onToggle,
+            openCode = openCode,
+            onOpenSubagent = onOpenSubagent
+        )
+        is UiPart.Text -> MarkdownText(part.text)
     }
 }
 
@@ -1896,7 +2013,7 @@ private fun Composer(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
-                        "QUEUED · ${queued.size} · sends automatically when the turn ends",
+                        "PENDING · ${queued.size} · delivers at the next step boundary",
                         style = MaterialTheme.typography.labelSmall,
                         color = Warning,
                         modifier = Modifier.padding(start = 2.dp, bottom = 1.dp)
@@ -1911,7 +2028,7 @@ private fun Composer(
                                 modifier = Modifier.fillMaxWidth().padding(start = 9.dp, end = 2.dp, top = 3.dp, bottom = 3.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("QUEUED", style = MaterialTheme.typography.labelSmall, color = Warning)
+                                Text("NEXT STEP", style = MaterialTheme.typography.labelSmall, color = Warning)
                                 Spacer(Modifier.width(8.dp))
                                 Text(
                                     item.text.replace('\n', ' '),
@@ -1931,7 +2048,7 @@ private fun Composer(
                                 }
                                 if (!busy) {
                                     Text(
-                                        "SEND NOW",
+                                        "DELIVER NOW",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = Accent,
                                         modifier = Modifier
@@ -1960,7 +2077,7 @@ private fun Composer(
                     modifier = Modifier.weight(1f),
                     placeholder = {
                         Text(
-                            if (busy) "Queue a message…" else "Message OpenCode…",
+                            if (busy) "Message for the next step…" else "Message OpenCode…",
                             color = TextFaint,
                             style = MaterialTheme.typography.bodyMedium
                         )

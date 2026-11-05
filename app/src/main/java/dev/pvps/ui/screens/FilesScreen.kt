@@ -52,8 +52,14 @@ import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.AudioFile
+import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.FolderZip
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.PictureAsPdf
+import androidx.compose.material.icons.outlined.VideoFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -98,7 +104,6 @@ import dev.pvps.ui.components.MonospaceBox
 import dev.pvps.ui.components.PvpsTextField
 import dev.pvps.ui.components.collectAsStateValue
 import dev.pvps.ui.components.formatBytes
-import dev.pvps.ui.components.formatDate
 import dev.pvps.ui.theme.Accent
 import dev.pvps.ui.theme.Danger
 import dev.pvps.ui.theme.MonoFont
@@ -106,10 +111,12 @@ import dev.pvps.ui.theme.OutlineDark
 import dev.pvps.ui.theme.OutlineSoft
 import dev.pvps.ui.theme.SurfaceDark
 import dev.pvps.ui.theme.SurfaceHigh
+import dev.pvps.ui.theme.Success
 import dev.pvps.ui.theme.SurfaceRaised
 import dev.pvps.ui.theme.TextFaint
 import dev.pvps.ui.theme.TextPrimary
 import dev.pvps.ui.theme.TextSecondary
+import dev.pvps.ui.theme.Violet
 import dev.pvps.ui.theme.Warning
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -349,6 +356,7 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = 88.dp)
                     ) {
+                        item(key = "file-list-header") { FileListHeader() }
                         items(visibleEntries, key = { it.path }) { file ->
                             FileRow(
                                 file = file,
@@ -741,29 +749,29 @@ private fun FileTile(
 ) {
     var menu by remember { mutableStateOf(false) }
     Surface(
-        color = SurfaceRaised.copy(alpha = 0.55f),
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, if (file.isDirectory) Warning.copy(alpha = 0.18f) else OutlineDark.copy(alpha = 0.7f)),
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onOpen)
+        color = SurfaceRaised.copy(alpha = 0.44f),
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, if (file.isDirectory) Warning.copy(alpha = 0.16f) else OutlineDark.copy(alpha = 0.62f)),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).clickable(onClick = onOpen)
     ) {
-        Column(Modifier.padding(12.dp)) {
+        Column(Modifier.padding(start = 12.dp, end = 6.dp, top = 10.dp, bottom = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                FileGlyph(isDirectory = file.isDirectory)
+                FileGlyph(file)
                 Spacer(Modifier.weight(1f))
                 Box(
-                    modifier = Modifier.size(32.dp).clip(CircleShape).clickable { menu = true },
+                    modifier = Modifier.size(30.dp).clip(CircleShape).clickable { menu = true },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         Icons.Default.MoreVert,
                         contentDescription = "Actions for ${file.name}",
                         tint = TextSecondary,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(17.dp)
                     )
                     FileActionMenu(file = file, expanded = menu, onDismiss = { menu = false }, onAction = onAction)
                 }
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(9.dp))
             Text(
                 file.name,
                 style = MaterialTheme.typography.titleSmall,
@@ -771,14 +779,13 @@ private fun FileTile(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(3.dp))
+            Spacer(Modifier.height(2.dp))
             Text(
-                fileMetadata(file),
+                fileSizeLabel(file),
                 style = MaterialTheme.typography.labelSmall,
                 color = TextFaint,
                 fontFamily = MonoFont,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                maxLines = 1
             )
         }
     }
@@ -827,144 +834,152 @@ private fun FileActionMenu(
 }
 
 @Composable
+private fun FileListHeader() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 50.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            "NAME",
+            style = MaterialTheme.typography.labelSmall,
+            color = TextFaint,
+            modifier = Modifier.weight(1f)
+        )
+        Text("SIZE", style = MaterialTheme.typography.labelSmall, color = TextFaint)
+    }
+}
+
+@Composable
 private fun FileRow(
     file: RemoteFile,
     onOpen: () -> Unit,
     onAction: (FileAction) -> Unit
 ) {
     var menu by remember { mutableStateOf(false) }
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 68.dp)
-                .clickable(onClick = onOpen)
-                .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            FileGlyph(isDirectory = file.isDirectory)
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = file.name,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = fileMetadata(file),
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontSize = 10.5.sp,
-                        lineHeight = 14.sp,
-                        letterSpacing = 0.2.sp
-                    ),
-                    color = TextSecondary,
-                    fontFamily = MonoFont,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            if (file.isDirectory) {
-                Spacer(Modifier.width(4.dp))
-                Icon(
-                    Icons.Default.ChevronRight,
-                    contentDescription = null,
-                    tint = TextFaint,
-                    modifier = Modifier.size(15.dp)
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .clickable { menu = true },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.MoreVert,
-                    contentDescription = "Actions for ${file.name}",
-                    tint = TextSecondary,
-                    modifier = Modifier.size(19.dp)
-                )
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    if (!file.isDirectory) {
-                        DropdownMenuItem(
-                            text = { Text("Download", color = TextPrimary) },
-                            leadingIcon = {
-                                Icon(Icons.Default.Download, contentDescription = null, tint = TextSecondary)
-                            },
-                            onClick = { menu = false; onAction(FileAction.DOWNLOAD) }
-                        )
-                    }
-                    DropdownMenuItem(
-                        text = { Text("Rename", color = TextPrimary) },
-                        leadingIcon = {
-                            Icon(Icons.Default.Edit, contentDescription = null, tint = TextSecondary)
-                        },
-                        onClick = { menu = false; onAction(FileAction.RENAME) }
-                    )
-                    if (file.isDirectory) {
-                        DropdownMenuItem(
-                            text = { Text("Create tar.gz", color = TextPrimary) },
-                            leadingIcon = {
-                                Icon(Icons.Default.Archive, contentDescription = null, tint = TextSecondary)
-                            },
-                            onClick = { menu = false; onAction(FileAction.TAR) }
-                        )
-                    }
-                    if (file.name.endsWith(".tar.gz") || file.name.endsWith(".tgz")) {
-                        DropdownMenuItem(
-                            text = { Text("Extract", color = TextPrimary) },
-                            leadingIcon = {
-                                Icon(Icons.Default.Unarchive, contentDescription = null, tint = TextSecondary)
-                            },
-                            onClick = { menu = false; onAction(FileAction.EXTRACT) }
-                        )
-                    }
-                    DropdownMenuItem(
-                        text = { Text("Delete", color = Danger) },
-                        leadingIcon = {
-                            Icon(Icons.Default.Delete, contentDescription = null, tint = Danger)
-                        },
-                        onClick = { menu = false; onAction(FileAction.DELETE) }
-                    )
-                }
-            }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 54.dp)
+            .clickable(onClick = onOpen)
+            .padding(start = 14.dp, end = 2.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        FileGlyph(file, size = 30.dp)
+        Spacer(Modifier.width(11.dp))
+        Text(
+            text = file.name,
+            style = MaterialTheme.typography.titleSmall.copy(
+                fontSize = 14.5.sp,
+                fontWeight = FontWeight.Medium
+            ),
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = fileSizeLabel(file),
+            style = MaterialTheme.typography.labelSmall,
+            color = TextFaint,
+            fontFamily = MonoFont,
+            maxLines = 1
+        )
+        if (file.isDirectory) {
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = TextFaint,
+                modifier = Modifier.size(14.dp)
+            )
         }
-        HorizontalDivider(
-            modifier = Modifier.padding(start = 64.dp, end = 16.dp),
-            thickness = 0.5.dp,
-            color = OutlineDark.copy(alpha = 0.55f)
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .clip(CircleShape)
+                .clickable { menu = true },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Default.MoreVert,
+                contentDescription = "Actions for ${file.name}",
+                tint = TextSecondary,
+                modifier = Modifier.size(18.dp)
+            )
+            FileActionMenu(file = file, expanded = menu, onDismiss = { menu = false }, onAction = onAction)
+        }
+    }
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 55.dp, end = 14.dp),
+        thickness = 0.5.dp,
+        color = OutlineDark.copy(alpha = 0.45f)
+    )
+}
+
+@Composable
+private fun FileGlyph(file: RemoteFile, size: androidx.compose.ui.unit.Dp = 34.dp) {
+    val isDirectory = file.isDirectory
+    val tint = when {
+        isDirectory -> Warning
+        isImageFile(file.name) -> Success
+        isArchiveFile(file.name) -> Violet
+        isCodeFile(file.name) -> Accent
+        else -> TextSecondary
+    }
+    val container = if (isDirectory) Warning.copy(alpha = 0.10f) else tint.copy(alpha = 0.08f)
+    val border = if (isDirectory) Warning.copy(alpha = 0.20f) else tint.copy(alpha = 0.18f)
+    val icon = when {
+        isDirectory -> Icons.Outlined.Folder
+        isImageFile(file.name) -> Icons.Outlined.Image
+        isArchiveFile(file.name) -> Icons.Outlined.FolderZip
+        isCodeFile(file.name) -> Icons.Outlined.Code
+        isVideoFile(file.name) -> Icons.Outlined.VideoFile
+        isAudioFile(file.name) -> Icons.Outlined.AudioFile
+        file.name.endsWith(".pdf", true) -> Icons.Outlined.PictureAsPdf
+        else -> Icons.Outlined.Description
+    }
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(RoundedCornerShape(if (size > 32.dp) 10.dp else 9.dp))
+            .background(container)
+            .border(0.5.dp, border, RoundedCornerShape(if (size > 32.dp) 10.dp else 9.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(size * 0.5f)
         )
     }
 }
 
-@Composable
-private fun FileGlyph(isDirectory: Boolean) {
-    val tint = if (isDirectory) Warning else TextSecondary
-    val container = if (isDirectory) Warning.copy(alpha = 0.10f) else SurfaceRaised.copy(alpha = 0.7f)
-    val border = if (isDirectory) Warning.copy(alpha = 0.20f) else OutlineDark
-    Box(
-        modifier = Modifier
-            .size(36.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(container)
-            .border(0.5.dp, border, RoundedCornerShape(10.dp)),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = if (isDirectory) Icons.Outlined.Folder else Icons.Outlined.Description,
-            contentDescription = null,
-            tint = tint,
-            modifier = Modifier.size(18.dp)
-        )
-    }
-}
+private fun isImageFile(name: String): Boolean =
+    name.substringAfterLast('.', "").lowercase(Locale.US) in
+        setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "heic")
+
+private fun isArchiveFile(name: String): Boolean =
+    name.endsWith(".tar.gz", true) || name.endsWith(".tgz", true) ||
+        name.substringAfterLast('.', "").lowercase(Locale.US) in
+        setOf("zip", "gz", "bz2", "xz", "7z", "rar", "tar")
+
+private fun isCodeFile(name: String): Boolean =
+    name.substringAfterLast('.', "").lowercase(Locale.US) in setOf(
+        "kt", "kts", "java", "js", "ts", "tsx", "jsx", "py", "go", "rs", "c", "h",
+        "cpp", "hpp", "cs", "sh", "bash", "zsh", "fish", "json", "yaml", "yml",
+        "toml", "xml", "html", "css", "scss", "sql", "md", "gradle", "properties"
+    )
+
+private fun isVideoFile(name: String): Boolean =
+    name.substringAfterLast('.', "").lowercase(Locale.US) in
+        setOf("mp4", "mkv", "mov", "webm", "avi", "m4v")
+
+private fun isAudioFile(name: String): Boolean =
+    name.substringAfterLast('.', "").lowercase(Locale.US) in
+        setOf("mp3", "flac", "wav", "ogg", "m4a", "aac", "opus")
 
 @Composable
 private fun DirectoryEmpty(modifier: Modifier = Modifier) {
@@ -1113,11 +1128,8 @@ private fun NameDialog(
     )
 }
 
-private fun fileMetadata(file: RemoteFile): String = buildString {
-    if (!file.isDirectory) append(formatBytes(file.size)).append(" · ")
-    append(formatDate(file.modified))
-    if (file.permissions.isNotBlank()) append(" · ").append(file.permissions)
-}
+private fun fileSizeLabel(file: RemoteFile): String =
+    if (file.isDirectory) "Folder" else formatBytes(file.size)
 
 private fun join(base: String, name: String): String =
     if (base == "/") "/$name" else "${base.trimEnd('/')}/$name"
