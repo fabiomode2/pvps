@@ -249,6 +249,7 @@ UMask=0077
 WantedBy=multi-user.target
 EOF
 
+  UNIT_CHANGED=0
   if ! sudo test -f "${UNIT_FILE}" || ! sudo cmp -s "${WORK_DIR}/${SERVICE_NAME}" "${UNIT_FILE}"; then
     sudo install -m 644 -o root -g root "${WORK_DIR}/${SERVICE_NAME}" "${UNIT_FILE}"
     UNIT_CHANGED=1
@@ -277,6 +278,7 @@ PY
 
 stop_old_opencode() {
   say "Stopping old OpenCode service(s) because --replace was given"
+  warn "This may terminate an active OpenCode chat hosted by that service."
 
   if systemctl cat opencode.service >/dev/null 2>&1; then
     sudo systemctl stop opencode.service 2>/dev/null || true
@@ -306,7 +308,7 @@ resolve_port() {
   if ! port_in_use; then
     if systemctl cat opencode.service >/dev/null 2>&1 && \
        systemctl is-enabled --quiet opencode.service 2>/dev/null; then
-      warn "An existing opencode.service is enabled. If it also uses port ${OC_PORT}, disable it or re-run with --replace to avoid a reboot conflict."
+      warn "An existing opencode.service is enabled. If it also uses port ${OC_PORT}, disable it (sudo systemctl disable --now opencode.service) to avoid a reboot conflict."
     fi
     return 0
   fi
@@ -330,6 +332,8 @@ Not touching it and not starting ${SERVICE_NAME}.
 Re-run with --replace to stop an old opencode.service/background service,
 or stop the existing listener yourself, then run:
   sudo systemctl enable --now ${SERVICE_NAME}
+
+Find the listener with: sudo ss -ltnp 'sport = :${OC_PORT}'
 EOF
   exit 1
 }
@@ -413,7 +417,7 @@ enable_swap() {
 }
 
 harden_ssh() {
-  local tmp="${WORK_DIR}/99-pvps.conf"
+  local tmp="${WORK_DIR}/99-pvps.conf" effective
 
   say "Hardening SSH (local forwarding to 127.0.0.1:${OC_PORT} only)"
   if [[ ! -d /etc/ssh/sshd_config.d ]]; then
@@ -437,10 +441,14 @@ EOF
   fi
   say "sshd -t passed"
 
-  sudo sshd -T 2>/dev/null | grep -E '^(allowtcpforwarding|permitopen|allowagentforwarding|x11forwarding|maxauthtries|logingracetime)[[:space:]]' || true
+  effective="$(sudo sshd -T 2>/dev/null || true)"
+  printf '%s\n' "${effective}" | grep -E '^(allowtcpforwarding|permitopen|allowagentforwarding|x11forwarding|maxauthtries|logingracetime)[[:space:]]' || true
 
-  if ! sudo sshd -T 2>/dev/null | awk -v p="127.0.0.1:${OC_PORT}" '$1 == "permitopen" && $2 == p { found = 1 } END { exit !found }'; then
+  if ! grep -qE "^permitopen[[:space:]]+127\\.0\\.0\\.1:${OC_PORT}([[:space:],]|$)" <<< "${effective}"; then
     warn "The drop-in does not appear to be active; check that sshd_config includes /etc/ssh/sshd_config.d/*.conf."
+  fi
+  if ! grep -qF "allowtcpforwarding local" <<< "${effective}"; then
+    warn "AllowTcpForwarding is not 'local' in the effective sshd config; another file may override the drop-in."
   fi
 
   if systemctl is-active --quiet ssh.service; then
@@ -477,7 +485,8 @@ make_setup_code() {
   host="$(detect_host)"
   if [[ -z "${host}" ]]; then
     warn "Could not detect an IP address; falling back to the hostname."
-    host="$(hostname 2>/dev/null || printf 'unknown')"
+    host="$(hostname 2>/dev/null || true)"
+    [[ -n "${host}" ]] || host="unknown"
   fi
 
   python3 - "${host}" "${RUN_USER}" "${PASSWORD}" "${HOME}" "${OC_PORT}" "${OC_USER}" <<'PY'

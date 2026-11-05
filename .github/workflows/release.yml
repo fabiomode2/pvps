@@ -22,6 +22,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate install script
+        run: bash -n install.sh
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -50,7 +53,10 @@ jobs:
             version="${GITHUB_REF_NAME#v}"
             release_tag="${GITHUB_REF_NAME}"
           else
-            version="$(awk -F'"' '/versionName = / {print $2; exit}' app/build.gradle.kts)"
+            version="$(awk -F'"' '/pvpsVersionName.*\?: "/ {print $4; exit}' app/build.gradle.kts)"
+            if [[ -z "${version}" ]]; then
+              version="$(awk -F'"' '/versionName = "/ {print $2; exit}' app/build.gradle.kts)"
+            fi
             version="${version:-0.0.0}-dev.${GITHUB_SHA::7}"
             release_tag="v${version}"
           fi
@@ -59,6 +65,7 @@ jobs:
             exit 1
           fi
           core="${version%%-*}"
+          core="${core%%+*}"
           IFS=. read -r major minor patch <<< "${core}"
           version_code=$((10#${major:-0} * 10000 + 10#${minor:-0} * 100 + 10#${patch:-0}))
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
