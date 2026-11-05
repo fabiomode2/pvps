@@ -59,6 +59,15 @@ data class SessionInfo(
 ) {
     val displayTitle: String
         get() = title?.takeIf { it.isNotBlank() } ?: "Untitled session"
+
+    /**
+     * `time.busy` and `time.idle` are timestamps, not booleans. The last
+     * transition wins: a session is running only while its last busy event is
+     * newer than its last idle event. Treating a non-null `busy` as "running"
+     * makes every finished session and subagent look active forever.
+     */
+    val isRunning: Boolean
+        get() = (time.busy ?: 0L) > (time.idle ?: 0L)
 }
 
 @Serializable

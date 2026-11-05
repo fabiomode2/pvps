@@ -155,7 +155,7 @@ class OpenCodeRepository(
             _state.value = _state.value.copy(
                 sessions = sessions,
                 activeSessionId = if (activeStillExists) active else fallback,
-                busy = sessions.firstOrNull { it.id == active }?.time?.busy != null
+                busy = sessions.firstOrNull { it.id == active }?.isRunning == true
             )
             if (!activeStillExists) {
                 _state.value.activeSessionId?.let { selectSession(it) }
@@ -170,7 +170,7 @@ class OpenCodeRepository(
             messages = emptyList(),
             queued = emptyList(),
             permissions = emptyList(),
-            busy = _state.value.sessions.firstOrNull { it.id == sessionId }?.time?.busy != null
+            busy = _state.value.sessions.firstOrNull { it.id == sessionId }?.isRunning == true
         )
         refreshMessages()
         refreshInbox()

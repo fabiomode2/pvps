@@ -186,7 +186,7 @@ fun ChatScreen(
         (contextUsed.toDouble() / contextLimit).coerceIn(0.0, 1.0)
     } else null
     val tps = tokensPerSecond(chat.messages, now)
-    val runningSubagents = chat.subagents.count { it.time.busy != null }
+    val runningSubagents = chat.subagents.count { it.isRunning }
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -1170,7 +1170,7 @@ private fun SessionRow(
         ) {
             StatusDot(
                 when {
-                    session.time.busy != null -> Warning
+                    session.isRunning -> Warning
                     active -> Accent
                     else -> TextFaint
                 },
@@ -1192,7 +1192,7 @@ private fun SessionRow(
                         append(formatCost(session.cost))
                         append(" · ")
                         append(relativeTime(session.time.updated))
-                        if (session.time.busy != null) append(" · busy")
+                        if (session.isRunning) append(" · busy")
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = TextFaint,
@@ -1240,7 +1240,7 @@ private fun StatsDialog(
                     buildString {
                         session?.agent?.let { append("$it · ") }
                         session?.model?.let { append("${it.providerID}/${it.id} · ") }
-                        append(if (session?.time?.busy != null) "working" else "idle")
+                        append(if (session?.isRunning == true) "working" else "idle")
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = TextSecondary
@@ -1293,7 +1293,7 @@ private fun StatsDialog(
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                StatusDot(if (sub.time.busy != null) Warning else Violet, 6)
+                                StatusDot(if (sub.isRunning) Warning else Violet, 6)
                                 Spacer(Modifier.width(8.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text(
@@ -1304,7 +1304,7 @@ private fun StatsDialog(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        "${sub.agent ?: "subagent"} · ${if (sub.time.busy != null) "running" else "done"} · ${formatCost(sub.cost)}",
+                                        "${sub.agent ?: "subagent"} · ${if (sub.isRunning) "running" else "done"} · ${formatCost(sub.cost)}",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = TextFaint
                                     )

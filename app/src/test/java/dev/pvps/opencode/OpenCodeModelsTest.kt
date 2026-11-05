@@ -59,6 +59,16 @@ class OpenCodeModelsTest {
     }
 
     @Test
+    fun sessionRunningUsesLastTransitionNotBusyPresence() {
+        val finished = SessionInfo(time = SessionTime(busy = 10, idle = 20))
+        val running = SessionInfo(time = SessionTime(busy = 30, idle = 20))
+        val neverIdled = SessionInfo(time = SessionTime(busy = 30, idle = null))
+        assertEquals(false, finished.isRunning)
+        assertEquals(true, running.isRunning)
+        assertEquals(true, neverIdled.isRunning)
+    }
+
+    @Test
     fun latestMessagePageKeepsCursorAndStreamingTiming() {
         val raw = """
             {

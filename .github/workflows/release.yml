@@ -148,7 +148,10 @@ jobs:
             curl -fsSL https://github.com/fabiomode2/pvps/releases/latest/download/install.sh | bash
             ```
 
-            **What's new in 1.0.3:**
+            **What's new in ${{ steps.meta.outputs.version }}:**
+            - Fixed sessions and subagents showing as "running" forever. Status
+              now uses the newest busy/idle transition instead of the presence
+              of the historical busy timestamp.
             - Redesigned the whole app: compact graphite/phosphor interface,
               Material 3 navigation, denser dashboard, real file names, and a
               focused terminal chrome.
