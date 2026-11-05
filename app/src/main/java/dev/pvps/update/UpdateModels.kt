@@ -48,7 +48,9 @@ data class UpdateInfo(
     val apkUrl: String,
     val size: Long,
     val sha256: String?,
-    val htmlUrl: String
+    val htmlUrl: String,
+    /** Release asset file name, used to look up the SHA256SUMS asset. */
+    val apkName: String = ""
 )
 
 /** State exposed by [UpdateRepository] to the UI. */

@@ -6,6 +6,7 @@ import android.security.keystore.KeyProperties
 import dev.pvps.data.model.SecureData
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.FileOutputStream
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -30,7 +31,7 @@ class SecureStore(private val context: Context) {
         if (!file.exists()) return SecureData()
         return runCatching {
             val bytes = file.readBytes()
-            if (bytes.size < 13) return SecureData()
+            require(bytes.size >= 13) { "vault blob is truncated" }
             val iv = bytes.copyOfRange(0, 12)
             val ciphertext = bytes.copyOfRange(12, bytes.size)
             val cipher = Cipher.getInstance(TRANSFORMATION)
@@ -39,7 +40,11 @@ class SecureStore(private val context: Context) {
             json.decodeFromString<SecureData>(String(plain, Charsets.UTF_8))
         }.getOrElse {
             // A lost Keystore key (factory reset, restore) makes the old blob
-            // unreadable. Never crash the app because of that.
+            // unreadable. Never crash the app because of that, but keep the blob
+            // so it is not silently overwritten and destroyed by the next save.
+            runCatching {
+                file.renameTo(File(context.filesDir, "vault.bin.corrupt-${System.currentTimeMillis()}"))
+            }
             SecureData()
         }
     }
@@ -53,7 +58,10 @@ class SecureStore(private val context: Context) {
         val ciphertext = cipher.doFinal(plain)
         val out = iv + ciphertext
         val tmp = File(context.filesDir, "vault.bin.tmp")
-        tmp.writeBytes(out)
+        FileOutputStream(tmp).use { stream ->
+            stream.write(out)
+            stream.fd.sync()
+        }
         if (!tmp.renameTo(file)) {
             file.writeBytes(out)
             tmp.delete()

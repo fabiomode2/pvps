@@ -22,10 +22,10 @@
 -keepclasseswithmembers class kotlinx.serialization.json.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
--keep,includedescriptorclasses class dev.controlcenter.**$$serializer { *; }
--keepclassmembers class dev.controlcenter.** {
+-keep,includedescriptorclasses class dev.pvps.**$$serializer { *; }
+-keepclassmembers class dev.pvps.** {
     *** Companion;
 }
--keepclasseswithmembers class dev.controlcenter.** {
+-keepclasseswithmembers class dev.pvps.** {
     kotlinx.serialization.KSerializer serializer(...);
 }

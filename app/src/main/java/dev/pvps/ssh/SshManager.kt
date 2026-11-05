@@ -7,12 +7,14 @@ import dev.pvps.data.model.OpenCodeMode
 import dev.pvps.data.store.AuditStore
 import dev.pvps.data.store.SettingsStore
 import dev.pvps.data.store.VaultRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 class SshManager(
     private val vault: VaultRepository,
@@ -25,6 +27,8 @@ class SshManager(
 
     private val connections = ConcurrentHashMap<String, SshConnection>()
     private val forwards = ConcurrentHashMap<String, LocalForward>()
+    private val attemptSeq = AtomicLong()
+    private val activeAttempts = ConcurrentHashMap<String, Long>()
 
     fun stateFor(hostId: String): ConnectionState =
         _states.value[hostId] ?: ConnectionState(hostId, ConnectionState.Status.DISCONNECTED)
@@ -34,6 +38,10 @@ class SshManager(
     fun forward(hostId: String): LocalForward? = forwards[hostId]
 
     suspend fun connect(hostId: String, autoTrust: Boolean = false): ConnectionState {
+        // Two rapid taps must not create two SSH sessions for the same host.
+        if (stateFor(hostId).status == ConnectionState.Status.CONNECTING) {
+            return stateFor(hostId)
+        }
         val host = vault.host(hostId)
             ?: return fail(hostId, "Host not found")
         if (connections[hostId]?.isConnected == true) {
@@ -45,13 +53,31 @@ class SshManager(
         }
 
         setState(ConnectionState(hostId, ConnectionState.Status.CONNECTING, "Connecting to ${host.sshHost}:${host.sshPort}"))
+        val attempt = attemptSeq.incrementAndGet()
+        activeAttempts[hostId] = attempt
         val connection = SshConnection(
             host = host,
             key = key,
             pinnedHostKey = host.hostKeySha256,
             autoTrustHostKey = autoTrust || !settings.settings.value.strictHostKeys
         )
-        return when (val outcome = connection.connect()) {
+        val outcome = try {
+            connection.connect()
+        } catch (e: CancellationException) {
+            connection.disconnect()
+            if (activeAttempts[hostId] == attempt) {
+                activeAttempts.remove(hostId)
+                setState(ConnectionState(hostId, ConnectionState.Status.DISCONNECTED))
+            }
+            throw e
+        }
+        // A disconnect or a newer connect may have happened while this attempt was
+        // suspended. Never install a stale session in that case.
+        if (activeAttempts[hostId] != attempt) {
+            connection.disconnect()
+            return stateFor(hostId)
+        }
+        return when (outcome) {
             is ConnectOutcome.Connected -> {
                 connections[hostId] = connection
                 if (host.hostKeySha256.isNullOrBlank() && outcome.hostKeySha256.isNotBlank()) {
@@ -91,7 +117,8 @@ class SshManager(
                 connection.disconnect()
                 fail(
                     hostId,
-                    "HOST KEY CHANGED. Possible MITM. Expected ${host.hostKeySha256}, got ${outcome.hostKeySha256}"
+                    "HOST KEY CHANGED. Possible MITM. Expected ${host.hostKeySha256}, got ${outcome.hostKeySha256}",
+                    hostKeySha256 = outcome.hostKeySha256
                 )
             }
             is ConnectOutcome.Failed -> {
@@ -109,6 +136,8 @@ class SshManager(
     }
 
     fun disconnect(hostId: String) {
+        // Invalidate any connect attempt that is still suspended.
+        activeAttempts.remove(hostId)
         forwards.remove(hostId)?.close()
         connections.remove(hostId)?.disconnect()
         setState(ConnectionState(hostId, ConnectionState.Status.DISCONNECTED))
@@ -125,6 +154,7 @@ class SshManager(
     }
 
     fun disconnectAll() {
+        activeAttempts.clear()
         forwards.keys.toList().forEach { forwards.remove(it)?.close() }
         connections.keys.toList().forEach { connections.remove(it)?.disconnect() }
         _states.value = _states.value.mapValues { (id, _) -> ConnectionState(id, ConnectionState.Status.DISCONNECTED) }
@@ -170,8 +200,17 @@ class SshManager(
         _states.value = _states.value + (state.hostId to state)
     }
 
-    private fun fail(hostId: String, message: String): ConnectionState {
-        val state = ConnectionState(hostId, ConnectionState.Status.ERROR, message)
+    private fun fail(
+        hostId: String,
+        message: String,
+        hostKeySha256: String? = null
+    ): ConnectionState {
+        val state = ConnectionState(
+            hostId = hostId,
+            status = ConnectionState.Status.ERROR,
+            message = message,
+            hostKeySha256 = hostKeySha256
+        )
         setState(state)
         val host = vault.host(hostId)
         if (host != null) {

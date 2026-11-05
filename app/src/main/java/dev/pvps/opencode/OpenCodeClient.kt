@@ -236,6 +236,10 @@ class OpenCodeClient(
     fun close() {
         runCatching { client.connectionPool.evictAll() }
         runCatching { client.dispatcher.executorService.shutdown() }
+        // The SSE call uses its own client with an infinite read timeout.
+        // Evicting its pool closes the socket so events() can unblock.
+        runCatching { sseClient.connectionPool.evictAll() }
+        runCatching { sseClient.dispatcher.executorService.shutdown() }
     }
 
     private suspend fun get(path: String, query: List<Pair<String, String>> = emptyList()): JsonObject =

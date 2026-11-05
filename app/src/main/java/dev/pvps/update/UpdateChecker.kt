@@ -60,14 +60,22 @@ class UpdateChecker(
             throw UpdateException("The latest APK is not served over HTTPS")
         }
 
+        // GitHub's asset digest is authoritative when present. Older releases do
+        // not expose it, so fall back to the SHA256SUMS asset uploaded by CI and
+        // fail closed when neither source provides a checksum.
+        val sha256 = parseSha256(asset.digest)
+            ?: fetchChecksum(release.assets, asset.name)
+            ?: throw UpdateException("The latest release has no SHA-256 checksum; refusing to install it")
+
         UpdateInfo(
             version = normalizeVersion(tag),
             tag = tag,
             notes = release.body.orEmpty(),
             apkUrl = apkUrl,
             size = asset.size,
-            sha256 = parseSha256(asset.digest),
-            htmlUrl = release.htmlUrl
+            sha256 = sha256,
+            htmlUrl = release.htmlUrl,
+            apkName = asset.name
         )
     }
 
@@ -106,6 +114,42 @@ class UpdateChecker(
             } catch (e: Exception) {
                 throw UpdateException("Could not parse the GitHub release response", e)
             }
+        }
+    }
+
+    /**
+     * Fetches the signed release's `SHA256SUMS` file and returns the checksum for
+     * [apkName]. Returns null when the asset is absent, unreachable, malformed, or
+     * does not list the APK. Failures are deliberately non-fatal here so the caller
+     * can surface a single "no checksum" error.
+     */
+    private fun fetchChecksum(assets: List<GitHubAsset>, apkName: String): String? {
+        if (apkName.isBlank()) return null
+        val sumsAsset = assets.firstOrNull {
+            it.name.equals("SHA256SUMS", ignoreCase = true) &&
+                it.browserDownloadUrl.startsWith("https://")
+        } ?: return null
+
+        val request = Request.Builder()
+            .url(sumsAsset.browserDownloadUrl)
+            .header("User-Agent", USER_AGENT)
+            .header("Accept", "text/plain")
+            .get()
+            .build()
+
+        val response = try {
+            client.newCall(request).execute()
+        } catch (e: IOException) {
+            throw UpdateException("Could not download the update checksum", e)
+        }
+
+        return response.use { result ->
+            if (!result.isSuccessful) return@use null
+            val body = result.body ?: return@use null
+            if (body.contentLength() > MAX_CHECKSUM_BYTES) return@use null
+            val text = body.string()
+            if (text.length > MAX_CHECKSUM_BYTES) return@use null
+            checksumForAsset(text, apkName)
         }
     }
 
@@ -148,6 +192,7 @@ class UpdateChecker(
         private const val PREFS_NAME = "updates"
         private const val KEY_LAST_CHECK = "last_check_ms"
         private const val USER_AGENT = "pvps-android"
+        private const val MAX_CHECKSUM_BYTES = 1_000_000
     }
 }
 
@@ -159,6 +204,23 @@ fun normalizeVersion(version: String): String {
     val trimmed = version.trim()
     return trimmed.removePrefix("v").removePrefix("V").ifBlank { trimmed }
 }
+
+/**
+ * Extracts the SHA-256 for [assetName] from a `sha256sum`-style file.
+ * Accepts both `hash  name` and `hash *name` formats. Returns null when no
+ * well-formed line names the asset.
+ */
+internal fun checksumForAsset(text: String, assetName: String): String? =
+    text.lineSequence().firstNotNullOfOrNull { line ->
+        val parts = line.trim().split(Regex("\\s+"))
+        if (parts.size < 2) return@firstNotNullOfOrNull null
+        val hash = parts.first().lowercase()
+        if (hash.length != 64 || hash.any { it !in '0'..'9' && it !in 'a'..'f' }) {
+            return@firstNotNullOfOrNull null
+        }
+        val name = parts.last().removePrefix("*")
+        hash.takeIf { name == assetName }
+    }
 
 /** True when [candidate] is strictly newer than [current]. */
 fun isNewerVersion(candidate: String, current: String): Boolean =

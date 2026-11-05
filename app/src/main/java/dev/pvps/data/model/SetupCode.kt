@@ -32,6 +32,10 @@ object SetupCode {
         val decoded = json.decodeFromString(SetupPayload.serializer(), String(bytes, Charsets.UTF_8))
         require(decoded.host.isNotBlank()) { "Setup code has no host" }
         require(decoded.user.isNotBlank()) { "Setup code has no user" }
+        require(decoded.port in 1..65535) { "Setup code has an invalid SSH port" }
+        require(decoded.ocPort in 1..65535) { "Setup code has an invalid OpenCode port" }
+        require(decoded.ocUser.isNotBlank()) { "Setup code has no OpenCode user" }
+        require(decoded.ocPassword.isNotBlank()) { "Setup code has no OpenCode password" }
         decoded
     }
 

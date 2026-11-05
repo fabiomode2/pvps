@@ -11,9 +11,17 @@
 #
 # Optional:
 #   PVPS_SSH_PUBKEY="$(cat phone.pub)" bash install.sh
+#   PVPS_HOST=203.0.113.10 bash install.sh
+#   PVPS_SSH_PORT=2222 bash install.sh
+#   bash install.sh --tailscale
 #   bash install.sh --swap
 #   bash install.sh --harden-ssh
 #   bash install.sh --replace
+#
+# By default the setup code uses the machine's public IPv4 address, because a
+# phone on mobile data cannot reach a Tailscale 100.x address unless it is
+# signed into the same tailnet. Use --tailscale (or PVPS_HOST) when the phone
+# is on the tailnet and the public SSH port is not exposed.
 #
 set -euo pipefail
 
@@ -28,20 +36,30 @@ SSHD_DROPIN=/etc/ssh/sshd_config.d/99-pvps.conf
 REPLACE=0
 ENABLE_SWAP=0
 HARDEN_SSH=0
+PREFER_TAILSCALE="${PVPS_PREFER_TAILSCALE:-0}"
 UNIT_CHANGED=0
 PASSWORD=""
+SSH_PORT=""
 
 usage() {
   cat <<'EOF'
-Usage: install.sh [--swap] [--harden-ssh] [--replace]
+Usage: install.sh [--tailscale] [--swap] [--harden-ssh] [--replace]
 
+  --tailscale   Prefer the Tailscale 100.x address in the setup code instead
+                of the public IPv4 address. Only use this when the phone is
+                signed into the same tailnet.
   --swap        Add a 4 GB /swapfile if none is active (default: off).
   --harden-ssh  Restrict SSH local forwarding to 127.0.0.1:49374 (default: off).
   --replace     Stop an old opencode.service/background service that is
                 holding port 49374. Never kills an unknown process.
 
 Environment:
-  PVPS_SSH_PUBKEY   Public key to append to ~/.ssh/authorized_keys (marker: pvps).
+  PVPS_SSH_PUBKEY         Public key to append to ~/.ssh/authorized_keys
+                          (marker: pvps).
+  PVPS_HOST               Host/IP to put in the setup code (overrides detection).
+  PVPS_SSH_PORT           SSH port to put in the setup code (default: detected
+                          from sshd, otherwise 22).
+  PVPS_PREFER_TAILSCALE   Set to 1 for the same effect as --tailscale.
 EOF
 }
 
@@ -58,6 +76,7 @@ while (( $# > 0 )); do
     --replace) REPLACE=1 ;;
     --swap) ENABLE_SWAP=1 ;;
     --harden-ssh) HARDEN_SSH=1 ;;
+    --tailscale) PREFER_TAILSCALE=1 ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "Unknown option: $1" ;;
   esac
@@ -85,8 +104,9 @@ if ! sudo -n true 2>/dev/null; then
 fi
 
 say "Installing base packages"
-sudo apt-get update
-sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+APT_OPTS=(-o DPkg::Lock::Timeout=300 -o Acquire::Retries=3)
+sudo apt-get "${APT_OPTS[@]}" update
+sudo env DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" install -y --no-install-recommends \
   curl ca-certificates tmux openssl python3 unzip
 
 install_ssh_key() {
@@ -196,6 +216,23 @@ EOF
   say "Installed OpenCode v${ver}"
 }
 
+write_env_file() {
+  local src dst
+
+  src="$(mktemp)"
+  dst="$(mktemp)"
+  chmod 600 "${src}" "${dst}"
+  # shellcheck disable=SC2024 # redirect target is the user-owned temporary file
+  sudo cat "${ENV_FILE}" > "${src}" 2>/dev/null || true
+  PVPS_ENV_PASSWORD="${PASSWORD}" awk '
+    /^OPENCODE_PASSWORD=/ { print "OPENCODE_PASSWORD=" ENVIRON["PVPS_ENV_PASSWORD"]; done=1; next }
+    { print }
+    END { if (!done) print "OPENCODE_PASSWORD=" ENVIRON["PVPS_ENV_PASSWORD"] }
+  ' "${src}" > "${dst}"
+  sudo install -m 600 -o root -g root "${dst}" "${ENV_FILE}"
+  rm -f "${src}" "${dst}"
+}
+
 write_env() {
   local existing=""
 
@@ -207,18 +244,11 @@ write_env() {
 
   if [[ -n "${existing}" ]]; then
     PASSWORD="${existing}"
-    sudo sed -i "s|^OPENCODE_PASSWORD=.*|OPENCODE_PASSWORD=${PASSWORD}|" "${ENV_FILE}"
+    write_env_file
     say "Reusing the existing OpenCode password in ${ENV_FILE}"
   else
     PASSWORD="$(openssl rand -hex 32)"
-    if ! sudo test -f "${ENV_FILE}"; then
-      sudo install -m 600 -o root -g root /dev/null "${ENV_FILE}"
-    fi
-    if sudo grep -q '^OPENCODE_PASSWORD=' "${ENV_FILE}"; then
-      sudo sed -i "s|^OPENCODE_PASSWORD=.*|OPENCODE_PASSWORD=${PASSWORD}|" "${ENV_FILE}"
-    else
-      printf 'OPENCODE_PASSWORD=%s\n' "${PASSWORD}" | sudo tee -a "${ENV_FILE}" >/dev/null
-    fi
+    write_env_file
     say "Generated a new OpenCode password in ${ENV_FILE}"
   fi
 
@@ -342,6 +372,8 @@ EOF
 
 start_service() {
   sudo systemctl daemon-reload
+  # A unit that hit systemd's start limit stays failed even after a fix.
+  sudo systemctl reset-failed "${SERVICE_NAME}" 2>/dev/null || true
   sudo systemctl enable "${SERVICE_NAME}" >/dev/null
 
   if systemctl is-active --quiet "${SERVICE_NAME}" && (( UNIT_CHANGED == 0 )); then
@@ -363,7 +395,8 @@ start_service() {
 verify_service() {
   local response
 
-  for _ in {1..15}; do
+  # First start on a small VPS can be slow (npm/opencode cold start, swap-less box).
+  for _ in {1..45}; do
     if response="$(curl -fsS --max-time 3 -u "${OC_USER}:${PASSWORD}" \
       "http://127.0.0.1:${OC_PORT}/api/info" 2>/dev/null)"; then
       printf '%s\n' "${response}"
@@ -464,49 +497,143 @@ EOF
   say "SSH forwarding is now restricted. Keep this session open while you test a new one."
 }
 
-detect_host() {
-  local host=""
+is_ipv4() {
+  local ip="${1:-}" octet
+  local -a octets
 
-  if command -v tailscale >/dev/null 2>&1; then
-    host="$(tailscale ip -4 2>/dev/null | head -n 1 || true)"
-    if [[ -z "${host}" ]]; then
-      host="$(sudo -n tailscale ip -4 2>/dev/null | head -n 1 || true)"
+  [[ "${ip}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+  IFS=. read -r -a octets <<< "${ip}"
+  for octet in "${octets[@]}"; do
+    (( 10#${octet} <= 255 )) || return 1
+  done
+}
+
+detect_public_ipv4() {
+  local endpoint ip
+  for endpoint in \
+    "https://api.ipify.org" \
+    "https://ifconfig.me/ip" \
+    "https://icanhazip.com"; do
+    ip="$(curl -4 -fsS --max-time 8 --retry 2 --retry-delay 1 "${endpoint}" 2>/dev/null | tr -d '[:space:]' || true)"
+    if is_ipv4 "${ip}"; then
+      printf '%s' "${ip}"
+      return 0
     fi
+  done
+  return 1
+}
+
+detect_tailscale_ipv4() {
+  local ip
+  command -v tailscale >/dev/null 2>&1 || return 1
+
+  ip="$(timeout 5 tailscale ip -4 2>/dev/null | head -n 1 | tr -d '[:space:]' || true)"
+  if ! is_ipv4 "${ip}"; then
+    ip="$(timeout 5 sudo -n tailscale ip -4 2>/dev/null | head -n 1 | tr -d '[:space:]' || true)"
   fi
-  if [[ -z "${host}" ]]; then
-    host="$(curl -fsS --max-time 8 https://api.ipify.org 2>/dev/null || true)"
+  is_ipv4 "${ip}" || return 1
+  printf '%s' "${ip}"
+}
+
+detect_lan_ipv4() {
+  local ip
+  # Prefer the address on the default-route interface; hostname -I can list
+  # Docker bridges and other virtual interfaces first.
+  ip="$(ip route get 1.1.1.1 2>/dev/null |
+    awk '{ for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit } }' || true)"
+  if is_ipv4 "${ip}"; then
+    printf '%s' "${ip}"
+    return 0
   fi
-  if [[ -z "${host}" ]]; then
-    host="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+
+  while IFS= read -r ip; do
+    [[ "${ip}" =~ ^127\. ]] && continue
+    [[ "${ip}" =~ ^169\.254\. ]] && continue
+    [[ "${ip}" =~ ^172\.(1[7-9]|2[0-9]|3[01])\. ]] && continue
+    if is_ipv4 "${ip}"; then
+      printf '%s' "${ip}"
+      return 0
+    fi
+  done < <(hostname -I 2>/dev/null | tr ' ' '\n')
+  return 1
+}
+
+detect_host() {
+  local host="" public="" tailscale="" lan=""
+
+  if [[ -n "${PVPS_HOST:-}" ]]; then
+    printf '%s' "${PVPS_HOST}"
+    return 0
   fi
+
+  public="$(detect_public_ipv4 || true)"
+  tailscale="$(detect_tailscale_ipv4 || true)"
+  lan="$(detect_lan_ipv4 || true)"
+
+  if [[ "${PREFER_TAILSCALE}" == "1" ]]; then
+    host="${tailscale:-${public}}"
+  else
+    host="${public:-${tailscale}}"
+  fi
+  [[ -n "${host}" ]] || host="${lan}"
   if [[ -z "${host}" ]]; then
     host="$(hostname 2>/dev/null || true)"
   fi
+
+  if [[ -n "${public}" && "${host}" != "${public}" ]]; then
+    warn "Public IPv4 ${public} was detected but not used. The phone must be able to reach ${host}."
+  fi
+  if [[ -n "${tailscale}" && "${host}" != "${tailscale}" ]]; then
+    warn "Tailscale address ${tailscale} was detected but not used; phones outside the tailnet cannot reach it."
+    warn "If the phone is on the same tailnet, rerun with --tailscale or PVPS_HOST=${tailscale}."
+  fi
+  if [[ -z "${host}" ]]; then
+    warn "Could not detect an IP address; falling back to the hostname."
+    host="unknown"
+  fi
+
   printf '%s' "${host}"
+}
+
+detect_ssh_port() {
+  local port="${PVPS_SSH_PORT:-}"
+
+  if [[ -n "${port}" ]]; then
+    if [[ ! "${port}" =~ ^[0-9]+$ ]] || (( 10#${port} < 1 || 10#${port} > 65535 )); then
+      die "PVPS_SSH_PORT must be a TCP port between 1 and 65535."
+    fi
+    printf '%s' "${port}"
+    return 0
+  fi
+
+  port="$(sudo -n sshd -T 2>/dev/null | awk 'tolower($1) == "port" { print $2; exit }' || true)"
+  if [[ "${port}" =~ ^[0-9]+$ ]] && (( 10#${port} >= 1 && 10#${port} <= 65535 )); then
+    printf '%s' "${port}"
+    return 0
+  fi
+  printf '22'
 }
 
 make_setup_code() {
   local host
-  host="$(detect_host)"
-  if [[ -z "${host}" ]]; then
-    warn "Could not detect an IP address; falling back to the hostname."
-    host="$(hostname 2>/dev/null || true)"
-    [[ -n "${host}" ]] || host="unknown"
-  fi
 
-  PVPS_SETUP_PASSWORD="${PASSWORD}" python3 - "${host}" "${RUN_USER}" "${HOME}" "${OC_PORT}" "${OC_USER}" <<'PY'
+  host="$(detect_host)"
+  [[ -n "${SSH_PORT}" ]] || SSH_PORT="$(detect_ssh_port)"
+  say "Setup code will use ${host}:${SSH_PORT}"
+
+  PVPS_SETUP_PASSWORD="${PASSWORD}" python3 - "${host}" "${RUN_USER}" "${HOME}" "${OC_PORT}" "${OC_USER}" "${SSH_PORT}" <<'PY'
 import base64
 import json
 import os
 import sys
 
-host, user, directory, oc_port, oc_user = sys.argv[1:6]
+host, user, directory, oc_port, oc_user, ssh_port = sys.argv[1:7]
 password = os.environ["PVPS_SETUP_PASSWORD"]
 payload = {
     "v": 1,
     "name": "vps",
     "host": host,
-    "port": 22,
+    "port": int(ssh_port),
     "user": user,
     "ocPort": int(oc_port),
     "ocUser": oc_user,

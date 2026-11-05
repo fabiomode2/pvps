@@ -75,9 +75,14 @@ class UpdateRepository(
                 _state.value = UpdateState.Idle
                 throw e
             } catch (e: Exception) {
-                _state.value = UpdateState.Error(
-                    e.message?.takeIf { it.isNotBlank() } ?: "Could not check for updates"
-                )
+                // Automatic checks stay silent; only a manual check surfaces the error.
+                _state.value = if (force) {
+                    UpdateState.Error(
+                        e.message?.takeIf { it.isNotBlank() } ?: "Could not check for updates"
+                    )
+                } else {
+                    UpdateState.Idle
+                }
             }
         }
     }
@@ -108,14 +113,15 @@ class UpdateRepository(
 
                 try {
                     if (!isUsableCachedApk(target, info)) {
+                        val expectedHash = info.sha256
+                            ?: throw UpdateException("No SHA-256 checksum is available; refusing to install")
                         _state.value = UpdateState.Downloading(0f)
                         downloadTo(info, part)
 
                         if (info.size > 0 && part.length() != info.size) {
                             throw UpdateException("Downloaded APK size does not match the release metadata")
                         }
-                        val expectedHash = info.sha256
-                        if (expectedHash != null && !sha256Matches(part, expectedHash)) {
+                        if (!sha256Matches(part, expectedHash)) {
                             throw UpdateException("Downloaded APK failed SHA-256 verification")
                         }
 
@@ -275,9 +281,8 @@ class UpdateRepository(
     }
 
     /**
-     * Reuses a previous download only when it can be trusted: matching size and, when
-     * GitHub published a digest, a matching SHA-256. Otherwise it is deleted and fetched
-     * again.
+     * Reuses a previous download only when it can be trusted: matching size and a
+     * matching SHA-256. Without a checksum the cache is never trusted.
      */
     private fun isUsableCachedApk(file: File, info: UpdateInfo): Boolean {
         if (!file.isFile || file.length() <= 0L) return false
@@ -286,7 +291,12 @@ class UpdateRepository(
             return false
         }
 
-        val expectedHash = info.sha256 ?: return info.size > 0L
+        // Without a published checksum the cached file cannot be trusted; force a
+        // fresh download so the mandatory verification step runs.
+        val expectedHash = info.sha256 ?: run {
+            file.delete()
+            return false
+        }
         // A cache read failure should fall through to a fresh download, not abort the update.
         val matches = runCatching { sha256Matches(file, expectedHash) }.getOrDefault(false)
         if (!matches) {
@@ -326,6 +336,10 @@ class UpdateRepository(
                 setDataAndType(uri, "application/vnd.android.package-archive")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
             }
+            // End this update attempt before handing over to the system installer.
+            // Otherwise onResume() would relaunch the installer every time the
+            // user cancels it and returns to PVPS.
+            _state.value = UpdateState.Idle
             ContextCompat.startActivity(appContext, intent, null)
         } catch (e: ActivityNotFoundException) {
             _state.value = UpdateState.Error("No package installer is available on this device")

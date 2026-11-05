@@ -94,9 +94,20 @@ fun UpdateDialog(
             dismissButton = { TextButton(onClick = onDismiss) { Text("Later") } }
         )
 
-        // Automatic checks are silent: offline/rate-limit/no-release errors must not
-        // interrupt the user on every launch. Manual checks can surface them later.
-        is UpdateState.Error -> Unit
+        // Automatic check failures are turned into Idle by UpdateRepository; a manual
+        // check or a failed download surfaces the message here.
+        is UpdateState.Error -> AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Update failed") },
+            text = {
+                Text(
+                    state.message.ifBlank { "Could not complete the update." },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary
+                )
+            },
+            confirmButton = { TextButton(onClick = onDismiss) { Text("Close", color = Accent) } }
+        )
 
         UpdateState.Checking, UpdateState.Idle -> Unit
     }

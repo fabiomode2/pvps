@@ -23,7 +23,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Validate install script
-        run: bash -n install.sh
+        run: |
+          bash -n install.sh
+          shellcheck -S warning install.sh
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -137,7 +139,7 @@ jobs:
         with:
           tag_name: ${{ steps.meta.outputs.release_tag }}
           name: PVPS ${{ steps.meta.outputs.version }}
-          prerelease: ${{ github.ref_type != 'tag' }}
+          prerelease: ${{ github.ref_type != 'tag' || contains(steps.meta.outputs.version, '-') }}
           body: |
             **Download:** `pvps-${{ steps.meta.outputs.version }}.apk` (Android 9+, arm64-v8a)
 
@@ -145,6 +147,21 @@ jobs:
             ```bash
             curl -fsSL https://github.com/fabiomode2/pvps/releases/latest/download/install.sh | bash
             ```
+
+            **Fixes in this release:**
+            - Setup codes use the public IPv4 by default; a Tailscale `100.x`
+              address is only used with `--tailscale`/`PVPS_HOST`.
+            - SSH port is detected instead of always using 22.
+            - First connection to a new host now reaches the fingerprint trust prompt.
+            - Android 9 no longer crashes on startup.
+            - Cancelling the system installer no longer relaunches it on every resume.
+            - Failed/closed SSH sessions stop the foreground service notification.
+            - SSH commands now time out even after the channel opens.
+            - Corrupt vaults are quarantined instead of being silently overwritten.
+            - Update APKs are always checked against SHA-256 (asset digest or
+              release SHA256SUMS); missing checksums are refused.
+            - Deleting a host now tears down its tunnel, OpenCode client and
+              foreground service notification.
           files: |
             dist/pvps-${{ steps.meta.outputs.version }}.apk
             dist/SHA256SUMS

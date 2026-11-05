@@ -238,7 +238,11 @@ fun OnboardingScreen(
                         val parsed = SetupCode.parse(value)
                         parsed.onSuccess { payload ->
                             val firstKey = viewModel.keys.value.firstOrNull()
-                            val host = SetupCode.toHost(payload).copy(keyId = firstKey?.id)
+                            if (firstKey == null) {
+                                setupError = "Create an SSH key first, then import the setup code."
+                                return@onSuccess
+                            }
+                            val host = SetupCode.toHost(payload).copy(keyId = firstKey.id)
                             viewModel.saveHost(host)
                             viewModel.selectHost(host.id)
                             showSetup = false

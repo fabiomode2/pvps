@@ -101,8 +101,10 @@ fun AppRoot(viewModel: AppViewModel) {
     val settings = viewModel.settings.collectAsStateValue()
     val updateState = viewModel.updateState.collectAsStateValue()
     val needsUnknownSources = viewModel.needsUnknownSources.collectAsStateValue()
-    val pendingHostKey = selectedHost?.let { states[it.id] }
-        ?.takeIf { it.status == ConnectionState.Status.NEEDS_HOST_KEY }
+    val pendingHost = hosts.firstOrNull {
+        states[it.id]?.status == ConnectionState.Status.NEEDS_HOST_KEY
+    }
+    val pendingHostKey = pendingHost?.let { states[it.id] }
 
     LaunchedEffect(Unit) {
         // A debug APK cannot install a release-signed APK. Only auto-check in release.
@@ -256,7 +258,7 @@ fun AppRoot(viewModel: AppViewModel) {
 
     if (pendingHostKey != null) {
         AlertDialog(
-            onDismissRequest = { selectedHost?.let { viewModel.disconnect(it.id) } },
+            onDismissRequest = { pendingHost?.let { viewModel.disconnect(it.id) } },
             containerColor = SurfaceHigh,
             shape = RoundedCornerShape(28.dp),
             title = { Text("Unknown host key", color = Warning, style = MaterialTheme.typography.headlineSmall) },
@@ -276,12 +278,12 @@ fun AppRoot(viewModel: AppViewModel) {
                 }
             },
             confirmButton = {
-                TextButton(onClick = { selectedHost?.let { viewModel.trustHostKey(it.id) } }) {
+                TextButton(onClick = { pendingHost?.let { viewModel.trustHostKey(it.id) } }) {
                     Text("Trust and connect", color = Accent)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { selectedHost?.let { viewModel.disconnect(it.id) } }) {
+                TextButton(onClick = { pendingHost?.let { viewModel.disconnect(it.id) } }) {
                     Text("Cancel", color = TextSecondary)
                 }
             }

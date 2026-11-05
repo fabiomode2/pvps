@@ -52,7 +52,9 @@ class ConnectionService : Service() {
                 0
             }
         )
-        return START_STICKY
+        // If Android kills the process, the SSH sessions are gone too. Restarting
+        // the service without them would only show a misleading notification.
+        return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

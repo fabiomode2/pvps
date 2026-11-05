@@ -54,7 +54,12 @@ class AppViewModel(val container: AppContainer) : ViewModel() {
 
     fun connect(hostId: String) {
         ConnectionService.start(container.appContext)
-        viewModelScope.launch { container.ssh.connect(hostId) }
+        viewModelScope.launch {
+            val state = container.ssh.connect(hostId)
+            if (state.status != dev.pvps.data.model.ConnectionState.Status.CONNECTED) {
+                stopServiceIfNoConnectedHost()
+            }
+        }
     }
 
     fun connectSelected() {
@@ -63,15 +68,30 @@ class AppViewModel(val container: AppContainer) : ViewModel() {
 
     fun disconnect(hostId: String) {
         container.ssh.disconnect(hostId)
+        if (container.ssh.states.value.values.none {
+                it.status == dev.pvps.data.model.ConnectionState.Status.CONNECTED
+            }
+        ) {
+            // The OpenCode client points at a local tunnel that no longer exists.
+            container.openCode.disconnect()
+        }
+        stopServiceIfNoConnectedHost()
     }
 
     fun disconnectAll() {
         container.ssh.disconnectAll()
+        container.openCode.disconnect()
         ConnectionService.stop(container.appContext)
     }
 
     fun trustHostKey(hostId: String) {
-        viewModelScope.launch { container.ssh.trustHostKey(hostId) }
+        ConnectionService.start(container.appContext)
+        viewModelScope.launch {
+            val state = container.ssh.trustHostKey(hostId)
+            if (state.status != dev.pvps.data.model.ConnectionState.Status.CONNECTED) {
+                stopServiceIfNoConnectedHost()
+            }
+        }
     }
 
     fun saveHost(host: Host) {
@@ -80,8 +100,14 @@ class AppViewModel(val container: AppContainer) : ViewModel() {
     }
 
     fun deleteHost(hostId: String) {
-        container.ssh.disconnect(hostId)
+        // Full teardown also stops the tunnel, OpenCode client, and foreground service.
+        disconnect(hostId)
         container.vault.deleteHost(hostId)
+    }
+
+    fun clearHostKey(hostId: String) {
+        val host = container.vault.host(hostId) ?: return
+        container.vault.upsertHost(host.copy(hostKeySha256 = null))
     }
 
     fun saveKey(key: SshKey) {
@@ -144,10 +170,22 @@ class AppViewModel(val container: AppContainer) : ViewModel() {
         }
     }
 
+    private fun stopServiceIfNoConnectedHost() {
+        // A second tap returns CONNECTING immediately; the first attempt is still
+        // active and must keep the foreground service alive.
+        val anyActive = container.ssh.states.value.values.any {
+            it.status == dev.pvps.data.model.ConnectionState.Status.CONNECTED ||
+                it.status == dev.pvps.data.model.ConnectionState.Status.CONNECTING
+        }
+        if (!anyActive) ConnectionService.stop(container.appContext)
+    }
+
     override fun onCleared() {
         super.onCleared()
         container.ssh.disconnectAll()
-        container.openCode.close()
+        // The OpenCode repository lives in the application container. Cancelling its
+        // scope here would leave a dead repository when the Activity is recreated.
+        container.openCode.disconnect()
         ConnectionService.stop(container.appContext)
     }
 }

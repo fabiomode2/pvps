@@ -289,6 +289,7 @@ fun HostEditScreen(
     onBack: () -> Unit
 ) {
     val existing = remember(hostId) { viewModel.hosts.value.firstOrNull { it.id == hostId } }
+    var pinnedKey by rememberSaveable(hostId) { mutableStateOf(existing?.hostKeySha256) }
     val keys = viewModel.keys.collectAsStateValue()
     val states = viewModel.connectionStates.collectAsStateValue()
     val state = hostId?.let { states[it] }
@@ -380,7 +381,15 @@ fun HostEditScreen(
             }
             Text("SSH", style = MaterialTheme.typography.titleMedium, color = Accent)
             OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(value = sshHost, onValueChange = { sshHost = it }, label = { Text("Host / Tailscale IP") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(
+                value = sshHost,
+                onValueChange = { sshHost = it },
+                label = { Text("Host (public IP or hostname)") },
+                supportingText = {
+                    Text("Use the public IPv4 printed by install.sh. A Tailscale 100.x address only works when this phone is on the same tailnet.")
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = sshPort,
@@ -470,6 +479,12 @@ fun HostEditScreen(
                     value = openCodeHost,
                     onValueChange = { openCodeHost = it },
                     label = { Text("OpenCode host (blank = SSH host)") },
+                    supportingText = {
+                        Text(
+                            "Direct mode uses plain HTTP. Use it only on a trusted private network or Tailscale.",
+                            color = Warning
+                        )
+                    },
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -511,10 +526,18 @@ fun HostEditScreen(
             if (existing != null) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Host key: ${existing.hostKeySha256 ?: "not pinned yet"}",
+                    "Host key: ${pinnedKey ?: "not pinned yet"}",
                     style = MaterialTheme.typography.labelSmall,
                     color = TextSecondary
                 )
+                if (pinnedKey != null) {
+                    TextButton(onClick = {
+                        viewModel.clearHostKey(existing.id)
+                        pinnedKey = null
+                    }) {
+                        Text("Forget pinned host key", color = Danger)
+                    }
+                }
             }
             Spacer(Modifier.height(20.dp))
         }
