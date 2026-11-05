@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PVPS</string>
+    <string name="connection_channel">SSH connection</string>
+    <string name="connection_channel_desc">Keeps SSH sessions alive while the app is in the background.</string>
+</resources>

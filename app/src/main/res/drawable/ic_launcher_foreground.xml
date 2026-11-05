@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Hexagonal node / server shell -->
+    <path
+        android:pathData="M81,54L67.5,77.3827L40.5,77.3827L27,54L40.5,30.6173L67.5,30.6173Z"
+        android:strokeColor="#5EEAD4"
+        android:strokeWidth="5.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+
+    <!-- Violet live-link edge -->
+    <path
+        android:pathData="M67.5,30.6173L81,54"
+        android:strokeColor="#A78BFA"
+        android:strokeWidth="6.2"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Terminal prompt -->
+    <path
+        android:pathData="M45,45.7L52,54L45,62.3"
+        android:strokeColor="#E6FFFB"
+        android:strokeWidth="5.3"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+
+    <!-- Cursor -->
+    <path
+        android:pathData="M58.8,59.35L62.8,59.35A2.8,2.8 0 0 1 65.6,62.15A2.8,2.8 0 0 1 62.8,64.95L58.8,64.95A2.8,2.8 0 0 1 56,62.15A2.8,2.8 0 0 1 58.8,59.35Z"
+        android:fillColor="#E6FFFB" />
+</vector>

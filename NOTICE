@@ -1,0 +1,13 @@
+# Third-party notices
+
+PVPS is built with these third-party components:
+
+- **Termux terminal-emulator** — GPLv3. Source: https://github.com/termux/termux-app
+- **JSch** (`com.github.mwiede:jsch`) — BSD 3-Clause.
+- **BouncyCastle** (`org.bouncycastle:bcprov-jdk18on`) — MIT.
+- **AndroidX / Jetpack Compose** — Apache License 2.0.
+- **OkHttp** — Apache License 2.0.
+- **Coil** — Apache License 2.0.
+- **kotlinx.serialization** — Apache License 2.0.
+
+Full license texts are available in the respective upstream repositories and dependency artifacts.

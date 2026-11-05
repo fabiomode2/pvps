@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  OpenCode is reached over an SSH local tunnel (127.0.0.1) or over a
+  WireGuard/Tailscale network. The API is HTTP + Basic auth by design; it is
+  never exposed to the public internet. Cleartext is therefore limited to the
+  app's private transports.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
