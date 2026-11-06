@@ -160,11 +160,13 @@ fun TerminalScreen(
             error = null
             runCatching {
                 val shell = withContext(Dispatchers.IO) { ssh.openShell(host.id, 80, 24) }
+                // Remote OSC 52 clipboard writes are ignored by TerminalController.
+                // Only explicit local actions below (Copy transcript) write the
+                // device clipboard.
                 controller = TerminalController(
                     scope = scope,
                     shell = shell,
                     palette = palette,
-                    onCopy = { text -> clipboard.setText(AnnotatedString(text)) },
                     bellCallback = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress) },
                     onExit = {
                         error = "Shell exited"

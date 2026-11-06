@@ -299,13 +299,17 @@ fun HostEditScreen(
     var sshUser by rememberSaveable { mutableStateOf(existing?.sshUser ?: "ubuntu") }
     var authType by rememberSaveable { mutableStateOf(existing?.authType ?: AuthType.KEY) }
     var keyId by rememberSaveable { mutableStateOf(existing?.keyId) }
-    var password by rememberSaveable { mutableStateOf(existing?.password.orEmpty()) }
+    // Secrets deliberately use plain remember instead of rememberSaveable:
+    // saved instance state lives outside the Keystore-encrypted vault. Activity
+    // recreation or process death therefore loses in-progress secret input by
+    // design; ordinary recomposition still preserves it.
+    var password by remember { mutableStateOf(existing?.password.orEmpty()) }
     var showPassword by remember { mutableStateOf(false) }
     var openCodeMode by rememberSaveable { mutableStateOf(existing?.openCodeMode ?: OpenCodeMode.SSH_TUNNEL) }
     var openCodeHost by rememberSaveable { mutableStateOf(existing?.openCodeHost.orEmpty()) }
     var openCodePort by rememberSaveable { mutableStateOf((existing?.openCodePort ?: 49374).toString()) }
     var openCodeUser by rememberSaveable { mutableStateOf(existing?.openCodeUsername ?: "opencode") }
-    var openCodePassword by rememberSaveable { mutableStateOf(existing?.openCodePassword.orEmpty()) }
+    var openCodePassword by remember { mutableStateOf(existing?.openCodePassword.orEmpty()) }
     var openCodeDirectory by rememberSaveable { mutableStateOf(existing?.openCodeDirectory.orEmpty()) }
     var tags by rememberSaveable { mutableStateOf(existing?.tags?.joinToString(", ").orEmpty()) }
     var showKeyMenu by remember { mutableStateOf(false) }
@@ -698,7 +702,8 @@ fun GenerateKeyDialog(
     onGenerate: (String, String, Boolean) -> Unit
 ) {
     var name by rememberSaveable { mutableStateOf("phone") }
-    var passphrase by rememberSaveable { mutableStateOf("") }
+    // Passphrase is a secret and must not enter Android saved instance state.
+    var passphrase by remember { mutableStateOf("") }
     var rsa by rememberSaveable { mutableStateOf(false) }
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
@@ -731,9 +736,12 @@ fun ImportKeyDialog(
     onImport: (String, String, String, String) -> Unit
 ) {
     var name by rememberSaveable { mutableStateOf("imported") }
-    var privateKey by rememberSaveable { mutableStateOf("") }
+    // Private-key material and its passphrase stay out of saved instance state;
+    // activity recreation or process death intentionally clears them and the
+    // import must be retried rather than restored from an OS-managed bundle.
+    var privateKey by remember { mutableStateOf("") }
     var publicKey by rememberSaveable { mutableStateOf("") }
-    var passphrase by rememberSaveable { mutableStateOf("") }
+    var passphrase by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,

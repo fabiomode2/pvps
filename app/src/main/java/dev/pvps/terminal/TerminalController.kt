@@ -18,12 +18,18 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+
+// Trust boundary: terminal responses and user input are queued for the remote
+// PTY. Bound both item count and bytes so a host that withholds the SSH channel
+// window cannot grow app memory without limit.
+private const val MAX_QUEUED_WRITES = 64
+private const val MAX_QUEUED_BYTES = 256L * 1024
 
 class TerminalController(
     private val scope: CoroutineScope,
     private val shell: ShellChannel,
     palette: TerminalPalette,
-    private val onCopy: (String) -> Unit = {},
     private val bellCallback: () -> Unit = {},
     private val onExit: () -> Unit = {}
 ) : TerminalOutput(), TerminalSessionClient {
@@ -31,7 +37,8 @@ class TerminalController(
     // These must be initialized before TerminalEmulator: its constructor
     // calls onColorsChanged() synchronously, and the output callback may be
     // invoked during construction.
-    private val writeQueue = Channel<ByteArray>(Channel.UNLIMITED)
+    private val writeQueue = Channel<ByteArray>(capacity = MAX_QUEUED_WRITES)
+    private val queuedBytes = AtomicLong(0)
     private val closed = AtomicBoolean(false)
 
     var revision by mutableIntStateOf(0)
@@ -88,10 +95,29 @@ class TerminalController(
     private fun startWriter() {
         writerJob = scope.launch(Dispatchers.IO) {
             for (bytes in writeQueue) {
-                if (closed.get()) break
-                runCatching { shell.write(bytes) }
+                try {
+                    if (closed.get()) break
+                    runCatching { shell.write(bytes) }
+                } finally {
+                    queuedBytes.addAndGet(-bytes.size.toLong())
+                }
             }
         }
+    }
+
+    private fun tryEnqueue(bytes: ByteArray): Boolean {
+        if (bytes.isEmpty()) return false
+        val total = queuedBytes.addAndGet(bytes.size.toLong())
+        if (total > MAX_QUEUED_BYTES) {
+            queuedBytes.addAndGet(-bytes.size.toLong())
+            return false
+        }
+        val result = writeQueue.trySend(bytes)
+        if (result.isFailure) {
+            queuedBytes.addAndGet(-bytes.size.toLong())
+            return false
+        }
+        return true
     }
 
     private fun startBlink() {
@@ -110,7 +136,10 @@ class TerminalController(
 
     override fun write(data: ByteArray, offset: Int, count: Int) {
         if (count <= 0) return
-        writeQueue.trySend(data.copyOfRange(offset, offset + count))
+        if (count.toLong() > MAX_QUEUED_BYTES) return
+        // Remote-controlled emulator replies are best-effort. Dropping on
+        // overflow is safer than retaining an unbounded query-response backlog.
+        tryEnqueue(data.copyOfRange(offset, offset + count))
     }
 
     override fun titleChanged(oldTitle: String?, newTitle: String?) {
@@ -118,8 +147,11 @@ class TerminalController(
         revision++
     }
 
+    @Suppress("UNUSED_PARAMETER")
     override fun onCopyTextToClipboard(text: String?) {
-        if (!text.isNullOrEmpty()) onCopy(text)
+        // Trust boundary: OSC 52 is remote SSH output, not a local user action.
+        // Ignore it so a compromised host cannot replace the device clipboard.
+        // Explicit local copy (for example Copy transcript) still works.
     }
 
     override fun onPasteTextFromClipboard() = Unit
@@ -132,11 +164,11 @@ class TerminalController(
 
     fun sendText(text: String) {
         if (text.isEmpty()) return
-        writeQueue.trySend(text.toByteArray(Charsets.UTF_8))
+        tryEnqueue(text.toByteArray(Charsets.UTF_8))
     }
 
     fun sendBytes(bytes: ByteArray) {
-        if (bytes.isNotEmpty()) writeQueue.trySend(bytes)
+        if (bytes.isNotEmpty()) tryEnqueue(bytes)
     }
 
     fun paste(text: String) {

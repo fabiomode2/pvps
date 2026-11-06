@@ -7,20 +7,21 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  build:
+    name: Build (unsigned)
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    env:
-      PVPS_KEYSTORE_FILE: keystore/release.jks
-      PVPS_KEYSTORE_PASSWORD: ${{ secrets.PVPS_KEYSTORE_PASSWORD }}
-      PVPS_KEY_ALIAS: ${{ secrets.PVPS_KEY_ALIAS }}
-      PVPS_KEY_PASSWORD: ${{ secrets.PVPS_KEY_PASSWORD }}
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Validate install script
         run: |
@@ -62,7 +63,12 @@ jobs:
       - name: Resolve version
         id: meta
         run: |
+          set -euo pipefail
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]; then
+              echo "::error::Refusing to use an invalid release tag name. Expected vMAJOR.MINOR.PATCH with an optional suffix."
+              exit 1
+            fi
             version="${GITHUB_REF_NAME#v}"
             release_tag="${GITHUB_REF_NAME}"
           else
@@ -71,6 +77,140 @@ jobs:
               version="$(awk -F'"' '/versionName = "/ {print $2; exit}' app/build.gradle.kts)"
             fi
             version="${version:-0.0.0}-dev.${GITHUB_SHA::7}"
+            if [[ ! "${version}" =~ ^[0-9A-Za-z][0-9A-Za-z._+-]*$ ]]; then
+              echo "::error::Resolved version contains unsupported characters."
+              exit 1
+            fi
+            release_tag="v${version}"
+          fi
+          if [[ -z "${version}" ]]; then
+            echo "::error::Could not resolve a release version"
+            exit 1
+          fi
+          core="${version%%-*}"
+          core="${core%%+*}"
+          IFS=. read -r major minor patch <<< "${core}"
+          major="${major//[^0-9]/}"
+          minor="${minor//[^0-9]/}"
+          patch="${patch//[^0-9]/}"
+          version_code=$((10#${major:-0} * 10000 + 10#${minor:-0} * 100 + 10#${patch:-0}))
+          if (( version_code < 1 )); then
+            version_code=1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "version_code=${version_code}" >> "${GITHUB_OUTPUT}"
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build and test
+        env:
+          PVPS_VERSION: ${{ steps.meta.outputs.version }}
+          PVPS_VERSION_CODE: ${{ steps.meta.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleRelease \
+            -PpvpsVersionName="${PVPS_VERSION}" \
+            -PpvpsVersionCode="${PVPS_VERSION_CODE}"
+
+      - name: Package workflow artifact
+        env:
+          PVPS_VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          apk_dir="app/build/outputs/apk/release"
+          apk="$(find "${apk_dir}" -maxdepth 1 -type f -name '*.apk' 2>/dev/null | sort | head -n 1 || true)"
+          if [[ -z "${apk}" || ! -f "${apk}" ]]; then
+            echo "::error::APK not found under ${apk_dir}"
+            exit 1
+          fi
+          mkdir -p dist
+          apk_name="pvps-${PVPS_VERSION}.apk"
+          cp "${apk}" "dist/${apk_name}"
+          install -m 755 install.sh dist/install.sh
+          (
+            cd dist
+            sha256sum "${apk_name}" install.sh > SHA256SUMS
+          )
+          cat dist/SHA256SUMS
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pvps-${{ steps.meta.outputs.version }}
+          path: dist/
+
+  release:
+    name: Sign and publish
+    if: github.ref_type == 'tag'
+    environment: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate install script
+        run: |
+          bash -n install.sh
+          shellcheck -S warning install.sh
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        continue-on-error: true
+
+      - name: Install Android SDK packages
+        run: |
+          set -euo pipefail
+          if command -v sdkmanager > /dev/null 2>&1; then
+            SDKM="$(command -v sdkmanager)"
+          else
+            SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+            export ANDROID_HOME="${SDK}"
+            export ANDROID_SDK_ROOT="${SDK}"
+            echo "ANDROID_HOME=${SDK}" >> "${GITHUB_ENV}"
+            echo "ANDROID_SDK_ROOT=${SDK}" >> "${GITHUB_ENV}"
+            SDKM="$(find "${SDK}/cmdline-tools" -name sdkmanager -type f 2>/dev/null | sort | tail -1)"
+            if [[ -z "${SDKM}" ]]; then
+              echo "::error::sdkmanager not found after setup-android"
+              exit 1
+            fi
+            echo "Using ${SDKM}"
+          fi
+          yes | "${SDKM}" --licenses > /dev/null || true
+          "${SDKM}" --install "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Resolve version
+        id: meta
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]; then
+              echo "::error::Refusing to use an invalid release tag name. Expected vMAJOR.MINOR.PATCH with an optional suffix."
+              exit 1
+            fi
+            version="${GITHUB_REF_NAME#v}"
+            release_tag="${GITHUB_REF_NAME}"
+          else
+            version="$(awk -F'"' '/pvpsVersionName.*\?: "/ {print $4; exit}' app/build.gradle.kts)"
+            if [[ -z "${version}" ]]; then
+              version="$(awk -F'"' '/versionName = "/ {print $2; exit}' app/build.gradle.kts)"
+            fi
+            version="${version:-0.0.0}-dev.${GITHUB_SHA::7}"
+            if [[ ! "${version}" =~ ^[0-9A-Za-z][0-9A-Za-z._+-]*$ ]]; then
+              echo "::error::Resolved version contains unsupported characters."
+              exit 1
+            fi
             release_tag="v${version}"
           fi
           if [[ -z "${version}" ]]; then
@@ -94,7 +234,11 @@ jobs:
       - name: Decode signing keystore
         env:
           PVPS_KEYSTORE_BASE64: ${{ secrets.PVPS_KEYSTORE_BASE64 }}
+          PVPS_KEYSTORE_PASSWORD: ${{ secrets.PVPS_KEYSTORE_PASSWORD }}
+          PVPS_KEY_ALIAS: ${{ secrets.PVPS_KEY_ALIAS }}
+          PVPS_KEY_PASSWORD: ${{ secrets.PVPS_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
           if [[ -z "${PVPS_KEYSTORE_BASE64}" ]]; then
             echo "::error::PVPS_KEYSTORE_BASE64 secret is not set"
             exit 1
@@ -108,13 +252,23 @@ jobs:
           chmod 600 keystore/release.jks
 
       - name: Build and test
+        env:
+          PVPS_KEYSTORE_FILE: keystore/release.jks
+          PVPS_KEYSTORE_PASSWORD: ${{ secrets.PVPS_KEYSTORE_PASSWORD }}
+          PVPS_KEY_ALIAS: ${{ secrets.PVPS_KEY_ALIAS }}
+          PVPS_KEY_PASSWORD: ${{ secrets.PVPS_KEY_PASSWORD }}
+          PVPS_VERSION: ${{ steps.meta.outputs.version }}
+          PVPS_VERSION_CODE: ${{ steps.meta.outputs.version_code }}
         run: |
+          set -euo pipefail
           chmod +x gradlew
           ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleRelease \
-            -PpvpsVersionName="${{ steps.meta.outputs.version }}" \
-            -PpvpsVersionCode="${{ steps.meta.outputs.version_code }}"
+            -PpvpsVersionName="${PVPS_VERSION}" \
+            -PpvpsVersionCode="${PVPS_VERSION_CODE}"
 
       - name: Package release
+        env:
+          PVPS_VERSION: ${{ steps.meta.outputs.version }}
         run: |
           set -euo pipefail
           apk="app/build/outputs/apk/release/app-release.apk"
@@ -123,29 +277,31 @@ jobs:
             exit 1
           fi
           mkdir -p dist
-          cp "${apk}" "dist/pvps-${{ steps.meta.outputs.version }}.apk"
-          (cd dist && sha256sum "pvps-${{ steps.meta.outputs.version }}.apk" > SHA256SUMS)
+          apk_name="pvps-${PVPS_VERSION}.apk"
+          cp "${apk}" "dist/${apk_name}"
+          install -m 755 install.sh dist/install.sh
+          (
+            cd dist
+            sha256sum "${apk_name}" install.sh > SHA256SUMS
+          )
           cat dist/SHA256SUMS
-
-      - name: Upload workflow artifact
-        if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
-        with:
-          name: pvps-${{ steps.meta.outputs.version }}
-          path: dist/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.release_tag }}
           name: PVPS ${{ steps.meta.outputs.version }}
-          prerelease: ${{ github.ref_type != 'tag' || contains(steps.meta.outputs.version, '-') }}
+          prerelease: ${{ contains(steps.meta.outputs.version, '-') }}
           body: |
             **Download:** `pvps-${{ steps.meta.outputs.version }}.apk` (Android 9+, arm64-v8a)
 
             **VPS setup (Ubuntu/Debian):**
             ```bash
-            curl -fsSL https://github.com/fabiomode2/pvps/releases/latest/download/install.sh | bash
+            base="https://github.com/fabiomode2/pvps/releases/download/${{ steps.meta.outputs.release_tag }}"
+            curl -fsSLO "${base}/install.sh"
+            curl -fsSLO "${base}/SHA256SUMS"
+            sha256sum -c --ignore-missing SHA256SUMS
+            bash install.sh
             ```
 
             **What's new in ${{ steps.meta.outputs.version }}:**
@@ -177,7 +333,7 @@ jobs:
           files: |
             dist/pvps-${{ steps.meta.outputs.version }}.apk
             dist/SHA256SUMS
-            install.sh
+            dist/install.sh
           fail_on_unmatched_files: true
           generate_release_notes: false
           draft: false

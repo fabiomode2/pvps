@@ -40,6 +40,10 @@ object AppNotifications {
         ).apply {
             description = "Responses, questions and permission requests from OpenCode"
             setShowBadge(true)
+            // Notification text is derived from remote OpenCode sessions. Treat
+            // it as a lock-screen secret so the system does not render it while
+            // the device is locked. This is independent of the in-app Device lock.
+            setLockscreenVisibility(NotificationCompat.VISIBILITY_SECRET)
         }
         manager.createNotificationChannel(channel)
     }
@@ -103,6 +107,10 @@ object AppNotifications {
             .setAutoCancel(true)
             .setGroup(GROUP)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            // Privacy boundary: remote session text is secret on the lock
+            // screen, and no public version is provided to replace it.
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
+            .setPublicVersion(null)
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(id, notification) }
     }

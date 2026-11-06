@@ -17,8 +17,8 @@ android {
     compileSdk = 36
     buildToolsVersion = "36.0.0"
 
-    val pvpsVersionName = (project.findProperty("pvpsVersionName") as String?) ?: "1.1.0"
-    val pvpsVersionCode = (project.findProperty("pvpsVersionCode") as String?)?.toIntOrNull() ?: 10100
+    val pvpsVersionName = (project.findProperty("pvpsVersionName") as String?) ?: "1.2.0"
+    val pvpsVersionCode = (project.findProperty("pvpsVersionCode") as String?)?.toIntOrNull() ?: 10200
 
     defaultConfig {
         applicationId = "dev.pvps"
@@ -46,7 +46,9 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            // Never fall back to the debug key for a release build. Local builds
+            // without a keystore stay unsigned; CI supplies the release keystore.
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

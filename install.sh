@@ -7,14 +7,20 @@
 # adds the phone's SSH public key to ~/.ssh/authorized_keys, and prints a
 # single-line PVPS1 setup code (pvps-setup: prefix) that the app imports.
 #
-# Run as your normal user (the script uses sudo where needed), NOT as root:
-#   curl -fsSL https://github.com/fabiomode2/pvps/releases/latest/download/install.sh | bash
+# Run as your normal user (the script uses sudo where needed), NOT as root.
+# Download the installer and its checksums first, verify, then run:
+#   base="https://github.com/fabiomode2/pvps/releases/latest/download"
+#   curl -fsSLO "${base}/install.sh"
+#   curl -fsSLO "${base}/SHA256SUMS"
+#   grep -E '  install\.sh$' SHA256SUMS | sha256sum -c -
+#   bash install.sh
 #
 # The only interactive question is the phone SSH public key. It can be pasted
 # from the app or given as a path to a .pub file. For unattended installs use:
 #   PVPS_SSH_PUBKEY="$(cat phone.pub)" bash install.sh
 #
 # Optional:
+#   PVPS_OPENCODE_INSTALL_SHA256=<sha256> bash install.sh
 #   PVPS_HOST=203.0.113.10 bash install.sh
 #   PVPS_SSH_PORT=2222 bash install.sh
 #   bash install.sh --tailscale
@@ -41,6 +47,8 @@ ENV_FILE="${ENV_DIR}/opencode.env"
 UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}"
 SSHD_DROPIN=/etc/ssh/sshd_config.d/99-pvps.conf
 KEY_MARKER=pvps
+OPENCODE_INSTALL_URL=https://opencode.ai/v2/install
+OPENCODE_INSTALL_SHA256="${PVPS_OPENCODE_INSTALL_SHA256:-}"
 
 REPLACE=0
 ENABLE_SWAP=0
@@ -72,6 +80,10 @@ Environment:
                           from sshd, otherwise 22).
   PVPS_PREFER_TAILSCALE   Set to 1 for the same effect as --tailscale.
   PVPS_NONINTERACTIVE     Set to 1 to never prompt (for CI/unattended runs).
+  PVPS_OPENCODE_INSTALL_SHA256
+                          Expected SHA-256 of the upstream OpenCode v2
+                          installer. When set, a mismatch aborts. When unset,
+                          the downloaded installer runs after a warning.
 EOF
 }
 
@@ -310,7 +322,7 @@ opencode_version() {
 }
 
 install_opencode() {
-  local ver
+  local ver installer actual expected
 
   if [[ -x "${OPENCODE_BIN}" ]]; then
     ver="$(opencode_version "${OPENCODE_BIN}")"
@@ -318,16 +330,21 @@ install_opencode() {
       say "OpenCode v${ver} is already installed at ${OPENCODE_BIN}"
       return 0
     fi
-    die "Existing ${OPENCODE_BIN} is not OpenCode v2 (version: ${ver:-unknown}). Move it aside and re-run, or install v2 with: curl -fsSL https://opencode.ai/v2/install | bash"
+    die "Existing ${OPENCODE_BIN} is not OpenCode v2 (version: ${ver:-unknown}). Move it aside and re-run, or install v2 with the upstream installer after verifying its SHA-256."
   fi
 
   say "Installing OpenCode v2"
   # https://opencode.ai/install is the v1 installer and refuses 2.x by design.
-  # The v2 installer is https://opencode.ai/v2/install.
-  if ! curl -fsSL https://opencode.ai/v2/install | bash -s -- --no-modify-path; then
+  # The v2 installer is https://opencode.ai/v2/install. Download it to a file
+  # first so it can be digest-checked before execution instead of piping it
+  # straight from the network into bash.
+  installer="${WORK_DIR}/opencode-install.sh"
+  if ! curl -fsSL "${OPENCODE_INSTALL_URL}" -o "${installer}"; then
+    rm -f "${installer}"
     cat >&2 <<'EOF'
-OpenCode v2 install failed. Manual fallback:
-  curl -fsSL https://opencode.ai/v2/install | bash
+OpenCode v2 installer download failed. Manual fallback:
+  curl -fsSLo /tmp/opencode-install.sh https://opencode.ai/v2/install
+  # Inspect the file, then run: bash /tmp/opencode-install.sh --no-modify-path
 
 Or, with Node.js/npm available:
   npm install -g @opencode/cli@2
@@ -336,6 +353,41 @@ Or, with Node.js/npm available:
 EOF
     exit 1
   fi
+
+  if [[ -n "${OPENCODE_INSTALL_SHA256}" ]]; then
+    if [[ ! "${OPENCODE_INSTALL_SHA256}" =~ ^[0-9A-Fa-f]{64}$ ]]; then
+      rm -f "${installer}"
+      die "PVPS_OPENCODE_INSTALL_SHA256 must be a 64-character hexadecimal SHA-256."
+    fi
+    actual="$(sha256sum "${installer}" | awk '{print $1}')"
+    expected="$(printf '%s' "${OPENCODE_INSTALL_SHA256}" | tr 'A-F' 'a-f')"
+    if [[ "${actual}" != "${expected}" ]]; then
+      rm -f "${installer}"
+      die "OpenCode installer failed SHA-256 verification; refusing to run it."
+    fi
+    say "OpenCode installer SHA-256 verified"
+  else
+    warn "PVPS_OPENCODE_INSTALL_SHA256 is not set; the downloaded OpenCode installer is not integrity-pinned."
+    warn "It will run from ${installer} after an HTTPS download from ${OPENCODE_INSTALL_URL}."
+    warn "Set PVPS_OPENCODE_INSTALL_SHA256 to a reviewed digest to fail closed on changes."
+  fi
+
+  if ! bash "${installer}" --no-modify-path; then
+    rm -f "${installer}"
+    cat >&2 <<'EOF'
+OpenCode v2 install failed. Manual fallback:
+  curl -fsSLo /tmp/opencode-install.sh https://opencode.ai/v2/install
+  # Compare the file with the digest you trust, then run:
+  bash /tmp/opencode-install.sh --no-modify-path
+
+Or, with Node.js/npm available:
+  npm install -g @opencode/cli@2
+  mkdir -p "$HOME/.opencode/bin"
+  ln -sf "$(npm prefix -g)/bin/opencode" "$HOME/.opencode/bin/opencode"
+EOF
+    exit 1
+  fi
+  rm -f "${installer}"
 
   [[ -x "${OPENCODE_BIN}" ]] || die "OpenCode installer did not create ${OPENCODE_BIN}"
   ver="$(opencode_version "${OPENCODE_BIN}")"

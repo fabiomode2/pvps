@@ -117,6 +117,7 @@ import coil.compose.SubcomposeAsyncImage
 import coil.request.CachePolicy
 import coil.request.ImageRequest
 import dev.pvps.data.model.ConnectionState
+import dev.pvps.security.SecuritySupport
 import dev.pvps.ssh.RemoteFile
 import dev.pvps.ssh.SftpClient
 import dev.pvps.ui.AppViewModel
@@ -204,15 +205,29 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             scope.launch {
                 loading = true
                 runCatching {
-                    val name = queryName(context, uri) ?: "upload-${System.currentTimeMillis()}"
-                    val temp = File(context.cacheDir, name)
-                    withContext(Dispatchers.IO) {
-                        context.contentResolver.openInputStream(uri)?.use { input ->
-                            temp.outputStream().use { output -> input.copyTo(output) }
-                        } ?: error("Could not open the selected file")
+                    SecuritySupport.requirePickerReadUri(context, uri)
+                    val name = SecuritySupport.safeLeafName(
+                        queryName(context, uri) ?: "upload-${System.currentTimeMillis()}"
+                    )
+                    val temp = SecuritySupport.containedFile(context.cacheDir, name)
+                    try {
+                        withContext(Dispatchers.IO) {
+                            context.contentResolver.openInputStream(uri)?.use { input ->
+                                temp.outputStream().use { output ->
+                                    SecuritySupport.copyLimited(
+                                        input,
+                                        output,
+                                        SecuritySupport.MAX_UPLOAD_BYTES
+                                    )
+                                }
+                            } ?: error("Could not open the selected file")
+                        }
+                        withContext(Dispatchers.IO) {
+                            sftp.upload(temp, SecuritySupport.safeRemoteChild(currentPath, name))
+                        }
+                    } finally {
+                        runCatching { temp.delete() }
                     }
-                    withContext(Dispatchers.IO) { sftp.upload(temp, join(currentPath, name)) }
-                    temp.delete()
                 }.onFailure { error = it.message }
                 loading = false
                 refresh++
@@ -227,14 +242,28 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             scope.launch {
                 loading = true
                 runCatching {
-                    val temp = File(context.cacheDir, target.name)
-                    withContext(Dispatchers.IO) {
-                        sftp.download(target.path, temp)
-                        context.contentResolver.openOutputStream(uri)?.use { output ->
-                            temp.inputStream().use { input -> input.copyTo(output) }
-                        } ?: error("Could not write the selected destination")
+                    SecuritySupport.requirePickerWriteUri(context, uri)
+                    val temp = SecuritySupport.containedFile(context.cacheDir, target.name)
+                    try {
+                        withContext(Dispatchers.IO) {
+                            sftp.download(
+                                target.path,
+                                temp,
+                                maxBytes = SecuritySupport.MAX_DOWNLOAD_BYTES
+                            )
+                            context.contentResolver.openOutputStream(uri)?.use { output ->
+                                temp.inputStream().use { input ->
+                                    SecuritySupport.copyLimited(
+                                        input,
+                                        output,
+                                        SecuritySupport.MAX_DOWNLOAD_BYTES
+                                    )
+                                }
+                            } ?: error("Could not write the selected destination")
+                        }
+                    } finally {
+                        runCatching { temp.delete() }
                     }
-                    temp.delete()
                 }.onFailure { error = it.message }
                 loading = false
             }
@@ -989,6 +1018,7 @@ private fun isAudioFile(name: String): Boolean =
         setOf("mp3", "flac", "wav", "ogg", "m4a", "aac", "opus")
 
 private const val MAX_TEXT_PREVIEW_BYTES = 256 * 1024
+private const val MAX_MEDIA_PREVIEW_BYTES = 64L * 1024 * 1024
 private const val PREVIEW_CACHE_PREFIX = "pvps-preview-"
 private const val PREVIEW_CACHE_MAX_AGE_MS = 24L * 60L * 60L * 1000L
 
@@ -1049,9 +1079,13 @@ private fun previewTempFile(cacheDir: File, file: RemoteFile): File {
     val extension = file.name.substringAfterLast('.', "").lowercase(Locale.US)
         .takeIf { it.length in 1..6 && it.all { ch -> ch.isLetterOrDigit() } }
         ?: "bin"
+    // The cache key is derived from hashed/metadata fields and the extension
+    // is restricted to alphanumerics, so no remote path component reaches the
+    // local file name.
     val prefix = "$PREVIEW_CACHE_PREFIX${previewCacheKey(file)}-"
-    return runCatching { File.createTempFile(prefix, ".$extension", cacheDir) }
+    val generated = runCatching { File.createTempFile(prefix, ".$extension", cacheDir) }
         .getOrElse { File(cacheDir, "$prefix${System.nanoTime()}.$extension") }
+    return SecuritySupport.containedFile(cacheDir, generated.name)
 }
 
 private fun cleanupStalePreviewFiles(cacheDir: File) {
@@ -1104,24 +1138,27 @@ private fun FilePreviewDialog(
                     }
                     PreviewKind.ARCHIVE -> PreviewContent.Archive(client.listTar(file.path))
                     PreviewKind.IMAGE -> {
-                        client.download(file.path, temp)
+                        client.download(file.path, temp, maxBytes = MAX_MEDIA_PREVIEW_BYTES)
                         PreviewContent.Image(temp)
                     }
                     PreviewKind.PDF -> {
-                        client.download(file.path, temp)
+                        client.download(file.path, temp, maxBytes = MAX_MEDIA_PREVIEW_BYTES)
                         PreviewContent.Pdf(temp, loadPdfPageCount(temp))
                     }
                     PreviewKind.VIDEO -> {
-                        client.download(file.path, temp)
+                        client.download(file.path, temp, maxBytes = MAX_MEDIA_PREVIEW_BYTES)
                         PreviewContent.Video(temp)
                     }
                     PreviewKind.AUDIO -> {
-                        client.download(file.path, temp)
+                        client.download(file.path, temp, maxBytes = MAX_MEDIA_PREVIEW_BYTES)
                         PreviewContent.Audio(temp)
                     }
                 }
             }.getOrElse { throwable ->
                 if (throwable is CancellationException) throw throwable
+                // Do not keep a partial capped download around while the error
+                // is displayed; onDispose will also attempt this delete.
+                runCatching { temp.delete() }
                 PreviewContent.Error(throwable.message ?: "Preview failed.")
             }
         }

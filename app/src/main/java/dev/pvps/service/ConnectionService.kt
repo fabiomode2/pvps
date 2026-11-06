@@ -33,6 +33,10 @@ class ConnectionService : Service() {
         ).apply {
             description = getString(R.string.connection_channel_desc)
             setShowBadge(false)
+            // The update notification carries a vault-derived host label. Keep
+            // it off the lock screen; the ongoing private notification still
+            // shows the label when the device is unlocked.
+            setLockscreenVisibility(NotificationCompat.VISIBILITY_SECRET)
         }
         manager.createNotificationChannel(channel)
     }
@@ -75,6 +79,9 @@ class ConnectionService : Service() {
             .setOngoing(true)
             .setSilent(true)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            // Connection status may reveal vault host labels; keep it secret on
+            // the lock screen and provide no public replacement.
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
             .build()
     }
 
@@ -106,6 +113,9 @@ class ConnectionService : Service() {
                 .setOngoing(true)
                 .setSilent(true)
                 .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+                // Host label stays in this private notification only; no public
+                // version is attached, and lock-screen rendering is suppressed.
+                .setVisibility(NotificationCompat.VISIBILITY_SECRET)
                 .build()
             runCatching { manager.notify(NOTIFICATION_ID, notification) }
         }

@@ -21,6 +21,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -28,6 +30,40 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
+import kotlin.random.Random
+
+// Trust boundary: server-controlled collections and live text are bounded so a
+// malicious or compromised OpenCode server cannot grow app state without limit.
+private const val MAX_PROJECTS = 500
+private const val MAX_SESSIONS = 500
+private const val MAX_QUEUED_PROMPTS = 500
+private const val MAX_RETAINED_MESSAGES = 1_000
+private const val MAX_LIVE_ASSISTANT_MESSAGES = 50
+private const val MAX_PARTS_PER_MESSAGE = 200
+private const val MAX_TEXT_CHARS_PER_PART = 200_000
+private const val MAX_REASONING_CHARS_PER_PART = 200_000
+private const val MAX_TOOL_INPUT_CHARS = 200_000
+private const val MAX_TOOL_CONTENT_ITEMS = 50
+private const val MAX_TOOL_CONTENT_TEXT_CHARS = 200_000
+private const val MAX_TOOL_CONTENT_TOTAL_CHARS = 200_000L
+private const val MAX_MESSAGE_TEXT_CHARS = 400_000
+private const val MAX_MESSAGE_STORED_CHARS = 600_000L
+private const val MAX_MEDIA_BYTES = 64 * 1024 * 1024
+private const val MAX_MEDIA_CACHE_BYTES = 64 * 1024 * 1024
+private const val MEDIA_CACHE_ENTRY_OVERHEAD = 64 * 1024
+
+// SSE amplification guards. Event IDs/seqs and terminal markers are deduped in
+// bounded memory, refresh bursts are coalesced, and reconnect waits are capped.
+private const val MAX_SEEN_EVENTS = 4_096
+private const val MAX_EVENT_KEY_CHARS = 256
+private const val TERMINAL_EVENT_DEDUPE_MS = 2_000L
+private const val REFRESH_ALL_DEBOUNCE_MS = 250L
+private const val REFRESH_ALL_MIN_INTERVAL_MS = 1_000L
+private const val INITIAL_SSE_RECONNECT_MS = 500L
+private const val MAX_SSE_RECONNECT_MS = 15_000L
+private const val HEALTHY_SSE_CONNECTION_MS = 10_000L
+private const val INITIAL_SSE_ERROR_BACKOFF_MS = 400L
+private const val MAX_SSE_ERROR_BACKOFF_MS = 5_000L
 
 class OpenCodeRepository(
     private val ssh: SshManager,
@@ -90,14 +126,37 @@ class OpenCodeRepository(
     private var refreshJob: Job? = null
     private var queueJob: Job? = null
     private var eventGeneration = 0
-    private var mediaCache = LruCache<String, ByteArray>(24)
+    private var mediaCache = newMediaCache()
     private val optimisticIds = mutableSetOf<String>()
     private val optimisticLock = Any()
     private val liveMessages = mutableMapOf<String, UiMessage>()
     private val liveLock = Any()
     private var lastNotifiedMessageId: String? = null
     private var lastNotifiedFormId: String? = null
-    private var lastStreamActivityAt = 0L
+
+    private val refreshAllLock = Any()
+    private var refreshAllJob: Job? = null
+    private val refreshAllMutex = Mutex()
+    private var lastRefreshAllAt = 0L
+
+    private val dedupeLock = Any()
+    private val seenEventKeys = LinkedHashSet<String>()
+    private val terminalLock = Any()
+    private var lastTerminalAt = 0L
+    private var lastTerminalSession: String? = null
+
+    private val reentryLock = Any()
+    private var refreshingSessions = false
+    private var selectingSession = false
+    private var promotingQueue = false
+
+    private fun newMediaCache(): LruCache<String, ByteArray> =
+        object : LruCache<String, ByteArray>(MAX_MEDIA_CACHE_BYTES) {
+            // Count bytes plus per-entry/key overhead so tiny entries cannot
+            // multiply into an unbounded number of cache keys.
+            override fun sizeOf(key: String, value: ByteArray): Int =
+                value.size + key.length + MEDIA_CACHE_ENTRY_OVERHEAD
+        }
 
     suspend fun connect(host: Host, force: Boolean = false) {
         val desiredBase = runCatching { ssh.openCodeBaseUrl(host) }.getOrNull()
@@ -147,7 +206,7 @@ class OpenCodeRepository(
             client?.close()
             client = newClient
             connectedBaseUrl = baseUrl
-            val sessions = newClient.listSessions()
+            val sessions = newClient.listSessions().take(MAX_SESSIONS)
             val oldActive = _state.value.activeSessionId
             val models = _state.value.models.ifEmpty {
                 runCatching { newClient.models(host.openCodeDirectory) }.getOrDefault(emptyList())
@@ -219,9 +278,11 @@ class OpenCodeRepository(
     private fun stopEventsAndDrain() {
         eventsJob?.cancel()
         refreshJob?.cancel()
+        refreshAllJob?.cancel()
         queueJob?.cancel()
         eventsJob = null
         refreshJob = null
+        refreshAllJob = null
         queueJob = null
         eventGeneration++
     }
@@ -232,9 +293,15 @@ class OpenCodeRepository(
         client = null
         host = null
         connectedBaseUrl = null
-        mediaCache = LruCache(24)
+        mediaCache = newMediaCache()
         synchronized(optimisticLock) { optimisticIds.clear() }
         synchronized(liveLock) { liveMessages.clear() }
+        synchronized(dedupeLock) { seenEventKeys.clear() }
+        synchronized(terminalLock) {
+            lastTerminalAt = 0L
+            lastTerminalSession = null
+        }
+        lastRefreshAllAt = 0L
         if (resetState) _state.value = State()
     }
 
@@ -242,7 +309,7 @@ class OpenCodeRepository(
         val c = client ?: return
         runCatching { c.projects() }
             .onSuccess { projects ->
-                _state.update { it.copy(projects = projects) }
+                _state.update { it.copy(projects = projects.take(MAX_PROJECTS)) }
             }
             .onFailure {
                 Diagnostics.event("opencode", "refresh projects failed", it)
@@ -250,55 +317,71 @@ class OpenCodeRepository(
     }
 
     suspend fun refreshSessions() {
-        val c = client ?: return
-        runCatching {
-            val sessions = c.listSessions()
-            val active = _state.value.activeSessionId
-            val hasActive = sessions.any { it.id == active }
-            val fallback = sessions.firstOrNull { it.parentID == null }?.id
-                ?: sessions.firstOrNull()?.id
-            val liveActive = synchronized(liveLock) { liveMessages.isNotEmpty() }
-            _state.update {
-                it.copy(
-                    sessions = sessions,
-                    activeSessionId = if (hasActive) active else fallback,
-                    busy = sessions.firstOrNull { session -> session.id == active }?.isRunning == true ||
-                        (hasActive && liveActive)
-                )
+        synchronized(reentryLock) {
+            if (refreshingSessions) return
+            refreshingSessions = true
+        }
+        try {
+            val c = client ?: return
+            runCatching {
+                val sessions = c.listSessions().take(MAX_SESSIONS)
+                val active = _state.value.activeSessionId
+                val hasActive = sessions.any { it.id == active }
+                val fallback = sessions.firstOrNull { it.parentID == null }?.id
+                    ?: sessions.firstOrNull()?.id
+                val liveActive = synchronized(liveLock) { liveMessages.isNotEmpty() }
+                _state.update {
+                    it.copy(
+                        sessions = sessions,
+                        activeSessionId = if (hasActive) active else fallback,
+                        busy = sessions.firstOrNull { session -> session.id == active }?.isRunning == true ||
+                            (hasActive && liveActive)
+                    )
+                }
+                if (!hasActive && _state.value.activeSessionId != null) {
+                    selectSession(_state.value.activeSessionId!!)
+                }
+            }.onFailure {
+                Diagnostics.event("opencode", "refresh sessions failed", it)
+                _state.update { state -> state.copy(error = it.message) }
             }
-            if (!hasActive && _state.value.activeSessionId != null) {
-                selectSession(_state.value.activeSessionId!!)
-            }
-        }.onFailure {
-            Diagnostics.event("opencode", "refresh sessions failed", it)
-            _state.update { state -> state.copy(error = it.message) }
+        } finally {
+            synchronized(reentryLock) { refreshingSessions = false }
         }
     }
 
     suspend fun selectSession(sessionId: String) {
-        synchronized(optimisticLock) { optimisticIds.clear() }
-        synchronized(liveLock) { liveMessages.clear() }
-        _state.update {
-            it.copy(
-                activeSessionId = sessionId,
-                messages = emptyList(),
-                queued = emptyList(),
-                permissions = emptyList(),
-                forms = emptyList(),
-                realCost = null,
-                contextTokens = 0,
-                busy = it.sessions.firstOrNull { session -> session.id == sessionId }?.isRunning == true
-            )
+        synchronized(reentryLock) {
+            if (selectingSession) return
+            selectingSession = true
         }
-        refreshMessages()
-        refreshInbox()
-        refreshPermissions()
-        refreshForms()
-        refreshContextUsage()
-        scope.launch { refreshRealCost(sessionId) }
-        // A queue left behind by a previous app process must not stay parked
-        // when the session is already idle.
-        if (_state.value.activeSession?.isRunning != true) promoteQueued()
+        try {
+            synchronized(optimisticLock) { optimisticIds.clear() }
+            synchronized(liveLock) { liveMessages.clear() }
+            _state.update {
+                it.copy(
+                    activeSessionId = sessionId,
+                    messages = emptyList(),
+                    queued = emptyList(),
+                    permissions = emptyList(),
+                    forms = emptyList(),
+                    realCost = null,
+                    contextTokens = 0,
+                    busy = it.sessions.firstOrNull { session -> session.id == sessionId }?.isRunning == true
+                )
+            }
+            refreshMessages()
+            refreshInbox()
+            refreshPermissions()
+            refreshForms()
+            refreshContextUsage()
+            scope.launch { refreshRealCost(sessionId) }
+            // A queue left behind by a previous app process must not stay parked
+            // when the session is already idle.
+            if (_state.value.activeSession?.isRunning != true) promoteQueued()
+        } finally {
+            synchronized(reentryLock) { selectingSession = false }
+        }
     }
 
     suspend fun newSession() {
@@ -331,7 +414,7 @@ class OpenCodeRepository(
         val c = client ?: return
         val id = _state.value.activeSessionId ?: return
         runCatching {
-            val server = c.messages(id).map { it.toUi() }
+            val server = c.messages(id).map { it.toUi() }.takeLast(MAX_RETAINED_MESSAGES)
             if (_state.value.activeSessionId != id) return@runCatching
             val serverIds = server.mapTo(mutableSetOf()) { it.id }
             val pending = synchronized(optimisticLock) {
@@ -361,6 +444,7 @@ class OpenCodeRepository(
             val merged = (server + pending + live)
                 .distinctBy { it.id }
                 .sortedBy { it.created }
+                .takeLast(MAX_RETAINED_MESSAGES)
             val serverAssistantRunning = server.any {
                 it.isAssistant && it.completed == null && it.error == null
             }
@@ -385,6 +469,7 @@ class OpenCodeRepository(
                     it.type == "user" &&
                         (it.payload.text.isNotBlank() || it.payload.files.isNotEmpty())
                 }
+                .take(MAX_QUEUED_PROMPTS)
                 .map {
                     QueuedPrompt(
                         id = it.id,
@@ -638,6 +723,7 @@ class OpenCodeRepository(
                     messages = (it.messages + optimistic)
                         .distinctBy { message -> message.id }
                         .sortedBy { message -> message.created }
+                        .takeLast(MAX_RETAINED_MESSAGES)
                 )
             }
         }
@@ -660,21 +746,29 @@ class OpenCodeRepository(
      * queue items need promotion, and only once the session is actually idle.
      */
     private suspend fun promoteQueued() {
-        val c = client ?: return
-        val id = _state.value.activeSessionId ?: return
-        refreshSessions()
-        if (_state.value.sessions.firstOrNull { it.id == id }?.isRunning == true) return
-        refreshInbox()
-        val pending = _state.value.queued.filter { it.delivery != "steer" }
-        if (pending.isEmpty()) return
-        Diagnostics.event("queue", "promote ${pending.size} parked item(s)")
-        pending.forEach { item ->
-            val promoted = runCatching { c.updateInboxDelivery(id, item.id, "steer") }
-                .onFailure { Diagnostics.event("queue", "promote ${item.id} failed", it) }
-                .isSuccess
-            Diagnostics.event("queue", "promote ${item.id} (${item.delivery}) -> steer=$promoted")
+        synchronized(reentryLock) {
+            if (promotingQueue) return
+            promotingQueue = true
         }
-        refreshInbox()
+        try {
+            val c = client ?: return
+            val id = _state.value.activeSessionId ?: return
+            refreshSessions()
+            if (_state.value.sessions.firstOrNull { it.id == id }?.isRunning == true) return
+            refreshInbox()
+            val pending = _state.value.queued.filter { it.delivery != "steer" }
+            if (pending.isEmpty()) return
+            Diagnostics.event("queue", "promote ${pending.size} parked item(s)")
+            pending.forEach { item ->
+                val promoted = runCatching { c.updateInboxDelivery(id, item.id, "steer") }
+                    .onFailure { Diagnostics.event("queue", "promote ${item.id} failed", it) }
+                    .isSuccess
+                Diagnostics.event("queue", "promote ${item.id} (${item.delivery}) -> steer=$promoted")
+            }
+            refreshInbox()
+        } finally {
+            synchronized(reentryLock) { promotingQueue = false }
+        }
     }
 
     private fun startQueueDrain() {
@@ -787,12 +881,18 @@ class OpenCodeRepository(
         if (uri.startsWith("data:")) {
             val comma = uri.indexOf(',')
             if (comma < 0) return null
-            return runCatching { Base64.decode(uri.substring(comma + 1), Base64.DEFAULT) }.getOrNull()
+            val payload = uri.substring(comma + 1)
+            // Trust boundary: reject before Base64 decoding an oversized data URI.
+            if (payload.length.toLong() > MAX_MEDIA_BYTES.toLong() * 4 / 3 + 4) return null
+            return runCatching { Base64.decode(payload, Base64.DEFAULT) }
+                .getOrNull()
+                ?.takeIf { it.size <= MAX_MEDIA_BYTES }
         }
         if (uri.startsWith("media:")) {
             val hash = uri.removePrefix("media:")
             mediaCache.get(hash)?.let { return it }
             val bytes = runCatching { client?.media(hash) }.getOrNull() ?: return null
+            if (bytes.size > MAX_MEDIA_BYTES) return null
             mediaCache.put(hash, bytes)
             return bytes
         }
@@ -807,28 +907,66 @@ class OpenCodeRepository(
         eventsJob?.cancel()
         val generation = ++eventGeneration
         eventsJob = scope.launch {
-            var backoff = 400L
+            var normalBackoff = INITIAL_SSE_RECONNECT_MS
+            var errorBackoff = INITIAL_SSE_ERROR_BACKOFF_MS
             while (isActive) {
                 val c = client ?: break
+                val connectionStartedAt = System.currentTimeMillis()
                 try {
                     c.events().collect { event ->
-                        lastStreamActivityAt = System.currentTimeMillis()
+                        if (isDuplicateEvent(event)) return@collect
                         onEvent(event)
                     }
-                    // The stream ended without an exception. The v2 contract is
-                    // live-only, so reconnect immediately and resync on the
-                    // server.connected marker.
-                    backoff = 400L
-                    delay(backoff)
+                    // Normal end of stream. A connection that stayed healthy for
+                    // a while starts over at the base delay; repeated short-lived
+                    // streams grow to the capped, jittered delay instead.
+                    val healthy = System.currentTimeMillis() - connectionStartedAt >=
+                        HEALTHY_SSE_CONNECTION_MS
+                    if (healthy) normalBackoff = INITIAL_SSE_RECONNECT_MS
+                    val wait = jitteredDelay(normalBackoff)
+                    Diagnostics.event("sse", "stream ended; retry in ${wait}ms")
+                    delay(wait)
+                    normalBackoff = (normalBackoff * 2).coerceAtMost(MAX_SSE_RECONNECT_MS)
                 } catch (e: Exception) {
                     if (!isActive || generation != eventGeneration) break
-                    Diagnostics.event("sse", "disconnected; retry in ${backoff}ms", e)
-                    delay(backoff)
-                    backoff = (backoff * 2).coerceAtMost(5_000L)
-                    runCatching { refreshAll() }
+                    val wait = jitteredDelay(errorBackoff)
+                    Diagnostics.event("sse", "disconnected; retry in ${wait}ms", e)
+                    delay(wait)
+                    errorBackoff = (errorBackoff * 2).coerceAtMost(MAX_SSE_ERROR_BACKOFF_MS)
+                    requestRefreshAll()
                 }
             }
         }
+    }
+
+    private fun jitteredDelay(baseMs: Long): Long {
+        val capped = baseMs.coerceAtLeast(0L)
+        if (capped == 0L) return 0L
+        val jitter = (capped / 4).coerceAtLeast(1L)
+        return capped + Random.nextLong(jitter + 1)
+    }
+
+    private fun isDuplicateEvent(event: OpenCodeEvent): Boolean {
+        // Do not retain oversized server-chosen keys; skip dedupe instead.
+        if (event.type.length > MAX_EVENT_KEY_CHARS || event.id.length > MAX_EVENT_KEY_CHARS) {
+            return false
+        }
+        val key = when {
+            event.id.isNotBlank() && event.seq != null -> "${event.type}|${event.id}|${event.seq}"
+            event.id.isNotBlank() -> "${event.type}|${event.id}"
+            event.seq != null -> "${event.type}|seq:${event.seq}"
+            else -> return false
+        }
+        synchronized(dedupeLock) {
+            if (!seenEventKeys.add(key)) return true
+            while (seenEventKeys.size > MAX_SEEN_EVENTS) {
+                val oldest = seenEventKeys.iterator()
+                if (!oldest.hasNext()) break
+                oldest.next()
+                oldest.remove()
+            }
+        }
+        return false
     }
 
     private suspend fun onEvent(event: OpenCodeEvent) {
@@ -839,7 +977,7 @@ class OpenCodeRepository(
         when (event.type) {
             "server.connected" -> {
                 Diagnostics.event("sse", "connected; resyncing")
-                refreshAll()
+                requestRefreshAll()
                 return
             }
             "session.created", "session.deleted", "session.renamed", "session.moved",
@@ -1081,7 +1219,8 @@ class OpenCodeRepository(
             }
             "session.execution.succeeded", "session.execution.failed",
             "session.execution.interrupted", "session.idle" -> {
-                finishExecution(event.type)
+                val terminalSession = eventSession ?: active.orEmpty()
+                if (claimTerminalEvent(terminalSession)) finishExecution(event.type)
             }
             "session.compaction.started" -> {
                 _state.update { it.copy(busy = true) }
@@ -1093,6 +1232,20 @@ class OpenCodeRepository(
             "session.retry.scheduled" -> {
                 _state.update { it.copy(busy = true) }
             }
+        }
+    }
+
+    private fun claimTerminalEvent(sessionId: String): Boolean {
+        val now = System.currentTimeMillis()
+        synchronized(terminalLock) {
+            if (lastTerminalSession == sessionId &&
+                now - lastTerminalAt < TERMINAL_EVENT_DEDUPE_MS
+            ) {
+                return false
+            }
+            lastTerminalSession = sessionId
+            lastTerminalAt = now
+            return true
         }
     }
 
@@ -1166,11 +1319,13 @@ class OpenCodeRepository(
                 model = model ?: message.model
             )
             liveMessages[id] = updated
+            val dropped = trimLiveMessagesLocked()
             _state.update { state ->
                 state.copy(
-                    messages = (state.messages.filterNot { it.id == id } + updated)
+                    messages = (state.messages.filterNot { it.id == id || it.id in dropped } + updated)
                         .distinctBy { it.id }
-                        .sortedBy { it.created },
+                        .sortedBy { it.created }
+                        .takeLast(MAX_RETAINED_MESSAGES),
                     busy = true
                 )
             }
@@ -1200,33 +1355,101 @@ class OpenCodeRepository(
             )
             val transformed = transform(current)
             val updated = transformed.copy(
-                text = transformed.parts
-                    .filterIsInstance<UiPart.Text>()
-                    .joinToString("\n") { it.text }
-                    .ifBlank { transformed.text },
+                text = joinTextParts(transformed.parts).ifBlank { transformed.text },
                 streamed = System.currentTimeMillis()
             )
             liveMessages[id] = updated
+            val dropped = trimLiveMessagesLocked()
             _state.update { state ->
                 state.copy(
-                    messages = (state.messages.filterNot { it.id == id } + updated)
+                    messages = (state.messages.filterNot { it.id == id || it.id in dropped } + updated)
                         .distinctBy { it.id }
-                        .sortedBy { it.created },
+                        .sortedBy { it.created }
+                        .takeLast(MAX_RETAINED_MESSAGES),
                     busy = true
                 )
             }
         }
     }
 
+    /**
+     * Keep the newest live assistant messages. Must be called while [liveLock]
+     * is held. Returns dropped IDs so callers can prune state.messages too.
+     */
+    private fun trimLiveMessagesLocked(): Set<String> {
+        if (liveMessages.size <= MAX_LIVE_ASSISTANT_MESSAGES) return emptySet()
+        val dropped = liveMessages.entries
+            .sortedBy { it.value.created }
+            .take(liveMessages.size - MAX_LIVE_ASSISTANT_MESSAGES)
+            .mapTo(mutableSetOf()) { it.key }
+        dropped.forEach { liveMessages.remove(it) }
+        return dropped
+    }
+
+    private fun boundedText(value: String, maxChars: Int): String =
+        if (value.length <= maxChars) value else value.takeLast(maxChars)
+
+    private fun toolContentChars(item: ToolContent): Long = when (item) {
+        is ToolContent.Text -> item.text.length.toLong()
+        is ToolContent.File -> item.uri.length.toLong() + (item.name?.length ?: 0).toLong()
+    }
+
+    private fun storedChars(part: UiPart): Long = when (part) {
+        is UiPart.Text -> part.text.length.toLong()
+        is UiPart.Reasoning -> part.text.length.toLong()
+        is UiPart.Tool -> part.tool.input.length.toLong() +
+            part.tool.content.sumOf { toolContentChars(it) }
+    }
+
+    /** Drop oldest parts until the stored-character budget is met. */
+    private fun trimPartsToBudget(parts: MutableList<UiPart>, keepIndex: Int) {
+        if (parts.isEmpty()) return
+        var keep = keepIndex.coerceIn(0, parts.lastIndex)
+        var total = parts.sumOf { storedChars(it) }
+        while (total > MAX_MESSAGE_STORED_CHARS && parts.size > 1) {
+            val removeIndex = if (keep == 0) 1 else 0
+            total -= storedChars(parts.removeAt(removeIndex))
+            if (removeIndex < keep) keep--
+        }
+    }
+
+    private fun appendPartBounded(parts: MutableList<UiPart>, part: UiPart) {
+        while (parts.size >= MAX_PARTS_PER_MESSAGE) parts.removeAt(0)
+        parts += part
+        trimPartsToBudget(parts, parts.lastIndex)
+    }
+
+    /** Join text parts newest-first so the bounded result keeps recent content. */
+    private fun joinTextParts(parts: List<UiPart>): String {
+        val textParts = parts.filterIsInstance<UiPart.Text>()
+        if (textParts.isEmpty()) return ""
+        val selected = ArrayDeque<String>()
+        var used = 0
+        for (index in textParts.indices.reversed()) {
+            val value = textParts[index].text
+            val separator = if (selected.isEmpty()) 0 else 1
+            if (used + value.length + separator > MAX_MESSAGE_TEXT_CHARS) {
+                val room = MAX_MESSAGE_TEXT_CHARS - used - separator
+                if (room > 0) selected.addFirst(value.takeLast(room))
+                break
+            }
+            selected.addFirst(value)
+            used += value.length + separator
+        }
+        return selected.joinToString("\n")
+    }
+
     private fun upsertText(message: UiMessage, partId: String, text: String): UiMessage {
+        val bounded = boundedText(text, MAX_TEXT_CHARS_PER_PART)
         val parts = message.parts.toMutableList()
         val index = parts.indexOfFirst { it is UiPart.Text && it.id == partId }
         if (index >= 0) {
-            parts[index] = UiPart.Text(text, partId)
+            parts[index] = UiPart.Text(bounded, partId)
+            trimPartsToBudget(parts, index)
         } else {
-            parts += UiPart.Text(text, partId)
+            appendPartBounded(parts, UiPart.Text(bounded, partId))
         }
-        return message.copy(parts = parts, text = parts.filterIsInstance<UiPart.Text>().joinToString("\n") { it.text })
+        return message.copy(parts = parts, text = joinTextParts(parts))
     }
 
     private fun appendText(message: UiMessage, partId: String, delta: String): UiMessage {
@@ -1235,12 +1458,14 @@ class OpenCodeRepository(
     }
 
     private fun upsertReasoning(message: UiMessage, partId: String, text: String): UiMessage {
+        val bounded = boundedText(text, MAX_REASONING_CHARS_PER_PART)
         val parts = message.parts.toMutableList()
         val index = parts.indexOfFirst { it is UiPart.Reasoning && it.id == partId }
         if (index >= 0) {
-            parts[index] = UiPart.Reasoning(text, partId)
+            parts[index] = UiPart.Reasoning(bounded, partId)
+            trimPartsToBudget(parts, index)
         } else {
-            parts += UiPart.Reasoning(text, partId)
+            appendPartBounded(parts, UiPart.Reasoning(bounded, partId))
         }
         return message.copy(parts = parts)
     }
@@ -1250,10 +1475,41 @@ class OpenCodeRepository(
         return upsertReasoning(message, partId, (existing?.text.orEmpty()) + delta)
     }
 
+    private fun boundToolContent(content: List<ToolContent>): List<ToolContent> {
+        val bounded = content.takeLast(MAX_TOOL_CONTENT_ITEMS).map { item ->
+            when (item) {
+                is ToolContent.Text ->
+                    item.copy(text = boundedText(item.text, MAX_TOOL_CONTENT_TEXT_CHARS))
+                is ToolContent.File -> item
+            }
+        }
+        var total = bounded.sumOf { toolContentChars(it) }
+        val kept = ArrayDeque<ToolContent>()
+        for (item in bounded.asReversed()) {
+            if (kept.isNotEmpty() && total > MAX_TOOL_CONTENT_TOTAL_CHARS) {
+                total -= toolContentChars(item)
+                continue
+            }
+            kept.addFirst(item)
+        }
+        return kept.toList()
+    }
+
+    private fun boundTool(tool: ToolPart): ToolPart = tool.copy(
+        input = boundedText(tool.input, MAX_TOOL_INPUT_CHARS),
+        content = boundToolContent(tool.content)
+    )
+
     private fun upsertTool(message: UiMessage, tool: ToolPart): UiMessage {
+        val bounded = boundTool(tool)
         val parts = message.parts.toMutableList()
-        val index = parts.indexOfFirst { it is UiPart.Tool && it.tool.id == tool.id }
-        if (index >= 0) parts[index] = UiPart.Tool(tool) else parts += UiPart.Tool(tool)
+        val index = parts.indexOfFirst { it is UiPart.Tool && it.tool.id == bounded.id }
+        if (index >= 0) {
+            parts[index] = UiPart.Tool(bounded)
+            trimPartsToBudget(parts, index)
+        } else {
+            appendPartBounded(parts, UiPart.Tool(bounded))
+        }
         return message.copy(parts = parts)
     }
 
@@ -1285,6 +1541,30 @@ class OpenCodeRepository(
         refreshJob = scope.launch {
             delay(120)
             refreshMessages()
+        }
+    }
+
+    /**
+     * Coalesce refreshAll bursts from server.connected and reconnect handling:
+     * at most one debounced job is queued, and at most one refresh runs at a time.
+     */
+    private fun requestRefreshAll() {
+        synchronized(refreshAllLock) {
+            if (refreshAllJob?.isActive == true) return
+            refreshAllJob = scope.launch {
+                delay(REFRESH_ALL_DEBOUNCE_MS)
+                runCatching { refreshAllCoalesced() }
+                    .onFailure { Diagnostics.event("opencode", "refresh all failed", it) }
+            }
+        }
+    }
+
+    private suspend fun refreshAllCoalesced() {
+        refreshAllMutex.withLock {
+            val now = System.currentTimeMillis()
+            if (now - lastRefreshAllAt < REFRESH_ALL_MIN_INTERVAL_MS) return@withLock
+            lastRefreshAllAt = now
+            refreshAll()
         }
     }
 

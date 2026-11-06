@@ -9,6 +9,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import dev.pvps.diagnostics.Diagnostics
+import dev.pvps.security.SecuritySupport
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -22,7 +23,10 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.ResponseBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import java.io.EOFException
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 class OpenCodeException(val code: Int, val body: String) :
@@ -50,6 +54,12 @@ class OpenCodeClient(
     private val sseClient = client.newBuilder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
+    // Console requests carry an OAuth bearer token to a server-named origin.
+    // Never follow redirects away from the validated OpenCode Console origin.
+    private val consoleClient = client.newBuilder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .build()
 
     suspend fun info(): ServerInfo = withContext(Dispatchers.IO) {
         withTimeout(30_000) {
@@ -75,8 +85,10 @@ class OpenCodeClient(
                 .get()
                 .build()
             client.newCall(request).execute().use { response ->
-                val text = response.body?.string().orEmpty()
-                if (!response.isSuccessful) throw OpenCodeException(response.code, text)
+                if (!response.isSuccessful) {
+                    throw OpenCodeException(response.code, response.body?.readLimitedErrorText().orEmpty())
+                }
+                val text = response.body?.readLimitedText(MAX_JSON_BODY_BYTES).orEmpty()
                 val element = runCatching { json.parseToJsonElement(text) }.getOrNull()
                 when (element) {
                     is kotlinx.serialization.json.JsonArray ->
@@ -395,9 +407,9 @@ class OpenCodeClient(
                 .build()
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
-                    throw OpenCodeException(response.code, response.body?.string().orEmpty())
+                    throw OpenCodeException(response.code, response.body?.readLimitedErrorText().orEmpty())
                 }
-                response.body?.bytes() ?: ByteArray(0)
+                response.body?.readLimitedBytes(MAX_MEDIA_BODY_BYTES) ?: ByteArray(0)
             }
         }
     }
@@ -412,11 +424,20 @@ class OpenCodeClient(
             .build()
         sseClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                throw OpenCodeException(response.code, response.body?.string().orEmpty())
+                throw OpenCodeException(response.code, response.body?.readLimitedErrorText().orEmpty())
             }
             val source = response.body?.source() ?: return@flow
+            var eventCount = 0
             while (currentCoroutineContext().isActive) {
-                val line = source.readUtf8Line() ?: break
+                // Trust boundary: SSE lines are server-controlled. Strict reads
+                // bound one line and end the connection on EOF or oversize input.
+                val line = try {
+                    source.readUtf8LineStrict(MAX_SSE_LINE_BYTES)
+                } catch (_: EOFException) {
+                    break
+                } catch (_: IOException) {
+                    break
+                }
                 if (!line.startsWith("data:")) continue
                 val payload = line.substring(5).trim()
                 if (payload.isEmpty()) continue
@@ -428,6 +449,8 @@ class OpenCodeClient(
                     ?.let { (it["directory"] as? JsonPrimitive)?.content }
                 val durable = objectValue["durable"] as? JsonObject
                 val seq = (durable?.get("seq") as? JsonPrimitive)?.content?.toLongOrNull()
+                if (eventCount >= MAX_SSE_EVENTS_PER_CONNECTION) break
+                eventCount++
                 emit(
                     OpenCodeEvent(
                         id = (objectValue["id"] as? JsonPrimitive)?.content.orEmpty(),
@@ -479,16 +502,18 @@ class OpenCodeClient(
                 val metadata = value.metadata
                 val orgId = metadata?.orgID.orEmpty()
                 if (orgId.isBlank()) return@withTimeout null
-                val root = metadata?.server?.takeIf { it.isNotBlank() }
-                    ?.trimEnd('/')
-                    ?: "https://opencode.ai"
-                val endpoint = "$root/console/api/request-logs".toHttpUrl()
+                // Trust boundary: metadata.server comes from the connected server.
+                // Only the public HTTPS Console origin may receive the bearer token.
+                val origin = consoleOrigin(metadata?.server) ?: return@withTimeout null
                 var cursor: String? = null
                 var total = 0.0
                 var pages = 0
                 var sawItems = false
                 do {
-                    val url = endpoint.newBuilder()
+                    val url = origin.newBuilder()
+                        .addPathSegment("console")
+                        .addPathSegment("api")
+                        .addPathSegment("request-logs")
                         .addQueryParameter("category", "inference")
                         .addQueryParameter("sessionID", sessionId)
                         .addQueryParameter("since", since.toString())
@@ -503,9 +528,14 @@ class OpenCodeClient(
                         .header("Accept", "application/json")
                         .get()
                         .build()
-                    client.newCall(request).execute().use { response ->
-                        val body = response.body?.string().orEmpty()
-                        if (!response.isSuccessful) throw OpenCodeException(response.code, body)
+                    consoleClient.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) {
+                            throw OpenCodeException(
+                                response.code,
+                                response.body?.readLimitedErrorText(MAX_CONSOLE_BODY_BYTES).orEmpty()
+                            )
+                        }
+                        val body = response.body?.readLimitedText(MAX_CONSOLE_BODY_BYTES).orEmpty()
                         val page = json.decodeFromJsonElement(
                             ConsoleRequestLogs.serializer(),
                             json.parseToJsonElement(body)
@@ -547,8 +577,10 @@ class OpenCodeClient(
         val started = System.nanoTime()
         try {
             client.newCall(builder.build()).execute().use { response ->
-                val text = response.body?.string().orEmpty()
-                if (!response.isSuccessful) throw OpenCodeException(response.code, text)
+                if (!response.isSuccessful) {
+                    throw OpenCodeException(response.code, response.body?.readLimitedErrorText().orEmpty())
+                }
+                val text = response.body?.readLimitedText(MAX_JSON_BODY_BYTES).orEmpty()
                 if (text.isBlank()) return JsonObject(emptyMap())
                 return runCatching { json.parseToJsonElement(text).jsonObject }
                     .getOrElse { throw OpenCodeException(response.code, "Invalid JSON: ${text.take(300)}") }
@@ -559,6 +591,39 @@ class OpenCodeClient(
         }
     }
 
+    /**
+     * Trust boundary: [rawServer] comes from the connected OpenCode server.
+     * Accept only the OpenCode Console origin over HTTPS, with no credentials,
+     * query, fragment, path prefix, or non-standard port. Anything else returns
+     * null so the caller falls back to the local cost estimate.
+     */
+    private fun consoleOrigin(rawServer: String?): HttpUrl? {
+        val raw = rawServer?.trim().orEmpty().ifBlank { DEFAULT_CONSOLE_ORIGIN }
+        val url = runCatching { raw.toHttpUrl() }.getOrNull() ?: return null
+        if (!url.isHttps) return null
+        if (url.username.isNotEmpty() || url.password.isNotEmpty()) return null
+        if (url.query != null || url.fragment != null) return null
+        if (url.port != 443) return null
+        if (url.encodedPath != "/") return null
+        // The Console origin is fixed: a connected OpenCode server may point at
+        // the official Console, but not at an arbitrary *.opencode.ai host.
+        if (url.host.lowercase() != CONSOLE_HOST) return null
+        return url
+    }
+
+    /** Read at most [maxBytes] of a server-controlled body; never buffer unbounded. */
+    private fun ResponseBody.readLimitedText(maxBytes: Int): String =
+        SecuritySupport.readLimitedBytes(byteStream(), maxBytes).toString(Charsets.UTF_8)
+
+    private fun ResponseBody.readLimitedBytes(maxBytes: Int): ByteArray =
+        SecuritySupport.readLimitedBytes(byteStream(), maxBytes)
+
+    /** Error bodies are also bounded; truncate to a short diagnostic instead of failing. */
+    private fun ResponseBody.readLimitedErrorText(maxBytes: Int = MAX_JSON_BODY_BYTES): String =
+        runCatching { readLimitedText(maxBytes) }.getOrElse {
+            "Response body exceeds ${maxBytes / (1024 * 1024)} MiB"
+        }
+
     private fun url(path: String, query: List<Pair<String, String>> = emptyList()): HttpUrl {
         val builder = base.newBuilder()
         path.trim('/').split('/').filter { it.isNotEmpty() }.forEach { builder.addPathSegment(it) }
@@ -568,5 +633,17 @@ class OpenCodeClient(
 
     companion object {
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+
+        private const val DEFAULT_CONSOLE_ORIGIN = "https://opencode.ai"
+        private const val CONSOLE_HOST = "opencode.ai"
+
+        // Server-controlled response bodies are bounded before allocation.
+        private const val MAX_JSON_BODY_BYTES = 8 * 1024 * 1024
+        private const val MAX_CONSOLE_BODY_BYTES = 2 * 1024 * 1024
+        private const val MAX_MEDIA_BODY_BYTES = 64 * 1024 * 1024
+
+        // SSE lines and event count per connection are bounded as well.
+        private const val MAX_SSE_LINE_BYTES = 1L * 1024 * 1024
+        private const val MAX_SSE_EVENTS_PER_CONNECTION = 10_000
     }
 }

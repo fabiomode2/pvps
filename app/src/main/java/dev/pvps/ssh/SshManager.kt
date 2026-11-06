@@ -102,6 +102,9 @@ class SshManager(
         // brief network change feel like a permanently dead session.
         retryAt[hostId] = System.currentTimeMillis() + 2_000
         probeFailures.remove(hostId)
+        // This releases the preferred loopback port before the new session
+        // exists. The replacement therefore fails the preferred bind rather
+        // than silently moving to another port; see startTunnelIfNeeded.
         forwards.remove(hostId)?.close()
         connections.remove(hostId)?.disconnect()
         dev.pvps.diagnostics.Diagnostics.event("ssh", "reconnect host=$hostId")
@@ -234,6 +237,9 @@ class SshManager(
         retryAt.remove(hostId)
         probeFailures.remove(hostId)
         activeAttempts.remove(hostId)
+        // Keep the preferred tunnel port even across an explicit disconnect.
+        // Forgetting it would let the next connect silently move to a new
+        // port while an OpenCode client may still name the old one.
         forwards.remove(hostId)?.close()
         connections.remove(hostId)?.disconnect()
         setState(ConnectionState(hostId, ConnectionState.Status.DISCONNECTED))
@@ -259,10 +265,18 @@ class SshManager(
         _states.value = _states.value.mapValues { (id, _) -> ConnectionState(id, ConnectionState.Status.DISCONNECTED) }
     }
 
-    suspend fun exec(hostId: String, command: String, timeoutMs: Long = 30_000): CommandResult =
+    // Trust boundary: command output comes from the remote SSH host. Keep the
+    // byte caps explicit here so every caller inherits the same bounded reads.
+    suspend fun exec(
+        hostId: String,
+        command: String,
+        timeoutMs: Long = 30_000,
+        maxOutputBytes: Long = SshConnection.DEFAULT_MAX_OUTPUT_BYTES,
+        maxErrorBytes: Long = SshConnection.DEFAULT_MAX_ERROR_BYTES
+    ): CommandResult =
         withContext(Dispatchers.IO) {
             val connection = connections[hostId] ?: error("Host is not connected")
-            connection.exec(command, timeoutMs)
+            connection.exec(command, timeoutMs, maxOutputBytes, maxErrorBytes)
         }
 
     fun openShell(hostId: String, cols: Int, rows: Int, cellWidth: Int = 8, cellHeight: Int = 16): ShellChannel {
@@ -294,6 +308,13 @@ class SshManager(
             // Reuse the previous local port after a tunnel rebuild. The
             // OpenCode client (and its SSE stream) can then survive a network
             // handoff without the repository wiping its transcript.
+            //
+            // Trust boundary: if that exact port is unavailable, LocalForward
+            // fails instead of silently choosing a new port. A silent move
+            // would leave the configured OpenCode client (with its Basic
+            // credential) pointed at the old, now attacker-claimable loopback
+            // port. Invalidating that client still needs OpenCodeRepository
+            // lifecycle wiring, which is outside this file.
             val preferred = tunnelPorts[host.id] ?: 0
             val forward = connection.openForward("127.0.0.1", host.openCodePort, preferred)
             tunnelPorts[host.id] = forward.port

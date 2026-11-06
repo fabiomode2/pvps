@@ -18,6 +18,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.io.OutputStream
 import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicReference
 
@@ -40,6 +42,11 @@ class SshConnection(
 
     @Volatile
     private var session: Session? = null
+
+    companion object {
+        const val DEFAULT_MAX_OUTPUT_BYTES: Long = 8L * 1024 * 1024
+        const val DEFAULT_MAX_ERROR_BYTES: Long = 1L * 1024 * 1024
+    }
 
     val isConnected: Boolean
         get() = session?.isConnected == true
@@ -94,17 +101,25 @@ class SshConnection(
         }
     }
 
-    suspend fun exec(command: String, timeoutMs: Long = 30_000): CommandResult =
+    // Trust boundary: the authenticated SSH host controls command output and a
+    // compromised host can ignore the command and stream arbitrary bytes. Cap
+    // both streams by byte count, not only by the wall-clock watchdog.
+    suspend fun exec(
+        command: String,
+        timeoutMs: Long = 30_000,
+        maxOutputBytes: Long = DEFAULT_MAX_OUTPUT_BYTES,
+        maxErrorBytes: Long = DEFAULT_MAX_ERROR_BYTES
+    ): CommandResult =
         withContext(Dispatchers.IO) {
             val s = session ?: error("SSH session is not connected")
             val channel = s.openChannel("exec") as ChannelExec
             val stdout = ByteArrayOutputStream()
-            val stderr = ByteArrayOutputStream()
+            val stderr = BoundedByteArrayOutputStream(maxErrorBytes, "stderr")
             val started = System.currentTimeMillis()
             coroutineScope {
-                // copyTo() below is blocking and ignores coroutine cancellation.
-                // A watchdog closes the channel so a hung remote command cannot
-                // hold the UI forever.
+                // The read loop below is blocking and ignores coroutine
+                // cancellation. A watchdog closes the channel so a hung remote
+                // command cannot hold the UI forever.
                 val watchdog = launch {
                     delay(timeoutMs)
                     runCatching { channel.disconnect() }
@@ -115,20 +130,47 @@ class SshConnection(
                     channel.setInputStream(null)
                     channel.setPty(false)
                     channel.connect(timeoutMs.toInt().coerceIn(1_000, 120_000))
-                    channel.inputStream.use { input -> input.copyTo(stdout) }
-                    while (!channel.isClosed) delay(15)
+                    val buffer = ByteArray(16 * 1024)
+                    var totalBytes = 0L
+                    channel.inputStream.use { input ->
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            if (read == 0) continue
+                            totalBytes += read
+                            if (totalBytes > maxOutputBytes) {
+                                throw IOException("SSH stdout exceeded ${maxOutputBytes} bytes")
+                            }
+                            stdout.write(buffer, 0, read)
+                        }
+                    }
+                    if (stderr.overflowed) {
+                        throw IOException("SSH stderr exceeded ${maxErrorBytes} bytes")
+                    }
+                    while (!channel.isClosed) {
+                        if (stderr.overflowed) {
+                            throw IOException("SSH stderr exceeded ${maxErrorBytes} bytes")
+                        }
+                        delay(15)
+                    }
+                    if (stderr.overflowed) {
+                        throw IOException("SSH stderr exceeded ${maxErrorBytes} bytes")
+                    }
                     if (!watchdog.isActive) {
                         throw SocketTimeoutException("Command timed out after ${timeoutMs}ms")
                     }
                     CommandResult(
                         exitCode = channel.exitStatus,
                         stdout = stdout.toString(Charsets.UTF_8.name()),
-                        stderr = stderr.toString(Charsets.UTF_8.name()),
+                        stderr = String(stderr.toByteArray(), Charsets.UTF_8),
                         durationMs = System.currentTimeMillis() - started
                     )
                 } catch (e: Exception) {
-                    // copyTo() usually fails with an IOException when the watchdog
-                    // disconnects the channel; report the real cause.
+                    // The blocking read usually fails with an IOException when
+                    // the watchdog disconnects the channel; report the real cause.
+                    if (stderr.overflowed) {
+                        throw IOException("SSH stderr exceeded ${maxErrorBytes} bytes")
+                    }
                     if (!watchdog.isActive) {
                         throw SocketTimeoutException("Command timed out after ${timeoutMs}ms")
                     }
@@ -176,6 +218,46 @@ class SshConnection(
         runCatching { session?.disconnect() }
         session = null
     }
+}
+
+/**
+ * Bounded sink used for remote stderr. JSch writes that stream from its own
+ * reader thread, so overflow is both recorded and raised; exec() checks the
+ * flag after draining stdout to report a clear failure regardless of how JSch
+ * handles the writer-thread exception.
+ */
+private class BoundedByteArrayOutputStream(
+    private val maxBytes: Long,
+    private val streamName: String
+) : OutputStream() {
+
+    private val buffer = ByteArrayOutputStream()
+
+    @Volatile
+    var overflowed = false
+        private set
+
+    @Synchronized
+    override fun write(b: Int) {
+        if (buffer.size().toLong() + 1 > maxBytes) {
+            overflowed = true
+            throw IOException("SSH $streamName exceeded $maxBytes bytes")
+        }
+        buffer.write(b)
+    }
+
+    @Synchronized
+    override fun write(b: ByteArray, off: Int, len: Int) {
+        if (len <= 0) return
+        if (buffer.size().toLong() + len > maxBytes) {
+            overflowed = true
+            throw IOException("SSH $streamName exceeded $maxBytes bytes")
+        }
+        buffer.write(b, off, len)
+    }
+
+    @Synchronized
+    fun toByteArray(): ByteArray = buffer.toByteArray()
 }
 
 /** Tailscale uses 100.64.0.0/10 (100.64.x.x through 100.127.x.x). */

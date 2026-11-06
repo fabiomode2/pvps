@@ -7,6 +7,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.ResponseBody
+import okio.Buffer
 import java.io.IOException
 import java.math.BigInteger
 import java.util.concurrent.TimeUnit
@@ -99,7 +101,11 @@ class UpdateChecker(
             // A repo with no releases yet is not an error; it simply has no update.
             if (result.code == 404) return GitHubRelease()
             if (!result.isSuccessful) {
-                val detail = result.body?.string()?.trim()?.take(300).orEmpty()
+                val detail = result.body?.let { body ->
+                    runCatching {
+                        readBoundedText(body, MAX_ERROR_BODY_BYTES, "GitHub error response")
+                    }.getOrDefault("")
+                }?.trim()?.take(300).orEmpty()
                 val message = when (result.code) {
                     403 -> "GitHub API rate limit reached. Try again later."
                     else -> "GitHub API returned HTTP ${result.code}."
@@ -107,8 +113,9 @@ class UpdateChecker(
                 throw UpdateException(if (detail.isEmpty()) message else "$message $detail")
             }
 
-            val text = result.body?.string()
+            val body = result.body
                 ?: throw UpdateException("GitHub returned an empty response")
+            val text = readBoundedText(body, MAX_RELEASE_BODY_BYTES, "GitHub release metadata")
             return try {
                 json.decodeFromString(GitHubRelease.serializer(), text)
             } catch (e: Exception) {
@@ -147,10 +154,35 @@ class UpdateChecker(
             if (!result.isSuccessful) return@use null
             val body = result.body ?: return@use null
             if (body.contentLength() > MAX_CHECKSUM_BYTES) return@use null
-            val text = body.string()
-            if (text.length > MAX_CHECKSUM_BYTES) return@use null
+            val text = runCatching {
+                readBoundedText(body, MAX_CHECKSUM_BYTES, "update checksum")
+            }.getOrNull() ?: return@use null
             checksumForAsset(text, apkName)
         }
+    }
+
+    /**
+     * Reads at most [limit] bytes plus one, so an oversized or length-less body
+     * cannot be buffered in full before the caller rejects it.
+     */
+    private fun readBoundedText(body: ResponseBody, limit: Long, description: String): String {
+        val declared = body.contentLength()
+        if (declared > limit) {
+            throw UpdateException("The $description is larger than the supported limit")
+        }
+
+        val source = body.source()
+        val buffer = Buffer()
+        var remaining = limit + 1L
+        while (remaining > 0L) {
+            val read = source.read(buffer, remaining)
+            if (read < 0L) break
+            remaining -= read
+        }
+        if (buffer.size > limit) {
+            throw UpdateException("The $description is larger than the supported limit")
+        }
+        return buffer.readUtf8()
     }
 
     /** Prefer the release's `pvps-*.apk` asset, then any other `.apk` asset. */
@@ -192,7 +224,9 @@ class UpdateChecker(
         private const val PREFS_NAME = "updates"
         private const val KEY_LAST_CHECK = "last_check_ms"
         private const val USER_AGENT = "pvps-android"
-        private const val MAX_CHECKSUM_BYTES = 1_000_000
+        private const val MAX_RELEASE_BODY_BYTES = 2L * 1024L * 1024L
+        private const val MAX_CHECKSUM_BYTES = 1L * 1024L * 1024L
+        private const val MAX_ERROR_BODY_BYTES = 64L * 1024L
     }
 }
 

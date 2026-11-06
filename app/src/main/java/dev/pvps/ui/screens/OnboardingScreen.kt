@@ -62,7 +62,11 @@ import dev.pvps.ui.theme.TextSecondary
 import dev.pvps.ui.theme.Violet
 
 private const val INSTALL_COMMAND =
-    "curl -fsSL https://github.com/fabiomode2/pvps/releases/latest/download/install.sh | bash"
+    "base=\"https://github.com/fabiomode2/pvps/releases/latest/download\"\n" +
+        "curl -fsSLO \"\${base}/install.sh\"\n" +
+        "curl -fsSLO \"\${base}/SHA256SUMS\"\n" +
+        "grep -E '  install\\.sh$' SHA256SUMS | sha256sum -c -\n" +
+        "bash install.sh"
 
 @Composable
 fun OnboardingScreen(
@@ -109,7 +113,10 @@ fun OnboardingScreen(
         TerminalWindow(
             title = "pvps / setup",
             lines = listOf(
-                "$ curl -fsSL …/install.sh | bash",
+                "$ curl -fsSLO …/install.sh",
+                "$ curl -fsSLO …/SHA256SUMS",
+                "$ sha256sum -c --ignore-missing SHA256SUMS",
+                "$ bash install.sh",
                 "# installing OpenCode v2 on 127.0.0.1:49374",
                 "# done. paste the pvps-setup code into the app."
             )

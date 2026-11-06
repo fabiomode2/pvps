@@ -1,11 +1,13 @@
 package dev.pvps.ui.screens
 
+import android.content.ContentResolver
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Base64
 import androidx.core.content.FileProvider
+import dev.pvps.security.SecuritySupport
 import java.io.File
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -211,15 +213,17 @@ fun ChatScreen(
     var showStats by remember { mutableStateOf(false) }
     var expanded by remember { mutableStateOf<Set<String>>(emptySet()) }
 
-    val importUris: (List<Uri>) -> Unit = { uris ->
+    val importUris: (List<Uri>, Boolean) -> Unit = { uris, allowOwnProvider ->
         if (uris.isNotEmpty()) {
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
                     val picked = mutableListOf<ChatAttachment>()
                     val errors = mutableListOf<String>()
                     uris.forEach { uri ->
-                        runCatching { readChatAttachment(context, uri) }
-                            .onSuccess { picked += it }
+                        runCatching {
+                            requireReadableAttachmentUri(context, uri, allowOwnProvider)
+                            readChatAttachment(context, uri)
+                        }.onSuccess { picked += it }
                             .onFailure { errors += (it.message ?: "Could not read attachment") }
                     }
                     picked to errors
@@ -245,17 +249,17 @@ fun ChatScreen(
     }
     val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris -> importUris(uris) }
+    ) { uris -> importUris(uris, false) }
     val photoPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(MAX_ATTACHMENTS)
-    ) { uris -> importUris(uris) }
+    ) { uris -> importUris(uris, false) }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     val cameraPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.TakePicture()
     ) { success ->
         val uri = pendingCameraUri
         pendingCameraUri = null
-        if (success && uri != null) importUris(listOf(uri))
+        if (success && uri != null) importUris(listOf(uri), true)
     }
     val launchCamera: () -> Unit = {
         runCatching {
@@ -3374,6 +3378,22 @@ private const val MAX_ATTACHMENTS = 8
 private const val MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 private const val MAX_TOTAL_ATTACHMENT_BYTES = 24 * 1024 * 1024
 
+/**
+ * Picker results must be content:// documents. The camera path is the only
+ * caller allowed to read PVPS's own unexported FileProvider URI, because that
+ * URI is created by this app rather than returned by an external picker.
+ */
+private fun requireReadableAttachmentUri(context: Context, uri: Uri, allowOwnProvider: Boolean) {
+    val ownFileProvider = "${context.packageName}.files"
+    if (allowOwnProvider &&
+        uri.scheme == ContentResolver.SCHEME_CONTENT &&
+        uri.authority == ownFileProvider
+    ) {
+        return
+    }
+    SecuritySupport.requirePickerReadUri(context, uri)
+}
+
 private fun readChatAttachment(context: Context, uri: Uri): ChatAttachment {
     val resolver = context.contentResolver
     var name = uri.lastPathSegment ?: "attachment"
@@ -3394,8 +3414,9 @@ private fun readChatAttachment(context: Context, uri: Uri): ChatAttachment {
     if (declaredSize > MAX_ATTACHMENT_BYTES) {
         error("$name is too large (max 20 MB)")
     }
-    val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
-        ?: error("Could not open $name")
+    val bytes = resolver.openInputStream(uri)?.use { input ->
+        SecuritySupport.readLimitedBytes(input, MAX_ATTACHMENT_BYTES)
+    } ?: error("Could not open $name")
     if (bytes.size > MAX_ATTACHMENT_BYTES) {
         error("$name is too large (max 20 MB)")
     }

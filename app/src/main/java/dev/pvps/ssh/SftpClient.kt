@@ -2,10 +2,14 @@ package dev.pvps.ssh
 
 import com.jcraft.jsch.ChannelSftp
 import com.jcraft.jsch.SftpATTRS
+import dev.pvps.security.SecuritySupport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
+
+private const val MAX_LIST_ENTRIES = 20_000
 
 data class RemoteFile(
     val name: String,
@@ -23,14 +27,25 @@ class SftpClient(private val connection: SshConnection) {
         try {
             val normalized = normalize(path)
             val entries = sftp.ls(normalized)
+            if (entries.size > MAX_LIST_ENTRIES) {
+                throw IOException(
+                    "Directory contains more than $MAX_LIST_ENTRIES entries; narrow the path or use the terminal"
+                )
+            }
             entries.asSequence()
                 .map { it as ChannelSftp.LsEntry }
                 .filter { it.filename != "." && it.filename != ".." }
-                .map { entry ->
+                .mapNotNull { entry ->
+                    // A server-controlled filename is a single path component.
+                    // Drop names that can escape the browsed directory instead
+                    // of letting them steer currentPath or a later operation.
+                    val safeName = runCatching {
+                        SecuritySupport.safeLeafName(entry.filename)
+                    }.getOrNull() ?: return@mapNotNull null
                     val attrs = entry.attrs
                     RemoteFile(
-                        name = entry.filename,
-                        path = join(normalized, entry.filename),
+                        name = safeName,
+                        path = join(normalized, safeName),
                         isDirectory = attrs?.isDir == true,
                         size = attrs?.size ?: 0L,
                         modified = (attrs?.mTime ?: 0) * 1000L,
@@ -74,11 +89,21 @@ class SftpClient(private val connection: SshConnection) {
         }
     }
 
-    suspend fun download(path: String, destination: File): File = withContext(Dispatchers.IO) {
+    suspend fun download(
+        path: String,
+        destination: File,
+        maxBytes: Long = SecuritySupport.MAX_DOWNLOAD_BYTES
+    ): File = withContext(Dispatchers.IO) {
         destination.parentFile?.mkdirs()
         val sftp = connection.openSftp()
         try {
-            sftp.get(normalize(path), destination.absolutePath)
+            // Stream through a bounded copy instead of JSch's unbounded
+            // get(remote, local) so a server cannot fill the app's storage.
+            sftp.get(normalize(path)).use { input ->
+                destination.outputStream().use { output ->
+                    SecuritySupport.copyLimited(input, output, maxBytes)
+                }
+            }
             destination
         } finally {
             runCatching { sftp.disconnect() }
@@ -86,6 +111,11 @@ class SftpClient(private val connection: SshConnection) {
     }
 
     suspend fun upload(source: File, path: String) = withContext(Dispatchers.IO) {
+        if (source.length() > SecuritySupport.MAX_UPLOAD_BYTES) {
+            throw IOException(
+                "File exceeds the ${SecuritySupport.MAX_UPLOAD_BYTES / (1024 * 1024)} MB upload limit"
+            )
+        }
         val sftp = connection.openSftp()
         try {
             sftp.put(source.absolutePath, normalize(path))
@@ -137,8 +167,10 @@ class SftpClient(private val connection: SshConnection) {
     }
 
     suspend fun createTar(directory: String, name: String, destination: String) = withContext(Dispatchers.IO) {
+        // `--` ends tar option parsing, so a file name beginning with `-`
+        // is always treated as an operand rather than an option.
         val result = connection.exec(
-            "tar -czf ${ShellQuote.of(destination)} -C ${ShellQuote.of(directory)} ${ShellQuote.of(name)}",
+            "tar -czf ${ShellQuote.of(destination)} -C ${ShellQuote.of(directory)} -- ${ShellQuote.of(name)}",
             120_000
         )
         if (!result.isSuccess) error(result.combined.ifBlank { "tar failed" })

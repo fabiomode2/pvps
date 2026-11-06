@@ -223,6 +223,12 @@ class UpdateRepository(
         if (!info.apkUrl.startsWith("https://")) {
             throw UpdateException("Refusing to download an update over an insecure connection")
         }
+        if (info.size > MAX_UPDATE_BYTES) {
+            throw UpdateException("The update APK is larger than the supported limit")
+        }
+
+        val cacheDir = part.parentFile ?: appContext.cacheDir
+        ensureCacheSpace(cacheDir, info.size)
 
         val request = Request.Builder()
             .url(info.apkUrl)
@@ -245,8 +251,13 @@ class UpdateRepository(
             val total = body.contentLength().takeIf { it > 0L }
                 ?: info.size.takeIf { it > 0L }
                 ?: -1L
+            if (total > MAX_UPDATE_BYTES) {
+                throw UpdateException("The update APK is larger than the supported limit")
+            }
+            ensureCacheSpace(cacheDir, total.takeIf { it > 0L } ?: 0L)
 
             var lastPercent = -1
+            var nextSpaceCheck = SPACE_CHECK_INTERVAL_BYTES
             body.byteStream().use { input ->
                 FileOutputStream(part).use { output ->
                     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
@@ -256,8 +267,18 @@ class UpdateRepository(
                         currentCoroutineContext().ensureActive()
                         val read = input.read(buffer)
                         if (read < 0) break
+
+                        val nextTotal = downloaded + read
+                        if (nextTotal > MAX_UPDATE_BYTES) {
+                            throw UpdateException("Update download exceeded the maximum allowed size")
+                        }
+                        if (nextTotal >= nextSpaceCheck) {
+                            ensureCacheSpace(cacheDir)
+                            nextSpaceCheck = nextTotal + SPACE_CHECK_INTERVAL_BYTES
+                        }
+
                         output.write(buffer, 0, read)
-                        downloaded += read
+                        downloaded = nextTotal
 
                         if (total > 0L) {
                             val percent = ((downloaded * 100L) / total).toInt().coerceIn(0, 100)
@@ -280,12 +301,27 @@ class UpdateRepository(
         }
     }
 
+    private fun ensureCacheSpace(directory: File, additionalBytes: Long = 0L) {
+        val usable = directory.usableSpace
+        // getUsableSpace() reports 0 when the value is unknown; do not turn an
+        // unknown filesystem into a hard failure for normal users.
+        if (usable <= 0L) return
+        val required = FREE_SPACE_RESERVE_BYTES + additionalBytes.coerceAtLeast(0L)
+        if (usable < required) {
+            throw UpdateException("Not enough free space to download the update")
+        }
+    }
+
     /**
      * Reuses a previous download only when it can be trusted: matching size and a
      * matching SHA-256. Without a checksum the cache is never trusted.
      */
     private fun isUsableCachedApk(file: File, info: UpdateInfo): Boolean {
         if (!file.isFile || file.length() <= 0L) return false
+        if (file.length() > MAX_UPDATE_BYTES) {
+            file.delete()
+            return false
+        }
         if (info.size > 0L && file.length() != info.size) {
             file.delete()
             return false
@@ -375,6 +411,10 @@ class UpdateRepository(
             .take(64)
 
     companion object {
+        private const val MAX_UPDATE_BYTES = 256L * 1024L * 1024L
+        private const val FREE_SPACE_RESERVE_BYTES = 64L * 1024L * 1024L
+        private const val SPACE_CHECK_INTERVAL_BYTES = 4L * 1024L * 1024L
+
         private fun defaultDownloadClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)

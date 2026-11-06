@@ -33,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +47,9 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.pvps.service.AppNotifications
 import dev.pvps.ui.AppRoot
 import dev.pvps.ui.AppViewModel
@@ -112,6 +116,7 @@ private fun AppShell(viewModel: AppViewModel) {
     val context = LocalContext.current
     val view = LocalView.current
     val activity = (view.context as? Activity) ?: (context as? Activity)
+    val lifecycleOwner = LocalLifecycleOwner.current
     val settings = viewModel.settings.collectAsStateValue()
     var unlocked by remember { mutableStateOf(!settings.biometricLock) }
     var keyguardUnavailable by remember { mutableStateOf(false) }
@@ -125,8 +130,23 @@ private fun AppShell(viewModel: AppViewModel) {
         ActivityResultContracts.RequestPermission()
     ) { }
 
+    // Device lock is a foreground privacy boundary: re-arm it whenever the
+    // activity is no longer visible so a retained composition cannot resume
+    // straight into the host list, terminal, or keys. ON_STOP is also delivered
+    // while the credential activity is on top; its RESULT_OK sets unlocked
+    // again, so re-arming here does not fight the prompt or loop.
+    DisposableEffect(lifecycleOwner, settings.biometricLock) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && settings.biometricLock) {
+                unlocked = false
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     LaunchedEffect(settings.biometricLock) {
-        if (!settings.biometricLock) unlocked = true
+        // Enabling Device lock takes effect immediately; disabling releases it.
+        unlocked = !settings.biometricLock
     }
     LaunchedEffect(settings.blockScreenshots) {
         if (settings.blockScreenshots) {

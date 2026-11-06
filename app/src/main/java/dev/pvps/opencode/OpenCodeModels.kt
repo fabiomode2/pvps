@@ -11,6 +11,18 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
+// Trust boundary: message/tool content comes from the OpenCode server. These
+// caps keep one DTO from expanding into an unbounded heap allocation.
+private const val MAX_DTO_PARTS = 200
+private const val MAX_DTO_PART_TEXT_CHARS = 200_000
+private const val MAX_DTO_TOOL_INPUT_CHARS = 200_000
+private const val MAX_DTO_TOOL_CONTENT_ITEMS = 50
+private const val MAX_DTO_TOOL_CONTENT_TEXT_CHARS = 200_000
+private const val MAX_DTO_DISPLAY_TEXT_CHARS = 400_000
+
+private fun boundedTail(value: String, maxChars: Int): String =
+    if (value.length <= maxChars) value else value.takeLast(maxChars)
+
 @Serializable
 data class LocationRef(val directory: String = "")
 
@@ -547,7 +559,7 @@ data class UiMessage(
 }
 
 fun MessageDto.toUi(): UiMessage {
-    val parsed = content.mapNotNull { parsePart(it) }
+    val parsed = content.takeLast(MAX_DTO_PARTS).mapNotNull { parsePart(it) }
     val textParts = parsed.filterIsInstance<UiPart.Text>().joinToString("\n") { it.text }
     val reasoning = parsed.filterIsInstance<UiPart.Reasoning>()
     val toolText = parsed.filterIsInstance<UiPart.Tool>()
@@ -564,7 +576,7 @@ fun MessageDto.toUi(): UiMessage {
         reasoning.isNotEmpty() -> reasoning.joinToString("\n") { it.text }
         toolText.isNotBlank() -> toolText
         else -> ""
-    }
+    }.let { boundedTail(it, MAX_DTO_DISPLAY_TEXT_CHARS) }
     return UiMessage(
         id = id,
         type = type,
@@ -590,8 +602,9 @@ fun MessageDto.toUi(): UiMessage {
 private fun parsePart(element: JsonElement): UiPart? {
     val obj = element as? JsonObject ?: return null
     return when (obj.string("type")) {
-        "text" -> UiPart.Text(obj.string("text").orEmpty())
-        "reasoning" -> UiPart.Reasoning(obj.string("text").orEmpty())
+        "text" -> UiPart.Text(boundedTail(obj.string("text").orEmpty(), MAX_DTO_PART_TEXT_CHARS))
+        "reasoning" ->
+            UiPart.Reasoning(boundedTail(obj.string("text").orEmpty(), MAX_DTO_PART_TEXT_CHARS))
         "tool" -> {
             val state = obj["state"] as? JsonObject
             val status = state?.string("status") ?: "unknown"
@@ -600,7 +613,7 @@ private fun parsePart(element: JsonElement): UiPart? {
                 is JsonObject -> inputElement.toString()
                 is JsonPrimitive -> inputElement.contentOrNull.orEmpty()
                 else -> ""
-            }
+            }.let { boundedTail(it, MAX_DTO_TOOL_INPUT_CHARS) }
             val content = state?.get("content")?.let { parseToolContent(it) } ?: emptyList()
             val error = (state?.get("error") as? JsonObject)?.string("message")
             UiPart.Tool(
@@ -622,10 +635,16 @@ private fun parsePart(element: JsonElement): UiPart? {
 fun parseToolContent(element: JsonElement?): List<ToolContent> {
     if (element == null) return emptyList()
     val array = element as? JsonArray ?: return emptyList()
-    return array.mapNotNull { item ->
+    return array.takeLast(MAX_DTO_TOOL_CONTENT_ITEMS).mapNotNull { item ->
         val obj = item as? JsonObject ?: return@mapNotNull null
         when (obj.string("type")) {
-            "text" -> ToolContent.Text(obj.string("text").orEmpty())
+            "text" ->
+                ToolContent.Text(
+                    boundedTail(
+                        obj.string("text").orEmpty(),
+                        MAX_DTO_TOOL_CONTENT_TEXT_CHARS
+                    )
+                )
             "file" -> ToolContent.File(
                 uri = obj.string("uri").orEmpty(),
                 mime = obj.string("mime").orEmpty(),
