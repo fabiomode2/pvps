@@ -21,7 +21,9 @@ The app connects to the VPS over SSH. Shell, terminal and SFTP use SSH; OpenCode
 
 - OpenCode v2 sessions, streaming, tools, permissions and attachments.
 - Automatic tunnel recovery: SSH/TCP keepalives, a foreground wake lock, instant redial after Wi-Fi/LTE handoffs, and the OpenCode client rebinds to the rebuilt tunnel without losing the transcript.
+- Instant app shell: a hero link card, live telemetry and one-tap access to chat, files and shell.
 - Native terminal, SFTP file browser, Docker/systemd views and a process inspector.
+- Harness: embedded web view for a host web UI (for example DeepSeek Harness) through an on-demand SSH forward to a loopback port.
 - SSH keys stay on the phone; the app pins the host key on first connect.
 - Auto-updates from GitHub Releases.
 

@@ -78,6 +78,7 @@ import dev.pvps.ui.screens.DashboardScreen
 import dev.pvps.ui.screens.DockerScreen
 import dev.pvps.ui.screens.FilesScreen
 import dev.pvps.ui.screens.HostEditScreen
+import dev.pvps.ui.screens.HarnessScreen
 import dev.pvps.ui.screens.HostsScreen
 import dev.pvps.ui.screens.KeysScreen
 import dev.pvps.ui.screens.MoreScreen
@@ -231,7 +232,14 @@ fun AppRoot(viewModel: AppViewModel) {
                         onSettings = { navController.navigate("settings") },
                         onOpenTerminal = { navController.navigate("terminal") },
                         onOpenFiles = { navController.navigate("files") },
-                        onCheckUpdates = { viewModel.checkForUpdates(force = true) }
+                        onCheckUpdates = { viewModel.checkForUpdates(force = true) },
+                        onHarness = { navController.navigate("harness") }
+                    )
+                }
+                composable("harness") {
+                    HarnessScreen(
+                        viewModel = viewModel,
+                        onBack = { navController.popBackStack() }
                     )
                 }
                 composable("hosts") {

@@ -37,6 +37,11 @@ class SshManager(
 
     private val connections = ConcurrentHashMap<String, SshConnection>()
     private val forwards = ConcurrentHashMap<String, LocalForward>()
+
+    // Additional loopback forwards opened on demand (for example the web UI
+    // served on the host). Keyed by "hostId:remotePort" so they can coexist
+    // with the OpenCode tunnel and with each other.
+    private val webForwards = ConcurrentHashMap<String, LocalForward>()
     private val attemptSeq = AtomicLong()
     private val activeAttempts = ConcurrentHashMap<String, Long>()
 
@@ -487,6 +492,7 @@ class SshManager(
         // Forgetting it would let the next connect silently move to a new
         // port while an OpenCode client may still name the old one.
         forwards.remove(hostId)?.close()
+        releaseWebForwards(hostId)
         connections.remove(hostId)?.disconnect()
         setState(ConnectionState(hostId, ConnectionState.Status.DISCONNECTED))
         val host = vault.host(hostId)
@@ -508,6 +514,7 @@ class SshManager(
         activeAttempts.clear()
         wakeups.values.forEach { it.trySend(Unit) }
         forwards.keys.toList().forEach { forwards.remove(it)?.close() }
+        webForwards.keys.toList().forEach { webForwards.remove(it)?.close() }
         connections.keys.toList().forEach { connections.remove(it)?.disconnect() }
         _states.value = _states.value.mapValues { (id, _) ->
             ConnectionState(id, ConnectionState.Status.DISCONNECTED)
@@ -534,6 +541,38 @@ class SshManager(
     }
 
     fun openSftp(hostId: String) = connections[hostId]?.openSftp() ?: error("Host is not connected")
+
+    /**
+     * Opens (or reuses) a loopback forward to [remotePort] on [hostId] and
+     * returns the local port. Null when the SSH session is not usable.
+     *
+     * Used by the WebView surface: the page is served by the host and never
+     * exposed publicly, the same trust model as the OpenCode tunnel.
+     */
+    fun webForwardPort(hostId: String, remotePort: Int): Int? {
+        if (remotePort !in 1..65535) return null
+        val key = "$hostId:$remotePort"
+        webForwards[key]?.takeIf { it.isOpen }?.let { return it.port }
+        val connection = connections[hostId]?.takeIf { it.isAlive } ?: return null
+        return runCatching {
+            webForwards.remove(key)?.close()
+            val forward = connection.openForward("127.0.0.1", remotePort, 0) { reason ->
+                webForwards.remove(key)
+                Diagnostics.event("ssh", "web forward closed host=$hostId remote=$remotePort: $reason")
+            }
+            webForwards[key] = forward
+            Diagnostics.event("ssh", "web forward host=$hostId remote=$remotePort local=${forward.port}")
+            forward.port
+        }.getOrNull()
+    }
+
+    /** Closes every on-demand forward belonging to [hostId]. */
+    fun releaseWebForwards(hostId: String) {
+        val prefix = "$hostId:"
+        webForwards.keys.filter { it.startsWith(prefix) }.forEach { key ->
+            webForwards.remove(key)?.close()
+        }
+    }
 
     fun openCodeBaseUrl(host: Host): String {
         return when (host.openCodeMode) {

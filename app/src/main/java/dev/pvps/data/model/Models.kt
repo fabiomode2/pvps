@@ -71,6 +71,10 @@ data class AppSettings(
     // it the CPU can sleep through the keepalive timers, the carrier NAT drops
     // the idle socket, and the tunnel only notices minutes later.
     val keepConnectionAlive: Boolean = true,
+    // Web UI reached from Control → Harness. A loopback URL is tunnelled over
+    // the active SSH session on the port it names; anything else is loaded as
+    // is (Direct mode / LAN / Tailscale).
+    val harnessUrl: String = "http://127.0.0.1:3080",
     val lastModelProvider: String = "",
     val lastModelId: String = "",
     val lastModelVariant: String = "",

@@ -304,7 +304,21 @@ jobs:
             bash install.sh
             ```
 
-            **What's new in ${{ steps.meta.outputs.version }}:**
+            **What's new in 2.2 — interface redesign:**
+            - New design language: layered gradient surfaces, hairline light,
+              animated status orb, tabular numerals and a floating glass dock.
+            - Home rebuilt around one link card, a 2x2 telemetry grid and a
+              grouped control list; split view above 620dp.
+            - Chat, Files, Shell, Settings, Hosts/Keys, Docker, Services,
+              Processes, onboarding and the lock screen restyled to match.
+            - OpenCode failures now surface on Home with a retry action.
+            - Control → Harness: embedded web view for a host web UI
+              (DeepSeek Harness), reached through an on-demand SSH forward to
+              the loopback port named in the URL. Nothing is exposed publicly.
+            - Every spacing and type value follows the app font size and
+              interface zoom settings.
+
+            **SSH and tunnel hardening (since 2.1):**
             - Always-on SSH: 15s keepalives, TCP keepalive on the socket, and a
               foreground wake lock so the tunnel survives screen-off and Doze.
             - Fast self-healing: the watchdog probes every 5s, redials with

@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -35,6 +37,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -103,7 +106,8 @@ fun MoreScreen(
     onSettings: () -> Unit,
     onOpenTerminal: () -> Unit,
     onOpenFiles: () -> Unit,
-    onCheckUpdates: () -> Unit
+    onCheckUpdates: () -> Unit,
+    onHarness: () -> Unit
 ) {
     val host = viewModel.selectedHost.collectAsStateValue()
     Scaffold(
@@ -141,6 +145,16 @@ fun MoreScreen(
                 GroupRow("SSH keys", "Generate ed25519 or import existing", Icons.Default.Key, Accent, onKeys)
                 RowDivider()
                 GroupRow("Audit log", "Connections and destructive actions", Icons.Default.Archive, Violet, onAudit)
+            } }
+
+            item { SettingsGroup(title = "Web") {
+                GroupRow(
+                    "Harness",
+                    "DeepSeek web UI over the SSH tunnel",
+                    Icons.Default.Tune,
+                    Accent,
+                    onHarness
+                )
             } }
 
             item { SettingsGroup(title = "App") {
@@ -462,7 +476,10 @@ fun SettingsScreen(
                             color = TextSecondary
                         )
                         Spacer(Modifier.height(Space.md))
-                        Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(Space.sm)
+                        ) {
                             TinyAction(if (showDiagnostics) "Hide log" else "Show log") {
                                 diagnosticsText = Diagnostics.snapshot()
                                 showDiagnostics = !showDiagnostics
