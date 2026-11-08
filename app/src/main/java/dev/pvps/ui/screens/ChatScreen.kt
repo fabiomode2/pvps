@@ -401,7 +401,9 @@ fun ChatScreen(
             )
             return@Scaffold
         }
-        if (connection?.status != ConnectionState.Status.CONNECTED) {
+        if (connection?.status != ConnectionState.Status.CONNECTED &&
+            connection?.status != ConnectionState.Status.RECONNECTING
+        ) {
             EmptyState(
                 title = "SSH not connected",
                 message = "OpenCode is reached through the SSH tunnel. Connect to ${host.name} first.",
@@ -417,6 +419,24 @@ fun ChatScreen(
                 .padding(padding)
                 .imePadding()
         ) {
+            if (connection?.status == ConnectionState.Status.RECONNECTING) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        color = Warning,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        "SSH link lost. Reconnecting automatically…",
+                        color = Warning,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
             if (chat.error != null) {
                 ErrorBanner(chat.error!!) { viewModel.container.openCode.clearError() }
             }

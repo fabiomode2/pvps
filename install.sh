@@ -46,6 +46,7 @@ ENV_DIR=/etc/pvps
 ENV_FILE="${ENV_DIR}/opencode.env"
 UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}"
 SSHD_DROPIN=/etc/ssh/sshd_config.d/99-pvps.conf
+SSHD_KEEPALIVE=/etc/ssh/sshd_config.d/98-pvps-keepalive.conf
 KEY_MARKER=pvps
 OPENCODE_INSTALL_URL=https://opencode.ai/v2/install
 OPENCODE_INSTALL_SHA256="${PVPS_OPENCODE_INSTALL_SHA256:-}"
@@ -653,6 +654,47 @@ enable_swap() {
   swapon --show || true
 }
 
+reload_sshd() {
+  if systemctl is-active --quiet ssh.service; then
+    sudo systemctl reload ssh.service || warn "Could not reload ssh.service; the drop-in will apply on the next restart."
+  elif systemctl is-active --quiet sshd.service; then
+    sudo systemctl reload sshd.service || warn "Could not reload sshd.service; the drop-in will apply on the next restart."
+  else
+    warn "sshd is not active; the drop-in will apply the next time it starts."
+  fi
+}
+
+# Long-lived mobile tunnels need both ends to speak. The app sends keepalives
+# every 15s; this keeps the server's NAT mapping warm and lets sshd notice a
+# phone that vanished without a FIN. MaxSessions is raised because one OpenCode
+# client uses several direct-tcpip channels (HTTP pool, SSE, SFTP, terminal).
+configure_ssh_keepalive() {
+  local tmp="${WORK_DIR}/98-pvps-keepalive.conf"
+
+  if [[ ! -d /etc/ssh/sshd_config.d ]]; then
+    warn "/etc/ssh/sshd_config.d not found; skipping SSH keepalive tuning."
+    return 0
+  fi
+  cat > "${tmp}" <<EOF
+ClientAliveInterval 15
+ClientAliveCountMax 4
+TCPKeepAlive yes
+MaxSessions 64
+EOF
+  if sudo test -f "${SSHD_KEEPALIVE}" && sudo cmp -s "${tmp}" "${SSHD_KEEPALIVE}"; then
+    say "SSH keepalive settings already present"
+    return 0
+  fi
+  sudo install -m 644 -o root -g root "${tmp}" "${SSHD_KEEPALIVE}"
+  if ! sudo sshd -t; then
+    sudo rm -f "${SSHD_KEEPALIVE}"
+    warn "sshd -t failed after adding keepalive settings; removed ${SSHD_KEEPALIVE}."
+    return 0
+  fi
+  say "SSH keepalives enabled (ClientAliveInterval 15, MaxSessions 64)"
+  reload_sshd
+}
+
 harden_ssh() {
   local tmp="${WORK_DIR}/99-pvps.conf" effective
 
@@ -679,7 +721,7 @@ EOF
   say "sshd -t passed"
 
   effective="$(sudo sshd -T 2>/dev/null || true)"
-  printf '%s\n' "${effective}" | grep -E '^(allowtcpforwarding|permitopen|allowagentforwarding|x11forwarding|maxauthtries|logingracetime)[[:space:]]' || true
+  printf '%s\n' "${effective}" | grep -E '^(allowtcpforwarding|permitopen|allowagentforwarding|x11forwarding|maxauthtries|logingracetime|clientaliveinterval|clientalivecountmax|tcpkeepalive|maxsessions)[[:space:]]' || true
 
   if ! grep -qE "^permitopen[[:space:]]+127\\.0\\.0\\.1:${OC_PORT}([[:space:],]|$)" <<< "${effective}"; then
     warn "The drop-in does not appear to be active; check that sshd_config includes /etc/ssh/sshd_config.d/*.conf."
@@ -687,14 +729,11 @@ EOF
   if ! grep -qF "allowtcpforwarding local" <<< "${effective}"; then
     warn "AllowTcpForwarding is not 'local' in the effective sshd config; another file may override the drop-in."
   fi
-
-  if systemctl is-active --quiet ssh.service; then
-    sudo systemctl reload ssh.service || warn "Could not reload ssh.service; the drop-in will apply on the next restart."
-  elif systemctl is-active --quiet sshd.service; then
-    sudo systemctl reload sshd.service || warn "Could not reload sshd.service; the drop-in will apply on the next restart."
-  else
-    warn "sshd is not active; the drop-in will apply the next time it starts."
+  if ! grep -qE "^clientaliveinterval[[:space:]]+15$" <<< "${effective}"; then
+    warn "ClientAliveInterval is not 15s in the effective sshd config; the tunnel may still idle out on mobile networks."
   fi
+
+  reload_sshd
 
   say "SSH forwarding is now restricted. Keep this session open while you test a new one."
 }
@@ -914,6 +953,7 @@ install_base_packages
 SSH_PORT="$(detect_ssh_port)"
 collect_phone_key
 install_ssh_key
+configure_ssh_keepalive
 install_opencode
 write_env
 write_unit

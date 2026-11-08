@@ -244,6 +244,7 @@ fun HostSwitcher(
     val statusColor = when (state?.status) {
         ConnectionState.Status.CONNECTED -> Success
         ConnectionState.Status.CONNECTING -> Warning
+        ConnectionState.Status.RECONNECTING -> Warning
         ConnectionState.Status.NEEDS_HOST_KEY -> Warning
         ConnectionState.Status.ERROR -> Danger
         else -> TextFaint

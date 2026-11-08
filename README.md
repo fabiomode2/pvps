@@ -20,6 +20,7 @@ The installer adds OpenCode v2 for your user. It does not expose OpenCode to the
 The app connects to the VPS over SSH. Shell, terminal and SFTP use SSH; OpenCode requests are forwarded through a local tunnel to `127.0.0.1:49374`. The API is never bound to a public interface, and no cloud relay is involved.
 
 - OpenCode v2 sessions, streaming, tools, permissions and attachments.
+- Automatic tunnel recovery: SSH/TCP keepalives, a foreground wake lock, instant redial after Wi-Fi/LTE handoffs, and the OpenCode client rebinds to the rebuilt tunnel without losing the transcript.
 - Native terminal, SFTP file browser, Docker/systemd views and a process inspector.
 - SSH keys stay on the phone; the app pins the host key on first connect.
 - Auto-updates from GitHub Releases.
@@ -84,6 +85,7 @@ When printed, the `SSH: user@host:port` header shows what will be imported. If i
 - Creates `/etc/pvps/opencode.env`, owned by `root:root` with mode `0600`, and reuses the existing password on re-runs.
 - Writes `pvps-opencode.service` running as your user on `127.0.0.1:49374`.
 - Adds the phone key to `~/.ssh/authorized_keys`, deduplicated, with `.ssh` at `0700` and `authorized_keys` at `0600`.
+- Adds SSH keepalives (`ClientAliveInterval`) and raises `MaxSessions` so long-lived mobile tunnels survive NAT idle timeouts and the app's HTTP/SSE channels.
 - Optionally creates swap and restricts SSH forwarding (see below).
 - Verifies `http://127.0.0.1:49374/api/info` before printing the setup code.
 
@@ -141,6 +143,7 @@ sudo rm /etc/pvps/opencode.env
 | `Invalid setup code` | Copy the complete single line, including `pvps-setup:`; do not let the terminal wrap it; use a current app build |
 | OpenCode check fails | `systemctl status pvps-opencode`; `journalctl -u pvps-opencode -n 80`; confirm nothing else owns `49374` |
 | Port `49374` already in use | Re-run with `--replace`, or stop the old service; inspect with `sudo ss -ltnp 'sport = :49374'` |
+| Tunnel drops when the screen is off | Settings → Connection: enable **Always-on tunnel**, allow battery optimization exemption, and re-run the installer to apply the sshd keepalives |
 | Existing OpenCode v1 | Move the old `~/.opencode/bin/opencode` aside, then re-run |
 | Locked out after `--harden-ssh` | Keep a session open; remove `/etc/ssh/sshd_config.d/99-pvps.conf`, run `sudo sshd -t`, reload SSH |
 

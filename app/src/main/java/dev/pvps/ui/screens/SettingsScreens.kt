@@ -4,6 +4,9 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -46,6 +49,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,6 +64,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.pvps.BuildConfig
 import dev.pvps.data.model.AppSettings
 import dev.pvps.diagnostics.Diagnostics
@@ -300,6 +307,19 @@ fun SettingsScreen(
                     TextButton(onClick = { viewModel.disconnectAll() }) {
                         Text("Disconnect all and stop the SSH service", color = Danger)
                     }
+                }
+            }
+            item {
+                SectionCard(title = "Connection") {
+                    SettingSwitch(
+                        title = "Always-on tunnel",
+                        subtitle = "Hold a wake lock while SSH is active so keepalives run with the screen off. Uses more battery.",
+                        checked = settings.keepConnectionAlive,
+                        onChecked = { value ->
+                            viewModel.updateSettings { it.copy(keepConnectionAlive = value) }
+                        }
+                    )
+                    BatteryOptimizationRow()
                 }
             }
             item {
@@ -616,5 +636,58 @@ fun AuditScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             onConfirm = { viewModel.clearAudit() },
             onDismiss = { showClear = false }
         )
+    }
+}
+
+@Composable
+private fun BatteryOptimizationRow() {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var ignoring by remember { mutableStateOf(isIgnoringBatteryOptimizations(context)) }
+    // Refresh when the user comes back from the system dialog.
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                ignoring = isIgnoringBatteryOptimizations(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Battery optimization", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                if (ignoring) {
+                    "Unrestricted: keepalives keep running in the background"
+                } else {
+                    "Optimized: Android may freeze the tunnel while the screen is off"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = if (ignoring) Success else TextSecondary
+            )
+        }
+        if (!ignoring) {
+            TextButton(onClick = { requestIgnoreBatteryOptimizations(context) }) {
+                Text("Allow")
+            }
+        }
+    }
+}
+
+private fun isIgnoringBatteryOptimizations(context: Context): Boolean = runCatching {
+    context.getSystemService(PowerManager::class.java)
+        ?.isIgnoringBatteryOptimizations(context.packageName) == true
+}.getOrDefault(false)
+
+private fun requestIgnoreBatteryOptimizations(context: Context) {
+    val direct = Intent(
+        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+        Uri.parse("package:${context.packageName}")
+    )
+    if (runCatching { context.startActivity(direct) }.isSuccess) return
+    // Fall back to the list of apps when the OEM blocks the direct request.
+    runCatching {
+        context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
     }
 }

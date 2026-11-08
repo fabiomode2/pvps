@@ -10,7 +10,6 @@ import dev.pvps.data.model.SshKey
 import dev.pvps.service.ConnectionService
 import dev.pvps.ssh.KeyTools
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -79,8 +78,10 @@ class AppViewModel(val container: AppContainer) : ViewModel() {
                     container.appContext,
                     "$name · tunnel ready · $connected connected"
                 )
+                // Rebind OpenCode even when the user is on another tab.
+                container.openCode.onResume()
             } else {
-                stopServiceIfNoConnectedHost()
+                stopServiceIfIdle()
             }
         }
     }
@@ -91,14 +92,11 @@ class AppViewModel(val container: AppContainer) : ViewModel() {
 
     fun disconnect(hostId: String) {
         container.ssh.disconnect(hostId)
-        if (container.ssh.states.value.values.none {
-                it.status == dev.pvps.data.model.ConnectionState.Status.CONNECTED
-            }
-        ) {
-            // The OpenCode client points at a local tunnel that no longer exists.
+        if (container.openCode.isBoundTo(hostId)) {
+            // The OpenCode client points at a tunnel that no longer exists.
             container.openCode.disconnect()
         }
-        stopServiceIfNoConnectedHost()
+        stopServiceIfIdle()
     }
 
     fun disconnectAll() {
@@ -112,7 +110,7 @@ class AppViewModel(val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             val state = container.ssh.trustHostKey(hostId)
             if (state.status != dev.pvps.data.model.ConnectionState.Status.CONNECTED) {
-                stopServiceIfNoConnectedHost()
+                stopServiceIfIdle()
             }
         }
     }
@@ -185,25 +183,12 @@ class AppViewModel(val container: AppContainer) : ViewModel() {
     }
 
     fun onResume() {
-        // Reconnect any session that died while the app was backgrounded.
-        container.ssh.verifyConnections()
-        // The SSH watchdog may need a moment after a mobile handoff. Rebind
-        // OpenCode as soon as the tunnel is back so the event stream resumes
-        // even when the user is not looking at the Chat tab.
-        val host = selectedHost.value ?: hosts.value.firstOrNull()
-        if (host != null) {
-            viewModelScope.launch {
-                repeat(6) {
-                    if (container.ssh.stateFor(host.id).status ==
-                        dev.pvps.data.model.ConnectionState.Status.CONNECTED
-                    ) {
-                        container.openCode.connect(host)
-                        return@launch
-                    }
-                    delay(700)
-                }
-            }
-        }
+        // Reconnect any session that died while the app was backgrounded, and
+        // force an immediate probe after a network handoff.
+        container.ssh.verifyConnections(force = true)
+        // App-scoped supervisor: rebinds OpenCode as soon as the tunnel is back,
+        // even when the Chat tab is not composed.
+        container.openCode.onResume()
         container.updates.refreshUnknownSources()
         if (container.updates.state.value is dev.pvps.update.UpdateState.ReadyToInstall &&
             !container.updates.needsUnknownSources.value
@@ -212,14 +197,11 @@ class AppViewModel(val container: AppContainer) : ViewModel() {
         }
     }
 
-    private fun stopServiceIfNoConnectedHost() {
-        // A second tap returns CONNECTING immediately; the first attempt is still
-        // active and must keep the foreground service alive.
-        val anyActive = container.ssh.states.value.values.any {
-            it.status == dev.pvps.data.model.ConnectionState.Status.CONNECTED ||
-                it.status == dev.pvps.data.model.ConnectionState.Status.CONNECTING
-        }
-        if (!anyActive) ConnectionService.stop(container.appContext)
+    private fun stopServiceIfIdle() {
+        // Connected hosts keep the foreground service (and its wake lock)
+        // alive. An initial connect that failed has no desired host yet, so the
+        // notification is not left running for nothing.
+        if (!container.ssh.hasActiveSessions) ConnectionService.stop(container.appContext)
     }
 
     override fun onCleared() {

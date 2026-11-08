@@ -2,6 +2,7 @@ package dev.pvps.ssh
 
 import com.jcraft.jsch.ChannelDirectTCPIP
 import com.jcraft.jsch.Session
+import dev.pvps.diagnostics.Diagnostics
 import java.io.Closeable
 import java.io.IOException
 import java.io.InputStream
@@ -14,6 +15,7 @@ import java.net.SocketTimeoutException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
 
@@ -21,16 +23,35 @@ import kotlin.concurrent.thread
 // is capped and each bridge has an idle timeout so a local app or stalled
 // remote endpoint cannot create unbounded threads/channels.
 private const val MAX_CONCURRENT_CLIENTS = 32
-private const val CLIENT_IDLE_TIMEOUT_MS = 120_000
+
+// An SSE stream can be quiet for minutes while the server has nothing to say.
+// The old 120s cutoff killed idle tunnels even though the SSH transport was
+// healthy; 30 minutes still bounds leaked clients without breaking a chat the
+// user left open. Data in either direction refreshes the deadline.
+private const val CLIENT_IDLE_TIMEOUT_MS = 30L * 60_000L
+
+// A channel-open failure can be a one-off (sshd's MaxSessions, a remote server
+// restarting). Only a sustained burst marks the whole forward as broken.
+private const val CHANNEL_FAILURE_WINDOW_MS = 15_000L
+private const val CHANNEL_FAILURE_THRESHOLD = 3
+private const val SESSION_MONITOR_INTERVAL_MS = 2_000L
 
 /**
  * Local TCP listener forwarded through SSH direct-tcpip. The OpenCode API is
  * reached through this listener so it can stay bound to 127.0.0.1 on the host.
+ *
+ * The forward is tied to the lifetime of its SSH session: when the transport
+ * dies (or its channels keep failing) the listener is closed and [onBroken] is
+ * invoked once, so SshManager can redial immediately instead of waiting for the
+ * next watchdog tick. Local clients then fail fast instead of being accepted
+ * and reset for a minute, which is what made a dead tunnel look like a server
+ * outage.
  */
 class LocalForward(
     private val session: Session,
     private val remoteHost: String,
-    private val remotePort: Int
+    private val remotePort: Int,
+    private val onBroken: (reason: String) -> Unit = {}
 ) : Closeable {
 
     private val closed = AtomicBoolean(false)
@@ -38,12 +59,20 @@ class LocalForward(
     private val clientSlots = Semaphore(MAX_CONCURRENT_CLIENTS)
     private var serverSocket: ServerSocket? = null
     private var acceptThread: Thread? = null
+    private var monitorThread: Thread? = null
+
+    private val channelFailures = AtomicInteger(0)
+    private val lastChannelFailureAt = AtomicLong(0L)
+    private val lastFailureLogAt = AtomicLong(0L)
+    private val lastBrokenReportAt = AtomicLong(0L)
 
     @Volatile
     var port: Int = 0
         private set
 
-    val isOpen: Boolean get() = !closed.get() && serverSocket?.isClosed == false
+    /** True only while the listener and the underlying SSH transport are up. */
+    val isOpen: Boolean
+        get() = !closed.get() && session.isConnected && serverSocket?.isClosed == false
 
     fun start(preferredPort: Int = 0) {
         val address = InetAddress.getByName("127.0.0.1")
@@ -86,7 +115,7 @@ class LocalForward(
                 clients.add(client)
                 thread(name = "ssh-forward-client-$port", isDaemon = true) {
                     try {
-                        client.soTimeout = CLIENT_IDLE_TIMEOUT_MS
+                        client.soTimeout = CLIENT_IDLE_TIMEOUT_MS.toInt()
                         bridge(client)
                     } catch (_: Exception) {
                         // Client/channel closed or idle timeout; both sides are
@@ -96,6 +125,22 @@ class LocalForward(
                         clients.remove(client)
                         clientSlots.release()
                     }
+                }
+            }
+        }
+        monitorThread = thread(name = "ssh-forward-watch-$port", isDaemon = true) {
+            while (!closed.get()) {
+                try {
+                    Thread.sleep(SESSION_MONITOR_INTERVAL_MS)
+                } catch (_: InterruptedException) {
+                    break
+                }
+                // JSch normally flips this after its keepalive count is
+                // exhausted. Checking it here also covers a listener that was
+                // left behind by a transport that died between probes.
+                if (!session.isConnected) {
+                    reportBroken("SSH transport closed")
+                    break
                 }
             }
         }
@@ -111,6 +156,7 @@ class LocalForward(
             channel.setHost(remoteHost)
             channel.setPort(remotePort)
             channel.connect(15_000)
+            channelFailures.set(0)
             val remoteIn = channel.inputStream
             val remoteOut = channel.outputStream
             val clientIn = client.getInputStream()
@@ -129,12 +175,46 @@ class LocalForward(
             // Give the opposite direction a bounded drain window, then tear
             // down both sides so a stalled peer cannot pin this client slot
             // indefinitely.
-            t2.join(CLIENT_IDLE_TIMEOUT_MS.toLong())
-        } catch (_: Exception) {
-            // Client/channel closed or host unreachable; both sides are closed below.
+            t2.join(CLIENT_IDLE_TIMEOUT_MS)
+        } catch (e: Exception) {
+            noteChannelFailure(e)
         } finally {
             runCatching { channel?.disconnect() }
             runCatching { client.close() }
+        }
+    }
+
+    /**
+     * A channel open failure means the SSH session is alive but cannot carry
+     * this connection (sshd MaxSessions, the forwarded server refusing the
+     * port, or a wedged transport). "session is down" is definitive; anything
+     * else needs a short burst before we ask SshManager to verify/rebuild.
+     */
+    private fun noteChannelFailure(error: Throwable) {
+        val message = error.message.orEmpty().ifBlank { error.javaClass.simpleName }
+        if (!session.isConnected || message.contains("session is down", ignoreCase = true)) {
+            reportBroken("SSH session is down")
+            return
+        }
+        val now = System.currentTimeMillis()
+        val count = channelFailures.incrementAndGet()
+        val lastFailure = lastChannelFailureAt.getAndSet(now)
+        if (now - lastFailure > CHANNEL_FAILURE_WINDOW_MS) channelFailures.set(1)
+        if (now - lastFailureLogAt.get() > 5_000) {
+            lastFailureLogAt.set(now)
+            Diagnostics.event("ssh", "forward :$port channel failed: $message")
+        }
+        if (count >= CHANNEL_FAILURE_THRESHOLD && now - lastFailure <= CHANNEL_FAILURE_WINDOW_MS) {
+            channelFailures.set(0)
+            // Do NOT close the listener here. If the SSH transport is healthy,
+            // the failed channel means the remote endpoint is unavailable (for
+            // example OpenCode restarting); keeping the listener lets the
+            // client reconnect as soon as it is back. Only a dead transport
+            // closes the forward.
+            if (now - lastBrokenReportAt.get() >= 10_000L) {
+                lastBrokenReportAt.set(now)
+                runCatching { onBroken("tunnel channel open failed: $message") }
+            }
         }
     }
 
@@ -149,7 +229,7 @@ class LocalForward(
                     // direction has moved data. A busy downstream stream keeps
                     // a client with no upstream traffic (for example SSE) alive.
                     if (System.currentTimeMillis() - lastActivity.get() <
-                        CLIENT_IDLE_TIMEOUT_MS.toLong()
+                        CLIENT_IDLE_TIMEOUT_MS
                     ) {
                         continue
                     }
@@ -172,9 +252,27 @@ class LocalForward(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        teardown()
+    }
+
+    /**
+     * Unexpected failure path: close the listener first (so new local clients
+     * fail fast), then tell SshManager once. A concurrent intentional close
+     * wins the CAS and suppresses the callback.
+     */
+    private fun reportBroken(reason: String) {
+        if (!closed.compareAndSet(false, true)) return
+        teardown()
+        Diagnostics.event("ssh", "forward :$port lost: $reason")
+        runCatching { onBroken(reason) }
+    }
+
+    private fun teardown() {
         runCatching { serverSocket?.close() }
+        serverSocket = null
         clients.forEach { runCatching { it.close() } }
         clients.clear()
         acceptThread?.interrupt()
+        monitorThread?.interrupt()
     }
 }

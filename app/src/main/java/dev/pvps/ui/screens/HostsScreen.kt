@@ -181,6 +181,7 @@ private fun HostCard(
     val statusColor = when (state?.status) {
         ConnectionState.Status.CONNECTED -> Success
         ConnectionState.Status.CONNECTING -> Warning
+        ConnectionState.Status.RECONNECTING -> Warning
         ConnectionState.Status.NEEDS_HOST_KEY -> Warning
         ConnectionState.Status.ERROR -> Danger
         else -> TextFaint
@@ -228,6 +229,7 @@ private fun HostCard(
                     text = when (state?.status) {
                         ConnectionState.Status.CONNECTED -> "LIVE"
                         ConnectionState.Status.CONNECTING -> "LINKING"
+                        ConnectionState.Status.RECONNECTING -> "RETRY"
                         ConnectionState.Status.NEEDS_HOST_KEY -> "VERIFY"
                         ConnectionState.Status.ERROR -> "ERROR"
                         else -> "IDLE"

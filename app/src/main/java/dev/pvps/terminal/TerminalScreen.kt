@@ -100,6 +100,7 @@ import dev.pvps.ui.theme.SurfaceDark
 import dev.pvps.ui.theme.SurfaceRaised
 import dev.pvps.ui.theme.TextPrimary
 import dev.pvps.ui.theme.TextSecondary
+import dev.pvps.ui.theme.Warning
 import com.termux.terminal.TextStyle
 import com.termux.terminal.WcWidth
 import dev.pvps.data.model.AppSettings
@@ -236,6 +237,7 @@ fun TerminalScreen(
     val statusColor = when (connection.status) {
         ConnectionState.Status.CONNECTED -> Success
         ConnectionState.Status.CONNECTING -> Accent
+        ConnectionState.Status.RECONNECTING -> Warning
         ConnectionState.Status.ERROR -> Danger
         else -> TextSecondary
     }
@@ -243,6 +245,7 @@ fun TerminalScreen(
         ConnectionState.Status.CONNECTED ->
             controller?.title?.takeIf { it.isNotBlank() } ?: "connected"
         ConnectionState.Status.CONNECTING -> "connecting…"
+        ConnectionState.Status.RECONNECTING -> "reconnecting…"
         ConnectionState.Status.ERROR -> error ?: "connection error"
         ConnectionState.Status.NEEDS_HOST_KEY -> "host key not verified"
         ConnectionState.Status.DISCONNECTED -> "disconnected"

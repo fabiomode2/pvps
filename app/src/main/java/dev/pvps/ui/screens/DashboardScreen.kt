@@ -398,6 +398,7 @@ private fun ConnectionPanel(
     val title = when (status) {
         ConnectionState.Status.CONNECTED -> "Connected"
         ConnectionState.Status.CONNECTING -> "Connecting"
+        ConnectionState.Status.RECONNECTING -> "Reconnecting"
         ConnectionState.Status.NEEDS_HOST_KEY -> "Host key required"
         ConnectionState.Status.ERROR -> "Connection failed"
         else -> "Not connected"
@@ -405,6 +406,7 @@ private fun ConnectionPanel(
     val detail = when (status) {
         ConnectionState.Status.CONNECTED -> state?.message?.takeIf { it.isNotBlank() } ?: "SSH session established."
         ConnectionState.Status.CONNECTING -> state?.message?.takeIf { it.isNotBlank() } ?: "Opening SSH session."
+        ConnectionState.Status.RECONNECTING -> state?.message?.takeIf { it.isNotBlank() } ?: "Retrying the SSH session."
         ConnectionState.Status.NEEDS_HOST_KEY -> "Verify the fingerprint below before trusting this host."
         ConnectionState.Status.ERROR -> state?.message?.takeIf { it.isNotBlank() } ?: "Check the address, key, or network."
         else -> "Connect to load live telemetry and open a session."
@@ -973,6 +975,7 @@ fun HostKeyTrustCard(fingerprint: String, onTrust: () -> Unit, onCancel: () -> U
 private fun connectionColor(status: ConnectionState.Status?): Color = when (status) {
     ConnectionState.Status.CONNECTED -> Success
     ConnectionState.Status.CONNECTING -> Warning
+    ConnectionState.Status.RECONNECTING -> Warning
     ConnectionState.Status.NEEDS_HOST_KEY -> Warning
     ConnectionState.Status.ERROR -> Danger
     else -> TextSecondary
@@ -981,6 +984,7 @@ private fun connectionColor(status: ConnectionState.Status?): Color = when (stat
 private fun connectionLabel(status: ConnectionState.Status?): String = when (status) {
     ConnectionState.Status.CONNECTED -> "LIVE"
     ConnectionState.Status.CONNECTING -> "LINKING"
+    ConnectionState.Status.RECONNECTING -> "RETRY"
     ConnectionState.Status.NEEDS_HOST_KEY -> "VERIFY"
     ConnectionState.Status.ERROR -> "ERROR"
     else -> "OFFLINE"

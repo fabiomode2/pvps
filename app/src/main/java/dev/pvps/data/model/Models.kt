@@ -67,6 +67,10 @@ data class AppSettings(
     val fileGridView: Boolean = true,
     val showHiddenFiles: Boolean = false,
     val notifyResponses: Boolean = true,
+    // Keep a partial wake lock while the SSH foreground service runs. Without
+    // it the CPU can sleep through the keepalive timers, the carrier NAT drops
+    // the idle socket, and the tunnel only notices minutes later.
+    val keepConnectionAlive: Boolean = true,
     val lastModelProvider: String = "",
     val lastModelId: String = "",
     val lastModelVariant: String = "",
@@ -104,5 +108,5 @@ data class ConnectionState(
     val message: String = "",
     val hostKeySha256: String? = null
 ) {
-    enum class Status { DISCONNECTED, CONNECTING, CONNECTED, NEEDS_HOST_KEY, ERROR }
+    enum class Status { DISCONNECTED, CONNECTING, CONNECTED, RECONNECTING, NEEDS_HOST_KEY, ERROR }
 }

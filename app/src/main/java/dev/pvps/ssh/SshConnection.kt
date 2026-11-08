@@ -8,6 +8,7 @@ import com.jcraft.jsch.JSch
 import com.jcraft.jsch.JSchChangedHostKeyException
 import com.jcraft.jsch.JSchUnknownHostKeyException
 import com.jcraft.jsch.Session
+import com.jcraft.jsch.SocketFactory
 import dev.pvps.data.model.CommandResult
 import dev.pvps.data.model.Host
 import dev.pvps.data.model.SshKey
@@ -19,7 +20,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.io.OutputStream
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicReference
 
@@ -46,14 +50,30 @@ class SshConnection(
     companion object {
         const val DEFAULT_MAX_OUTPUT_BYTES: Long = 8L * 1024 * 1024
         const val DEFAULT_MAX_ERROR_BYTES: Long = 1L * 1024 * 1024
+
+        // Mobile NATs forget idle flows after ~30-60s. Send our own keepalive
+        // every 15s and give up after two missed replies (30s) instead of the
+        // old 30s x 3 = 90s, which is long enough for the UI to look dead.
+        const val KEEPALIVE_INTERVAL_MS = 15_000
+        const val KEEPALIVE_COUNT_MAX = 2
+        private const val CONNECT_TIMEOUT_MS = 15_000
     }
 
-    val isConnected: Boolean
+    /**
+     * JSch reports a dead transport through this flag. It can lag behind
+     * reality on a half-open mobile socket, which is why SshManager also runs a
+     * cheap exec probe; it is still the fastest signal for a clean RST/EOF.
+     */
+    val isAlive: Boolean
         get() = session?.isConnected == true
 
     suspend fun connect(): ConnectOutcome = withContext(Dispatchers.IO) {
         try {
             val s = jsch.getSession(host.sshUser, host.sshHost, host.sshPort)
+            // SO_KEEPALIVE is not enough on its own (the kernel default is two
+            // hours) but it is a cheap extra safety net under the SSH-level
+            // keepalive below. TCP_NODELAY keeps interactive keystrokes snappy.
+            s.setSocketFactory(KeepAliveSocketFactory(CONNECT_TIMEOUT_MS))
             if (key != null) {
                 val passphrase = key.passphrase.takeIf { it.isNotBlank() }?.toByteArray()
                 val pub = key.publicKey.takeIf { it.isNotBlank() }?.toByteArray()
@@ -69,9 +89,9 @@ class SshConnection(
                 autoTrust = autoTrustHostKey,
                 onSeen = { seenHostKey.set(it) }
             )
-            s.serverAliveInterval = 30_000
-            s.serverAliveCountMax = 3
-            s.connect(15_000)
+            s.serverAliveInterval = KEEPALIVE_INTERVAL_MS
+            s.serverAliveCountMax = KEEPALIVE_COUNT_MAX
+            s.connect(CONNECT_TIMEOUT_MS)
             session = s
 
             val fingerprint = seenHostKey.get()
@@ -209,15 +229,42 @@ class SshConnection(
         return (s.openChannel("sftp") as ChannelSftp).apply { connect(15_000) }
     }
 
-    fun openForward(remoteHost: String, remotePort: Int, localPort: Int = 0): LocalForward {
+    fun openForward(
+        remoteHost: String,
+        remotePort: Int,
+        localPort: Int = 0,
+        onBroken: (reason: String) -> Unit = {}
+    ): LocalForward {
         val s = session ?: error("SSH session is not connected")
-        return LocalForward(s, remoteHost, remotePort).also { it.start(localPort) }
+        return LocalForward(s, remoteHost, remotePort, onBroken).also { it.start(localPort) }
     }
 
     fun disconnect() {
         runCatching { session?.disconnect() }
         session = null
     }
+}
+
+/**
+ * Socket factory used by the SSH transport. JSch's default socket has no
+ * SO_KEEPALIVE and relies on the JVM default connect timeout, both of which are
+ * poor fits for a phone that moves between Wi-Fi and LTE.
+ */
+private class KeepAliveSocketFactory(
+    private val connectTimeoutMs: Int
+) : SocketFactory {
+
+    override fun createSocket(host: String, port: Int): Socket {
+        val socket = Socket()
+        runCatching { socket.keepAlive = true }
+        runCatching { socket.tcpNoDelay = true }
+        socket.connect(InetSocketAddress(host, port), connectTimeoutMs)
+        return socket
+    }
+
+    override fun getInputStream(socket: Socket): InputStream = socket.getInputStream()
+
+    override fun getOutputStream(socket: Socket): OutputStream = socket.getOutputStream()
 }
 
 /**

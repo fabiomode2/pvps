@@ -3,6 +3,7 @@ package dev.pvps.opencode
 import android.util.Base64
 import android.util.LruCache
 import dev.pvps.data.model.AuditEntry
+import dev.pvps.data.model.ConnectionState
 import dev.pvps.data.model.Host
 import dev.pvps.data.store.AuditStore
 import dev.pvps.data.store.SettingsStore
@@ -18,6 +19,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -64,6 +66,9 @@ private const val MAX_SSE_RECONNECT_MS = 15_000L
 private const val HEALTHY_SSE_CONNECTION_MS = 10_000L
 private const val INITIAL_SSE_ERROR_BACKOFF_MS = 400L
 private const val MAX_SSE_ERROR_BACKOFF_MS = 5_000L
+private const val SSE_RECOVERY_FAILURE_THRESHOLD = 3
+private const val SSE_RECOVERY_COOLDOWN_MS = 45_000L
+private const val SSE_LINK_DOWN_RETRY_MS = 5_000L
 
 class OpenCodeRepository(
     private val ssh: SshManager,
@@ -119,8 +124,13 @@ class OpenCodeRepository(
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
 
+    @Volatile
     private var client: OpenCodeClient? = null
+
+    @Volatile
     private var host: Host? = null
+
+    @Volatile
     private var connectedBaseUrl: String? = null
     private var eventsJob: Job? = null
     private var refreshJob: Job? = null
@@ -138,6 +148,80 @@ class OpenCodeRepository(
     private var refreshAllJob: Job? = null
     private val refreshAllMutex = Mutex()
     private var lastRefreshAllAt = 0L
+
+    // The OpenCode client is bound to a tunnel port. When SSH redials (or the
+    // watchdog rebuilds the forward) the old client must be replaced without
+    // dropping the transcript. This supervisor is app-scoped: recovery must not
+    // depend on the Chat tab being on screen.
+    private val connectMutex = Mutex()
+    private var connectRetryJob: Job? = null
+
+    @Volatile
+    private var sshLinkUp = false
+
+    @Volatile
+    private var consecutiveSseFailures = 0
+    private var lastSshRecoveryRequestAt = 0L
+    private var lastLinkDownLogAt = 0L
+
+    init {
+        scope.launch {
+            ssh.states.collect { states ->
+                val current = host ?: return@collect
+                val status = states[current.id]?.status
+                if (status == ConnectionState.Status.CONNECTED) {
+                    onSshLinkUp(current)
+                } else {
+                    onSshLinkDown(current)
+                }
+            }
+        }
+    }
+
+    /**
+     * SSH came back (or was rebuilt on the same local port). Rebinding keeps
+     * the transcript and queue; only the HTTP client is replaced when the base
+     * URL changed.
+     */
+    private fun onSshLinkUp(host: Host) {
+        if (this.host?.id != host.id) return
+        val first = !sshLinkUp
+        sshLinkUp = true
+        if (first) Diagnostics.event("opencode", "SSH link up host=${host.name}")
+        scope.launch {
+            val base = runCatching { ssh.openCodeBaseUrl(host) }.getOrNull()
+            if (!_state.value.connected || client == null || base != connectedBaseUrl) {
+                connect(host)
+            } else {
+                _state.update { it.copy(error = null) }
+                if (eventsJob?.isActive != true) startEvents()
+            }
+        }
+    }
+
+    private fun onSshLinkDown(host: Host) {
+        if (this.host?.id != host.id || !sshLinkUp) return
+        sshLinkUp = false
+        val now = System.currentTimeMillis()
+        if (now - lastLinkDownLogAt > 15_000) {
+            lastLinkDownLogAt = now
+            Diagnostics.event("opencode", "SSH link down host=${host.name}; pausing")
+        }
+        if (_state.value.connected) {
+            _state.update { it.copy(error = "SSH link lost. Reconnecting…") }
+        }
+    }
+
+    /** True when the client is bound to [hostId] and must be torn down with it. */
+    fun isBoundTo(hostId: String): Boolean = host?.id == hostId
+
+    /** Called when the app returns to the foreground. */
+    fun onResume() {
+        val current = host ?: return
+        if (ssh.stateFor(current.id).status == ConnectionState.Status.CONNECTED) {
+            onSshLinkUp(current)
+        }
+    }
 
     private val dedupeLock = Any()
     private val seenEventKeys = LinkedHashSet<String>()
@@ -159,6 +243,16 @@ class OpenCodeRepository(
         }
 
     suspend fun connect(host: Host, force: Boolean = false) {
+        // The UI and the SSH supervisor can both ask for a rebind at the same
+        // time; serialise them so two clients are never installed.
+        connectMutex.withLock { connectLocked(host, force) }
+    }
+
+    private suspend fun connectLocked(
+        host: Host,
+        force: Boolean = false,
+        fromRetryLoop: Boolean = false
+    ) {
         val desiredBase = runCatching { ssh.openCodeBaseUrl(host) }.getOrNull()
         val sameHost = this.host?.id == host.id
         if (!force && sameHost && _state.value.connected &&
@@ -251,6 +345,14 @@ class OpenCodeRepository(
             }
             startEvents()
             startQueueDrain()
+            sshLinkUp = true
+            consecutiveSseFailures = 0
+            // A retry loop that just succeeded must not cancel itself; it exits
+            // on the connected check at the top of its next iteration.
+            if (!fromRetryLoop) {
+                connectRetryJob?.cancel()
+                connectRetryJob = null
+            }
             audit.add(
                 AuditEntry(
                     hostName = host.name,
@@ -267,6 +369,28 @@ class OpenCodeRepository(
                     connected = false,
                     error = e.message ?: "Could not connect to OpenCode"
                 )
+            }
+            // The tunnel may be back before the OpenCode process is ready (or
+            // while sshd is briefly refusing channels). Keep trying without
+            // requiring the user to reopen the Chat tab.
+            if (!fromRetryLoop) scheduleConnectRetry(host)
+        }
+    }
+
+    private fun scheduleConnectRetry(host: Host) {
+        connectRetryJob?.cancel()
+        connectRetryJob = scope.launch {
+            var attempt = 0
+            while (isActive && this@OpenCodeRepository.host?.id == host.id) {
+                if (_state.value.connected) break
+                val waitMs = (10_000L shl attempt.coerceIn(0, 2)).coerceAtMost(30_000L)
+                delay(waitMs)
+                attempt++
+                if (!isActive || this@OpenCodeRepository.host?.id != host.id) break
+                if (ssh.stateFor(host.id).status != ConnectionState.Status.CONNECTED) continue
+                if (_state.value.connected) break
+                Diagnostics.event("opencode", "retrying connect host=${host.name}")
+                connectMutex.withLock { connectLocked(host, fromRetryLoop = true) }
             }
         }
     }
@@ -289,6 +413,10 @@ class OpenCodeRepository(
 
     private fun stopRuntime(resetState: Boolean) {
         stopEventsAndDrain()
+        connectRetryJob?.cancel()
+        connectRetryJob = null
+        sshLinkUp = false
+        consecutiveSseFailures = 0
         client?.close()
         client = null
         host = null
@@ -776,7 +904,7 @@ class OpenCodeRepository(
         queueJob = scope.launch {
             while (isActive) {
                 delay(4_000)
-                if (client == null || !_state.value.connected) continue
+                if (client == null || !_state.value.connected || !sshLinkUp) continue
                 val before = _state.value
                 // Reconcile only while there is something that can be stuck.
                 if (before.busy || before.queued.isNotEmpty()) {
@@ -909,11 +1037,14 @@ class OpenCodeRepository(
         eventsJob = scope.launch {
             var normalBackoff = INITIAL_SSE_RECONNECT_MS
             var errorBackoff = INITIAL_SSE_ERROR_BACKOFF_MS
+            var consecutiveFailures = 0
             while (isActive) {
                 val c = client ?: break
                 val connectionStartedAt = System.currentTimeMillis()
                 try {
                     c.events().collect { event ->
+                        // Any event proves the stream is alive again.
+                        consecutiveFailures = 0
                         if (isDuplicateEvent(event)) return@collect
                         onEvent(event)
                     }
@@ -922,21 +1053,65 @@ class OpenCodeRepository(
                     // streams grow to the capped, jittered delay instead.
                     val healthy = System.currentTimeMillis() - connectionStartedAt >=
                         HEALTHY_SSE_CONNECTION_MS
-                    if (healthy) normalBackoff = INITIAL_SSE_RECONNECT_MS
+                    if (healthy) {
+                        normalBackoff = INITIAL_SSE_RECONNECT_MS
+                        errorBackoff = INITIAL_SSE_ERROR_BACKOFF_MS
+                        consecutiveFailures = 0
+                    }
                     val wait = jitteredDelay(normalBackoff)
                     Diagnostics.event("sse", "stream ended; retry in ${wait}ms")
                     delay(wait)
                     normalBackoff = (normalBackoff * 2).coerceAtMost(MAX_SSE_RECONNECT_MS)
                 } catch (e: Exception) {
                     if (!isActive || generation != eventGeneration) break
-                    val wait = jitteredDelay(errorBackoff)
-                    Diagnostics.event("sse", "disconnected; retry in ${wait}ms", e)
+                    val linked = sshLinkUp
+                    val healthy = System.currentTimeMillis() - connectionStartedAt >=
+                        HEALTHY_SSE_CONNECTION_MS
+                    if (healthy) {
+                        errorBackoff = INITIAL_SSE_ERROR_BACKOFF_MS
+                        consecutiveFailures = 0
+                    }
+                    consecutiveFailures++
+                    // While SSH is down there is nothing to refresh; retrying
+                    // the burst of REST calls only spams the log and burns
+                    // battery. Keep one lightweight stream probe instead.
+                    val wait = if (linked) {
+                        jitteredDelay(errorBackoff)
+                    } else {
+                        SSE_LINK_DOWN_RETRY_MS
+                    }
+                    Diagnostics.event(
+                        "sse",
+                        if (linked) "disconnected; retry in ${wait}ms" else "link down; waiting ${wait}ms",
+                        e
+                    )
+                    if (linked) {
+                        requestRefreshAll()
+                        if (consecutiveFailures >= SSE_RECOVERY_FAILURE_THRESHOLD) {
+                            requestSshRecovery()
+                        }
+                    }
                     delay(wait)
-                    errorBackoff = (errorBackoff * 2).coerceAtMost(MAX_SSE_ERROR_BACKOFF_MS)
-                    requestRefreshAll()
+                    if (linked) {
+                        errorBackoff = (errorBackoff * 2).coerceAtMost(MAX_SSE_ERROR_BACKOFF_MS)
+                    }
                 }
             }
         }
+    }
+
+    /**
+     * The event stream is the best end-to-end heartbeat we have. After a few
+     * failed streams ask SshManager to probe/rebuild the tunnel; it will only
+     * replace the SSH session if the transport itself is unhealthy.
+     */
+    private fun requestSshRecovery() {
+        val current = host ?: return
+        val now = System.currentTimeMillis()
+        if (now - lastSshRecoveryRequestAt < SSE_RECOVERY_COOLDOWN_MS) return
+        lastSshRecoveryRequestAt = now
+        Diagnostics.event("opencode", "SSE failing; requesting SSH recovery")
+        ssh.requestRecovery(current.id, "opencode SSE failing")
     }
 
     private fun jitteredDelay(baseMs: Long): Long {
