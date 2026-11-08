@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>A · Console</title>
+<style>
+:root{--bg:#0A0C10;--ink:#E8EAF0;--mut:#8C93A3;--dim:#5B6273;--line:#1C212B;--amb:#FFB86B;--grn:#63E6A6;--red:#FF7B8F;
+--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;--mono:ui-monospace,"SF Mono",Menlo,monospace}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:#000;font-family:var(--sans);color:var(--ink);display:flex;justify-content:center;padding:16px}
+.phone{width:390px;height:844px;background:var(--bg);border-radius:38px;overflow:hidden;position:relative;box-shadow:0 0 0 9px #111318,0 30px 60px rgba(0,0,0,.6)}
+.screen{position:absolute;inset:0;display:none;flex-direction:column;padding-top:44px}
+.screen.on{display:flex}
+.sbar{position:absolute;top:0;left:0;right:0;height:44px;display:flex;justify-content:space-between;align-items:center;padding:0 20px;font:600 11px var(--mono);color:var(--mut);z-index:20}
+.ctx{display:flex;align-items:center;gap:10px;padding:10px 16px 12px;border-bottom:1px solid var(--line)}
+.ctx .dot{width:7px;height:7px;border-radius:50%;background:var(--grn);box-shadow:0 0 0 4px rgba(99,230,166,.12)}
+.ctx .h{font:600 14px var(--sans)}
+.ctx .s{font:400 10.5px var(--mono);color:var(--dim);margin-top:1px}
+.ctx .sp{flex:1}
+.pill{font:600 9.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--amb);border:1px solid rgba(255,184,107,.35);border-radius:99px;padding:4px 8px}
+.feed{flex:1;overflow:auto;padding:8px 0 120px}
+.ev{display:grid;grid-template-columns:52px 1fr;gap:10px;padding:9px 16px;align-items:start}
+.ev .ts{font:400 9.5px var(--mono);color:#3E4554;padding-top:4px}
+.ev .body{font:400 13px/1.5 var(--sans);color:#C9CEDB}
+.ev.sys .body{font:400 11.5px/1.5 var(--mono);color:var(--mut)}
+.ev.sys .body b{color:var(--grn);font-weight:600}
+.ev.me .body{background:#161B24;border:1px solid var(--line);border-radius:14px;border-bottom-right-radius:4px;padding:10px 12px;color:#E3E7F0}
+.ev.ai .body{color:#DCE1EC}
+.ev.ai .who{font:600 9.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--amb);margin-bottom:6px}
+.ev.ai code{display:block;margin-top:8px;background:#05070A;border:1px solid var(--line);border-radius:8px;padding:9px 10px;font:400 10.5px/1.6 var(--mono);color:#9FB3C8;white-space:pre-wrap}
+.ev .act{display:flex;gap:6px;margin-top:8px}
+.chip{font:600 10px var(--mono);letter-spacing:.04em;color:var(--mut);border:1px solid var(--line);background:#11151C;border-radius:8px;padding:6px 9px;cursor:pointer}
+.chip:active{background:#1A2029}
+.composer{position:absolute;left:0;right:0;bottom:0;padding:10px 14px 22px;background:linear-gradient(to top,var(--bg) 55%,rgba(10,12,16,0))}
+.inputwrap{display:flex;align-items:center;gap:8px;background:#10141B;border:1px solid #242B37;border-radius:20px;padding:8px 8px 8px 14px;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.inputwrap .pmt{font:600 13px var(--mono);color:var(--amb)}
+.inputwrap input{flex:1;background:none;border:0;outline:none;color:var(--ink);font:400 13.5px var(--sans)}
+.inputwrap input::placeholder{color:#555D6E}
+.kbd{width:32px;height:32px;border-radius:10px;background:#1A2029;border:1px solid #2A3140;color:var(--mut);display:grid;place-items:center;font:600 13px var(--mono);cursor:pointer}
+.go{width:34px;height:34px;border-radius:50%;background:var(--amb);color:#1B1206;display:grid;place-items:center;font-size:15px;border:0;cursor:pointer}
+/* palette */
+.palette{position:absolute;inset:0;background:rgba(5,7,10,.72);backdrop-filter:blur(6px);display:none;z-index:30;padding:70px 14px 20px}
+.palette.on{display:block}
+.pbox{background:#0E1218;border:1px solid #262E3B;border-radius:18px;overflow:hidden;box-shadow:0 30px 60px rgba(0,0,0,.6)}
+.pinput{display:flex;gap:8px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line);font:400 13px var(--mono);color:var(--mut)}
+.pinput b{color:var(--amb)}
+.plist{max-height:430px;overflow:auto}
+.pitem{display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;border-bottom:1px solid #151A22}
+.pitem:active{background:#141A23}
+.pitem .k{font:600 10px var(--mono);color:var(--amb);width:64px}
+.pitem .t{flex:1;font:400 13px var(--sans);color:#D7DCE7}
+.pitem .d{font:400 10px var(--mono);color:var(--dim)}
+/* peek */
+.peek{position:absolute;left:0;right:0;bottom:0;background:#0E1218;border-top:1px solid #262E3B;border-radius:22px 22px 0 0;padding:8px 16px 26px;transform:translateY(110%);transition:transform .3s cubic-bezier(.3,.9,.2,1);z-index:25;box-shadow:0 -20px 50px rgba(0,0,0,.5)}
+.peek.on{transform:none}
+.grab{width:38px;height:4px;border-radius:99px;background:#2B3341;margin:6px auto 14px}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#1A2029;border:1px solid #1A2029;border-radius:12px;overflow:hidden}
+.kpi{background:#0E1218;padding:12px}
+.kpi .k{font:600 9px var(--mono);letter-spacing:.14em;color:var(--dim)}
+.kpi .v{font:600 24px/1 var(--sans);letter-spacing:-.02em;margin-top:6px;font-variant-numeric:tabular-nums}
+.kpi .d{font:400 9.5px var(--mono);color:var(--mut);margin-top:3px}
+.bar{height:3px;background:#1A2029;border-radius:9px;margin-top:8px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--amb)}
+/* list screens */
+.list{flex:1;overflow:auto;padding:10px 16px 120px}
+.row{display:flex;align-items:center;gap:12px;padding:12px 2px;border-bottom:1px solid #141922;cursor:pointer}
+.row .t{flex:1;font:400 13.5px var(--sans);color:#D9DEEA}
+.row .m{font:400 10px var(--mono);color:var(--dim);margin-top:2px}
+.row .v{font:600 11px var(--mono);color:var(--mut)}
+.row .v.bad{color:var(--red)}
+h3{font:600 9.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--dim);margin:18px 2px 6px}
+.term{flex:1;overflow:auto;background:#05070A;margin:8px 12px 110px;border:1px solid var(--line);border-radius:12px;padding:12px;font:400 11px/1.7 var(--mono);color:#8FA6BC;white-space:pre-wrap}
+.term .p{color:var(--amb)}
+.term .ok{color:var(--grn)}
+</style></head>
+<body>
+<div class="phone" id="phone">
+  <div class="sbar"><span>21:07</span><span>5G ▲</span></div>
+
+  <!-- TIMELINE -->
+  <section class="screen on" data-screen="home">
+    <div class="ctx">
+      <span class="dot"></span>
+      <div><div class="h">vps</div><div class="s">ubuntu@130.110.235.61 · tunnel 43359</div></div>
+      <div class="sp"></div><span class="pill">live</span>
+    </div>
+    <div class="feed">
+      <div class="ev sys"><div class="ts">21:02</div><div class="body"><b>ssh</b> session established · keepalive 15s</div></div>
+      <div class="ev sys"><div class="ts">21:02</div><div class="body"><b>opencode</b> v2.4.1 bound to 127.0.0.1:43359 · 3 sessions</div></div>
+      <div class="ev me"><div class="ts">21:04</div><div class="body">mira los logs de nginx y dime si hay algo raro con el 502 de esta mañana</div></div>
+      <div class="ev ai"><div class="ts">21:04</div><div class="body">
+        <div class="who">assistant · deepseek</div>
+        Revisé <b>access.log</b> y <b>error.log</b>. El 502 es un upstream timeout: nginx espera 60s y el contenedor tarda 74s.
+        <code>upstream timed out (110: Connection timed out)
+104.21.8.12 - [08/Nov 09:41] "GET /api/chat" 502</code>
+        Subí proxy_read_timeout a 120s y recargué nginx. Ya responde 200.
+        <div class="act"><button class="chip" data-go="services">ver servicios</button><button class="chip" data-go="files">abrir logs</button></div>
+      </div></div>
+      <div class="ev sys"><div class="ts">21:05</div><div class="body"><b>watchdog</b> probe ok · cpu 4% · mem 41%</div></div>
+      <div class="ev sys"><div class="ts">21:06</div><div class="body">2 services failed · <button class="chip" data-peek="1">peek</button></div></div>
+    </div>
+    <div class="composer">
+      <div class="inputwrap">
+        <span class="pmt">›</span>
+        <input placeholder="habla, o escribe /files /shell /docker">
+        <button class="kbd" data-palette="1">⌘</button>
+        <button class="go">↑</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- FILES -->
+  <section class="screen" data-screen="files">
+    <div class="ctx"><span class="dot"></span><div><div class="h">files</div><div class="s">/home/ubuntu</div></div><div class="sp"></div><span class="pill">sftp</span></div>
+    <div class="list">
+      <h3>18 items</h3>
+      <div class="row"><div class="t">📁 nginx<div class="m">dir · 4 items</div></div><div class="v">›</div></div>
+      <div class="row"><div class="t">📁 pvps<div class="m">dir · 12 items</div></div><div class="v">›</div></div>
+      <div class="row"><div class="t">📄 install.sh<div class="m">31.7 KB</div></div><div class="v">edit</div></div>
+      <div class="row"><div class="t">📄 SHA256SUMS<div class="m">158 B</div></div><div class="v">view</div></div>
+      <div class="row"><div class="t">🗄 opencode-backup.tgz<div class="m">932 MB</div></div><div class="v">›</div></div>
+    </div>
+  </section>
+
+  <!-- SHELL -->
+  <section class="screen" data-screen="shell">
+    <div class="ctx"><span class="dot"></span><div><div class="h">shell</div><div class="s">ubuntu@vnic-reiner</div></div><div class="sp"></div><span class="pill">pty</span></div>
+    <div class="term"><span class="p">ubuntu@vps:~$</span> docker ps --format '{{.Names}} {{.Status}}'
+nginx <span class="ok">Up 6 days</span>
+pvps <span class="ok">Up 6 days</span>
+<span class="p">ubuntu@vps:~$</span> systemctl --failed
+  UNIT                LOAD   ACTIVE SUB
+  auditd.service      loaded failed failed
+  cloudflared.service loaded failed failed
+<span class="p">ubuntu@vps:~$</span> █</div>
+  </section>
+
+  <!-- SERVICES -->
+  <section class="screen" data-screen="services">
+    <div class="ctx"><div><div class="h">services</div><div class="s">systemd · 2 failed of 148</div></div><div class="sp"></div><span class="pill">live</span></div>
+    <div class="list">
+      <h3>failed</h3>
+      <div class="row"><div class="t">auditd.service<div class="m">loaded failed failed</div></div><div class="v bad">failed</div></div>
+      <div class="row"><div class="t">cloudflared.service<div class="m">loaded failed failed</div></div><div class="v bad">failed</div></div>
+      <h3>running</h3>
+      <div class="row"><div class="t">pvps-opencode.service<div class="m">active running</div></div><div class="v">ok</div></div>
+      <div class="row"><div class="t">docker.service<div class="m">active running</div></div><div class="v">ok</div></div>
+    </div>
+  </section>
+
+  <!-- DOCKER -->
+  <section class="screen" data-screen="docker">
+    <div class="ctx"><div><div class="h">docker</div><div class="s">19 running / 19 total</div></div><div class="sp"></div><span class="pill">live</span></div>
+    <div class="list">
+      <h3>containers</h3>
+      <div class="row"><div class="t">nginx<div class="m">nginx:1.27 · up 6d</div></div><div class="v">ok</div></div>
+      <div class="row"><div class="t">pvps<div class="m">ghcr.io/pvps · up 6d</div></div><div class="v">ok</div></div>
+      <div class="row"><div class="t">nextcloud<div class="m">nextcloud:29 · up 2d</div></div><div class="v">ok</div></div>
+    </div>
+  </section>
+
+  <!-- palette -->
+  <div class="palette" id="palette">
+    <div class="pbox">
+      <div class="pinput"><b>⌘</b> escribe un comando o una acción…</div>
+      <div class="plist">
+        <div class="pitem" data-go="home"><span class="k">/chat</span><span class="t">Volver a la conversación</span><span class="d">↵</span></div>
+        <div class="pitem" data-go="files"><span class="k">/files</span><span class="t">Explorar archivos por SFTP</span><span class="d">↵</span></div>
+        <div class="pitem" data-go="shell"><span class="k">/shell</span><span class="t">Abrir terminal</span><span class="d">↵</span></div>
+        <div class="pitem" data-go="docker"><span class="k">/docker</span><span class="t">Contenedores</span><span class="d">↵</span></div>
+        <div class="pitem" data-go="services"><span class="k">/services</span><span class="t">Servicios systemd · 2 fallan</span><span class="d">!</span></div>
+        <div class="pitem" data-peek="1"><span class="k">/peek</span><span class="t">Telemetría rápida</span><span class="d">↑</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- peek -->
+  <div class="peek" id="peek">
+    <div class="grab"></div>
+    <div class="kpis">
+      <div class="kpi"><div class="k">CPU</div><div class="v">4%</div><div class="d">load 0.08 · 2 cores</div><div class="bar"><i style="width:4%"></i></div></div>
+      <div class="kpi"><div class="k">RAM</div><div class="v">41%</div><div class="d">4.9 / 11.6 GB</div><div class="bar"><i style="width:41%"></i></div></div>
+      <div class="kpi"><div class="k">DISK</div><div class="v">51%</div><div class="d">96 / 193 GB</div><div class="bar"><i style="width:51%"></i></div></div>
+      <div class="kpi"><div class="k">DOCKER</div><div class="v">19/19</div><div class="d">running</div><div class="bar"><i style="width:100%"></i></div></div>
+    </div>
+  </div>
+</div>
+<script>
+const phone=document.getElementById('phone');
+function go(n){
+  phone.querySelectorAll('[data-screen]').forEach(s=>s.classList.toggle('on',s.dataset.screen===n));
+  document.getElementById('palette').classList.remove('on');
+  document.getElementById('peek').classList.remove('on');
+  window.scrollTo(0,0);
+}
+phone.addEventListener('click',e=>{
+  const g=e.target.closest('[data-go]'); if(g) go(g.dataset.go);
+  if(e.target.closest('[data-palette]')) document.getElementById('palette').classList.toggle('on');
+  if(e.target.closest('[data-peek]')) document.getElementById('peek').classList.toggle('on');
+});
+</script>
+</body></html>

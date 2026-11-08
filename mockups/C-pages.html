@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>C · Pages</title>
+<style>
+:root{--bg:#07080B;--ink:#F4F4F8;--mut:#9C9FB0;--dim:#5C6070;--line:#1A1D24;
+--lime:#D9F76B;--cyan:#7FE7FF;--pink:#FF9BC8;--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;--mono:ui-monospace,"SF Mono",Menlo,monospace}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:#000;display:flex;justify-content:center;padding:16px;font-family:var(--sans);color:var(--ink)}
+.phone{width:390px;height:844px;border-radius:40px;overflow:hidden;position:relative;background:var(--bg);box-shadow:0 0 0 9px #111319,0 30px 60px rgba(0,0,0,.6)}
+.sbar{position:absolute;top:0;left:0;right:0;height:44px;display:flex;justify-content:space-between;align-items:center;padding:0 24px;font:600 11px var(--mono);color:var(--mut);z-index:6}
+.host{position:absolute;top:46px;left:0;right:0;display:flex;justify-content:center;z-index:6}
+.host span{font:600 9.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--mut);background:#101218;border:1px solid var(--line);padding:6px 12px;border-radius:99px;display:flex;gap:7px;align-items:center}
+.host i{width:6px;height:6px;border-radius:50%;background:var(--lime);display:block}
+.pages{height:100%;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;display:flex;scrollbar-width:none}
+.pages::-webkit-scrollbar{display:none}
+.page{flex:0 0 100%;scroll-snap-align:start;height:100%;padding:96px 26px 110px;position:relative;overflow:auto}
+.page:after{content:"";position:absolute;inset:auto -40% -30% auto;width:420px;height:420px;border-radius:50%;background:var(--hue,var(--lime));opacity:.07;filter:blur(10px);pointer-events:none}
+.kick{font:600 9.5px var(--mono);letter-spacing:.22em;text-transform:uppercase;color:var(--dim);margin-bottom:14px}
+.statement{font:600 40px/1.03 var(--sans);letter-spacing:-.045em;margin:0 0 18px}
+.statement em{font-style:normal;color:var(--hue,var(--lime))}
+.lede{font:400 14px/1.6 var(--sans);color:var(--mut);max-width:300px;margin:0 0 26px}
+.btn{display:flex;align-items:center;justify-content:space-between;width:100%;border:0;border-radius:16px;padding:16px 18px;font:600 14px var(--sans);background:var(--hue,var(--lime));color:#0A0C0E;cursor:pointer}
+.btn span:last-child{font-size:17px}
+.chips{display:flex;gap:8px;margin-top:10px}
+.chips button{flex:1;background:#101218;border:1px solid var(--line);color:var(--mut);border-radius:14px;padding:13px;font:600 12px var(--sans);cursor:pointer}
+.meta{position:absolute;left:26px;right:26px;bottom:104px;display:flex;justify-content:space-between;font:400 10px var(--mono);color:var(--dim)}
+.giant{font:600 96px/0.9 var(--sans);letter-spacing:-.06em;margin:10px 0 6px;font-variant-numeric:tabular-nums}
+.giant small{font-size:26px;color:var(--dim);letter-spacing:-.02em}
+.sub{font:400 11px var(--mono);color:var(--mut)}
+.rows{margin-top:34px;border-top:1px solid var(--line)}
+.r{display:flex;align-items:baseline;justify-content:space-between;padding:16px 0;border-bottom:1px solid var(--line);cursor:pointer}
+.r .l{font:400 13px var(--sans);color:#CFD2DC}
+.r .l small{display:block;font:400 10px var(--mono);color:var(--dim);margin-top:3px}
+.r .v{font:600 13px var(--mono);color:var(--ink)}
+.r .v.bad{color:var(--pink)}
+.bars{display:flex;align-items:flex-end;gap:3px;height:38px;margin-top:14px}
+.bars i{flex:1;background:#1D2129;border-radius:2px}
+/* agent page */
+.agent{display:flex;flex-direction:column;height:100%;padding-bottom:0}
+.turn{margin-bottom:16px}
+.who{font:600 9px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--dim);margin-bottom:6px}
+.who b{color:var(--hue)}
+.txt{font:400 13.5px/1.55 var(--sans);color:#DADDE7}
+.txt.me{background:#15181F;border:1px solid var(--line);border-radius:14px;padding:11px 13px}
+.code{margin-top:8px;background:#05060A;border:1px solid var(--line);border-radius:10px;padding:10px;font:400 10.5px/1.65 var(--mono);color:#9FB3C8;white-space:pre-wrap}
+.sug{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.sug button{background:#101218;border:1px solid var(--line);color:var(--mut);border-radius:99px;padding:8px 12px;font:500 11.5px var(--sans);cursor:pointer}
+.composer{margin-top:auto;padding-top:16px}
+.composer .box{display:flex;align-items:center;gap:8px;background:#101218;border:1px solid var(--line);border-radius:16px;padding:8px 8px 8px 14px}
+.composer input{flex:1;background:none;border:0;outline:none;color:var(--ink);font:400 13.5px var(--sans)}
+.composer button{width:36px;height:36px;border-radius:50%;border:0;background:var(--hue);color:#0A0C0E;font-size:15px}
+/* files page */
+.file{display:flex;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}
+.file .ic{width:34px;height:34px;border-radius:10px;background:#12151B;display:grid;place-items:center;font-size:15px}
+.file .n{flex:1;font:400 13.5px var(--sans)}
+.file .n small{display:block;font:400 9.5px var(--mono);color:var(--dim);margin-top:2px}
+.file .x{font:600 10.5px var(--mono);color:var(--mut)}
+/* dock dots */
+.dots{position:absolute;left:0;right:0;bottom:44px;display:flex;justify-content:center;gap:7px;z-index:7}
+.dots b{width:6px;height:6px;border-radius:50%;background:#2A2E38;transition:width .2s,background .2s}
+.dots b.on{width:20px;border-radius:99px;background:var(--ink)}
+.pager{position:absolute;left:0;right:0;bottom:12px;display:flex;justify-content:space-between;padding:0 26px;font:600 9px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--dim);z-index:7}
+</style></head>
+<body>
+<div class="phone" id="phone">
+  <div class="sbar"><span>21:07</span><span>5G ▲</span></div>
+  <div class="host"><span><i></i>vps · ubuntu@130.110.235.61</span></div>
+
+  <div class="pages" id="pages">
+    <section class="page" data-hue="var(--lime)">
+      <div class="kick">01 · link</div>
+      <h1 class="statement">Estás <em>dentro</em> de tu servidor.</h1>
+      <p class="lede">SSH vivo, túnel privado y OpenCode escuchando en loopback. Nada expuesto a internet.</p>
+      <button class="btn" data-goto="1"><span>Hablar con el agente</span><span>→</span></button>
+      <div class="chips"><button data-goto="3">Archivos</button><button data-goto="3">Terminal</button></div>
+      <div class="meta"><span>tunnel 43359</span><span>keepalive 15s</span><span>3 sessions</span></div>
+    </section>
+
+    <section class="page" data-hue="var(--cyan)">
+      <div class="kick">02 · machine</div>
+      <div class="giant">4<small>%</small></div>
+      <div class="sub">cpu · load 0.08 · 2 cores</div>
+      <div class="bars">
+        <i style="height:14%"></i><i style="height:22%"></i><i style="height:11%"></i><i style="height:30%"></i><i style="height:54%"></i><i style="height:80%"></i><i style="height:62%"></i><i style="height:20%"></i><i style="height:12%"></i><i style="height:8%"></i><i style="height:10%"></i><i style="height:16%"></i>
+      </div>
+      <div class="rows">
+        <div class="r"><div class="l">Memoria<small>4.9 / 11.6 GB</small></div><div class="v">41%</div></div>
+        <div class="r"><div class="l">Disco<small>96.5 / 193 GB</small></div><div class="v">51%</div></div>
+        <div class="r"><div class="l">Docker<small>running / total</small></div><div class="v">19/19</div></div>
+        <div class="r"><div class="l">Servicios<small>systemd</small></div><div class="v bad">2 failed</div></div>
+      </div>
+    </section>
+
+    <section class="page" data-hue="var(--pink)">
+      <div class="agent">
+        <div class="kick">03 · agent</div>
+        <div class="turn"><div class="who">Tú</div><div class="txt me">mira los logs de nginx y dime si hay algo raro con el 502 de esta mañana</div></div>
+        <div class="turn"><div class="who"><b>Assistant</b> · deepseek</div>
+          <div class="txt">Revisé access.log y error.log. El 502 es upstream timeout: nginx espera 60s y el contenedor tarda 74s.
+          <div class="code">upstream timed out (110)
+"GET /api/chat" 502</div></div></div>
+        <div class="sug"><button>reinicia nginx</button><button>¿y el 504?</button><button>resumen de hoy</button></div>
+        <div class="composer"><div class="box"><input placeholder="Message OpenCode…"><button>↑</button></div></div>
+      </div>
+    </section>
+
+    <section class="page" data-hue="var(--lime)">
+      <div class="kick">04 · files</div>
+      <h1 class="statement" style="font-size:30px">/home/ubuntu</h1>
+      <div class="file"><div class="ic">📁</div><div class="n">nginx<small>dir · 4 items</small></div><div class="x">›</div></div>
+      <div class="file"><div class="ic">📁</div><div class="n">pvps<small>dir · 12 items</small></div><div class="x">›</div></div>
+      <div class="file"><div class="ic">📄</div><div class="n">install.sh<small>31.7 KB</small></div><div class="x">edit</div></div>
+      <div class="file"><div class="ic">🗄</div><div class="n">opencode-backup.tgz<small>932 MB</small></div><div class="x">›</div></div>
+      <div class="chips" style="margin-top:22px"><button>Subir</button><button>Nueva carpeta</button></div>
+    </section>
+  </div>
+
+  <div class="dots" id="dots"><b class="on"></b><b></b><b></b><b></b></div>
+  <div class="pager"><span id="plabel">link</span><span>swipe →</span></div>
+</div>
+<script>
+const pages=document.getElementById('pages'),dots=[...document.querySelectorAll('#dots b')],label=document.getElementById('plabel');
+const names=['link','machine','agent','files'];
+pages.addEventListener('scroll',()=>{
+  const i=Math.round(pages.scrollLeft/pages.clientWidth);
+  dots.forEach((d,k)=>d.classList.toggle('on',k===i));
+  label.textContent=names[i]||'';
+},{passive:true});
+document.addEventListener('click',e=>{
+  const g=e.target.closest('[data-goto]');
+  if(g) pages.scrollTo({left:pages.clientWidth*(+g.dataset.goto),behavior:'smooth'});
+});
+</script>
+</body></html>

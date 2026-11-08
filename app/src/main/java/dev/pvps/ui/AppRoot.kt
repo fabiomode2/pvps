@@ -81,6 +81,7 @@ import dev.pvps.ui.screens.HostEditScreen
 import dev.pvps.ui.screens.HarnessScreen
 import dev.pvps.ui.screens.HostsScreen
 import dev.pvps.ui.screens.KeysScreen
+import dev.pvps.ui.screens.LinkScreen
 import dev.pvps.ui.screens.MoreScreen
 import dev.pvps.ui.screens.OnboardingScreen
 import dev.pvps.ui.screens.ProcessesScreen
@@ -182,7 +183,8 @@ fun AppRoot(viewModel: AppViewModel) {
                             onOpenDocker = { navController.navigate("docker") },
                             onOpenServices = { navController.navigate("services") },
                             onOpenProcesses = { navController.navigate("processes") },
-                            onManageHosts = { navController.navigate("hosts") }
+                            onManageHosts = { navController.navigate("hosts") },
+                            onOpenLink = { navController.navigate("link") }
                         )
                     }
                 }
@@ -235,6 +237,9 @@ fun AppRoot(viewModel: AppViewModel) {
                         onCheckUpdates = { viewModel.checkForUpdates(force = true) },
                         onHarness = { navController.navigate("harness") }
                     )
+                }
+                composable("link") {
+                    LinkScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
                 }
                 composable("harness") {
                     HarnessScreen(

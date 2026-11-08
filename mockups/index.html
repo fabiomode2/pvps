@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PVPS · 5 reimaginaciones</title>
+<style>
+:root{--bg:#F4F2EC;--ink:#191813;--mut:#6E6A5E;--dim:#9B9687;--line:#DDD7C6;--acc:#C2452D;
+--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;--mono:ui-monospace,"SF Mono",Menlo,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);padding:26px 18px 60px;line-height:1.5}
+.wrap{max-width:780px;margin:0 auto}
+.kicker{font:600 10px var(--mono);letter-spacing:.22em;text-transform:uppercase;color:var(--acc)}
+h1{font:600 32px/1.08 var(--sans);letter-spacing:-.04em;margin:10px 0 12px}
+.lead{font:400 14.5px/1.6 var(--sans);color:var(--mut);margin:0 0 10px;max-width:640px}
+.hint{border:1px solid var(--line);background:#FBF8F0;border-radius:14px;padding:14px 16px;margin:20px 0 26px;font-size:13.5px;color:var(--mut)}
+.hint b{color:var(--ink)}
+.grid{display:grid;gap:12px}
+@media(min-width:660px){.grid{grid-template-columns:1fr 1fr}}
+a.card{display:block;text-decoration:none;color:inherit;background:#FFFDF8;border:1px solid var(--line);border-radius:18px;padding:18px;transition:transform .12s,border-color .12s}
+a.card:active{transform:scale(.99)}
+a.card:hover{border-color:#C9C2AE}
+.row{display:flex;align-items:baseline;gap:10px}
+.letter{font:700 11px var(--mono);letter-spacing:.16em;color:var(--acc)}
+.name{font:600 19px var(--sans);letter-spacing:-.02em}
+.pitch{font:400 13.5px/1.5 var(--sans);color:var(--mut);margin:8px 0 12px}
+.line{display:flex;gap:8px;font:400 10px var(--mono);color:var(--dim);padding:3px 0;border-top:1px dashed var(--line)}
+.line b{color:var(--mut);font-weight:600;min-width:74px}
+.line:first-of-type{border-top:0}
+.foot{margin-top:28px;border-top:1px solid var(--line);padding-top:16px;font-size:12.5px;color:var(--dim)}
+</style></head>
+<body>
+<div class="wrap">
+  <div class="kicker">PVPS · reimaginaciones</div>
+  <h1>Cinco apps distintas, no cinco temas.</h1>
+  <p class="lead">Cada una organiza la información de otra manera y tiene navegación real: pestañas, rail, pager, paleta de comandos o deck. Toca todo, cambia de pantalla, abre menús.</p>
+
+  <div class="hint">
+    <b>Dime en términos de organización</b>, no solo de estética: “quiero home tipo board pero con el chat de la A”,
+    “me gusta el rail pero con la tipografía de la C”, “el deck es lo que quiero pero sin tarjetas”.
+    Con eso construyo la versión final y la paso a Kotlin.
+  </div>
+
+  <div class="grid">
+    <a class="card" href="A-console.html">
+      <div class="row"><span class="letter">A</span><span class="name">Console</span></div>
+      <div class="pitch">La app es una conversación. No hay tabs: un único hilo donde todo (SSH, agente, archivos, shell) aparece como eventos. Se navega con una paleta de comandos (⌘).</div>
+      <div class="line"><b>organización</b> timeline único + overlays</div>
+      <div class="line"><b>navegación</b> ⌘ /files /shell · sheets</div>
+      <div class="line"><b>prueba</b> pulsa ⌘ y salta entre pantallas</div>
+    </a>
+
+    <a class="card" href="B-board.html">
+      <div class="row"><span class="letter">B</span><span class="name">Board</span></div>
+      <div class="pitch">Home es un tablero de módulos vivos, no un menú. Cada tile es un widget que se expande a pantalla completa. La navegación es por el dato que te interesa.</div>
+      <div class="line"><b>organización</b> mosaico de widgets</div>
+      <div class="line"><b>navegación</b> tile → detalle · rail inferior</div>
+      <div class="line"><b>prueba</b> toca CPU, Docker y “2 servicios”</div>
+    </a>
+
+    <a class="card" href="C-pages.html">
+      <div class="row"><span class="letter">C</span><span class="name">Pages</span></div>
+      <div class="pitch">Cuatro pantallas a sangre que se deslizan: Link, Máquina, Agente, Archivos. Una idea por pantalla, tipografía enorme, cero cromo. Navegación = swipe + dots.</div>
+      <div class="line"><b>organización</b> pager horizontal</div>
+      <div class="line"><b>navegación</b> swipe · dots · CTA</div>
+      <div class="line"><b>prueba</b> desliza y usa el botón del hero</div>
+    </a>
+
+    <a class="card" href="D-rail.html">
+      <div class="row"><span class="letter">D</span><span class="name">Rail</span></div>
+      <div class="pitch">Estilo IDE: rail de herramientas a la izquierda, lista maestro, y un inspector abajo con los detalles del elemento seleccionado. Todo es inspeccionable.</div>
+      <div class="line"><b>organización</b> rail + master/detail + inspector</div>
+      <div class="line"><b>navegación</b> iconos del rail · inspector</div>
+      <div class="line"><b>prueba</b> cambia de herramienta y toca filas</div>
+    </a>
+
+    <a class="card" href="E-triage.html">
+      <div class="row"><span class="letter">E</span><span class="name">Triage</span></div>
+      <div class="pitch">La home solo muestra lo que necesita acción, como una bandeja. Si todo está bien, la app está en silencio. La máquina vive en “Server”, no en el inicio.</div>
+      <div class="line"><b>organización</b> cola de excepciones</div>
+      <div class="line"><b>navegación</b> deck + 4 tabs</div>
+      <div class="line"><b>prueba</b> resuelve tarjetas hasta vaciar</div>
+    </a>
+
+    <a class="card" href="04-swiss.html" style="opacity:.72">
+      <div class="row"><span class="letter">ref</span><span class="name">Swiss dark</span></div>
+      <div class="pitch">La referencia visual anterior (la que viste en la pre3), por si quieres mantener ese lenguaje con otra organización.</div>
+      <div class="line"><b>organización</b> secciones apiladas</div>
+      <div class="line"><b>navegación</b> tabs</div>
+      <div class="line"><b>prueba</b> compárala con B y D</div>
+    </a>
+  </div>
+
+  <div class="foot">Mezclas posibles: <b>B + A</b> (tablero con hilo de agente dentro), <b>D + C</b> (rail con páginas a sangre), <b>E + B</b> (bandeja solo cuando hay algo, tablero cuando no).</div>
+</div>
+</body></html>

@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>05 · Phosphor</title>
+<style>
+:root{--bg:#040A06;--panel:#061009;--line:#15301E;--txt:#8CF7A8;--dim:#3E7A52;--bright:#C8FFD8;--amber:#FFC46B;--bad:#FF7B8F;
+--mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:#0A0F0B;padding:28px 16px 48px;display:flex;gap:26px;justify-content:center;flex-wrap:wrap;font-family:var(--mono);color:var(--txt)}
+.name{width:100%;text-align:center;font:600 12px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:#4d7a5c;margin-bottom:4px}
+.device{width:390px;height:844px;border-radius:18px;background:var(--bg);overflow:hidden;position:relative;box-shadow:0 0 0 1px #1c3a26,0 30px 60px rgba(0,0,0,.7),inset 0 0 80px rgba(80,255,150,.05)}
+.scan{position:absolute;inset:0;pointer-events:none;z-index:5;background:repeating-linear-gradient(180deg,rgba(120,255,170,.045) 0 1px,transparent 1px 3px)}
+.vig{position:absolute;inset:0;pointer-events:none;z-index:4;background:radial-gradient(120% 90% at 50% 40%,transparent 55%,rgba(0,0,0,.55))}
+.screen{height:100%;overflow:auto;padding:0 14px 100px;position:relative;z-index:2;text-shadow:0 0 8px rgba(120,255,170,.28)}
+.statusbar{display:flex;justify-content:space-between;font:500 10px var(--mono);color:var(--dim);padding:10px 2px 6px;letter-spacing:.1em}
+.top{display:flex;justify-content:space-between;align-items:center;padding:8px 0 6px;border-bottom:1px dashed var(--line);font-size:10.5px;letter-spacing:.14em;color:var(--dim)}
+.top b{color:var(--txt)}
+h1{font:600 30px/1 var(--mono);letter-spacing:.02em;margin:16px 0 4px;color:var(--bright);text-shadow:0 0 14px rgba(140,255,180,.35)}
+.addr{font:400 10.5px var(--mono);color:var(--dim);letter-spacing:.04em}
+.addr em{color:var(--txt);font-style:normal}
+.block{border:1px dashed var(--line);padding:12px;margin-top:14px;background:rgba(10,30,18,.35)}
+.ln{display:flex;justify-content:space-between;font-size:11px;letter-spacing:.06em;padding:3px 0}
+.ln span:first-child{color:var(--dim)}
+.ln span:last-child{color:var(--txt)}
+.ln span.ok{color:var(--bright)}
+.ln span.warn{color:var(--amber)}
+.cta{display:block;width:100%;margin-top:14px;background:var(--txt);color:#03150A;border:0;padding:13px;font:600 11.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;cursor:pointer;text-align:center;box-shadow:0 0 24px rgba(120,255,170,.3)}
+.cta:hover{background:var(--bright)}
+h2{font:500 10px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--dim);margin:22px 0 8px;display:flex;justify-content:space-between}
+h2:before{content:"── "}
+h2:after{content:" ──";color:#12281A}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.cell{border:1px dashed var(--line);padding:10px 11px}
+.cell .k{font:500 9px var(--mono);letter-spacing:.18em;color:var(--dim);text-transform:uppercase}
+.cell .v{font:600 26px/1 var(--mono);color:var(--bright);margin:7px 0 3px;letter-spacing:-.01em}
+.cell .v small{font-size:11px;color:var(--dim);letter-spacing:0}
+.cell .d{font:400 9.5px var(--mono);color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ascii{font:400 10px var(--mono);color:#2f6b46;letter-spacing:1px;margin-top:8px}
+.rows{border-top:1px dashed var(--line)}
+.row{display:flex;justify-content:space-between;align-items:center;padding:12px 2px;border-bottom:1px dashed var(--line);font-size:11.5px;cursor:pointer;letter-spacing:.04em}
+.row .t{color:var(--txt)}
+.row .s{color:var(--dim);font-size:9.5px;letter-spacing:.08em}
+.row .v{color:var(--dim)}
+.row .v.warn{color:var(--amber)}
+.foot{font:400 9.5px/1.7 var(--mono);color:#2f6b46;margin-top:14px;letter-spacing:.04em}
+.dock{position:absolute;left:0;right:0;bottom:0;z-index:6;background:rgba(4,10,6,.96);border-top:1px solid var(--line);display:flex;padding:10px 4px 20px;font-size:9px;letter-spacing:.1em}
+.dock a{flex:1;text-align:center;color:#2f6b46;text-decoration:none;padding:4px 0}
+.dock a.on{color:var(--bright);text-shadow:0 0 10px rgba(140,255,180,.5)}
+.dock a.on:after{content:"_";animation:blink 1.2s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+/* chat */
+.turn{padding:14px 0;border-bottom:1px dashed var(--line)}
+.hd{font-size:9.5px;letter-spacing:.16em;color:var(--dim);margin-bottom:6px}
+.hd b{color:var(--txt)}
+.txt{font:400 12.5px/1.65 var(--mono);color:#A8EFC0}
+.code{margin-top:10px;border:1px solid #1E3A28;background:#020805;padding:10px;font:400 10.5px/1.7 var(--mono);color:#79D89A;white-space:pre-wrap}
+.composer{position:absolute;left:0;right:0;bottom:0;z-index:6;padding:10px 14px 22px;background:linear-gradient(to top,var(--bg) 60%,rgba(4,10,6,0))}
+.composer .box{display:flex;align-items:center;gap:8px;border:1px solid #1E3A28;background:#031008;padding:8px 10px}
+.composer input{flex:1;background:transparent;border:0;outline:none;color:var(--txt);font:400 12px var(--mono)}
+.composer .cur{width:8px;height:14px;background:var(--txt);animation:blink 1.1s steps(1) infinite;box-shadow:0 0 10px rgba(140,255,180,.6)}
+.composer button{background:var(--txt);border:0;color:#03150A;font:600 11px var(--mono);padding:7px 10px;letter-spacing:.1em}
+</style></head>
+<body>
+<div class="name">05 · Phosphor — fósforo, consola, CRT</div>
+
+<figure class="device" style="margin:0">
+  <div class="vig"></div><div class="scan"></div>
+  <div class="screen">
+    <div class="statusbar"><span>21:07</span><span>5G ▮▮▮</span></div>
+    <div class="top"><span>PVPS://<b>vps</b></span><span>● LIVE</span></div>
+    <h1>vps</h1>
+    <div class="addr">ubuntu@130.110.235.61 <em>· live</em> · tunnel 43359</div>
+
+    <div class="block">
+      <div class="ln"><span>transport</span><span class="ok">CONNECTED</span></div>
+      <div class="ln"><span>opencode</span><span>v2.4.1 · 3 sessions</span></div>
+      <div class="ln"><span>context</span><span>19.4k / 1.0M</span></div>
+      <div class="ascii">▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸</div>
+    </div>
+    <button class="cta">[ OPEN CONVERSATION → ]</button>
+
+    <h2>Telemetry</h2>
+    <div class="grid">
+      <div class="cell"><div class="k">CPU</div><div class="v">4<small>%</small></div><div class="d">0.08 · 2c</div><div class="ascii">▓░░░░░░░░</div></div>
+      <div class="cell"><div class="k">RAM</div><div class="v">41<small>%</small></div><div class="d">4.9 / 11.6G</div><div class="ascii">▓▓▓▓░░░░░</div></div>
+      <div class="cell"><div class="k">DISK</div><div class="v">51<small>%</small></div><div class="d">96 / 193G</div><div class="ascii">▓▓▓▓▓░░░░</div></div>
+      <div class="cell"><div class="k">DOCKER</div><div class="v">19<small>/19</small></div><div class="d">running</div><div class="ascii">▓▓▓▓▓▓▓▓▓</div></div>
+    </div>
+
+    <h2>Control</h2>
+    <div class="rows">
+      <div class="row"><span class="t">services<span class="s">  systemd</span></span><span class="v warn">2 FAILED</span></div>
+      <div class="row"><span class="t">processes<span class="s">  cpu/mem</span></span><span class="v">›</span></div>
+      <div class="row"><span class="t">hosts<span class="s">  ssh</span></span><span class="v">2</span></div>
+    </div>
+    <div class="foot">ubuntu 24.04.5 lts · 6.17.0-1020<br>up 6w 6d · tailscale 100.102.169.49</div>
+  </div>
+  <div class="dock"><a class="on" href="#">HOME</a><a href="#">CHAT</a><a href="#">FILES</a><a href="#">SHELL</a><a href="#">MORE</a></div>
+</figure>
+
+<figure class="device" style="margin:0">
+  <div class="vig"></div><div class="scan"></div>
+  <div class="screen" style="padding-bottom:0">
+    <div class="statusbar"><span>21:07</span><span>5G ▮▮▮</span></div>
+    <div class="top"><span>← chat://<b>vps</b></span><span>READY</span></div>
+    <div class="turn">
+      <div class="hd">user@phone <b>21:04</b></div>
+      <div class="txt">mira los logs de nginx y dime si hay algo raro con el 502 de esta mañana</div>
+    </div>
+    <div class="turn">
+      <div class="hd">assistant <b>deepseek-v4.1</b> · 212 tok</div>
+      <div class="txt">Revisé access.log y error.log. El 502 es upstream timeout: nginx espera 60s y el contenedor tarda 74s.</div>
+      <div class="code">upstream timed out (110)
+104.21.8.12 - [08/Nov 09:41] "GET /api/chat" 502</div>
+      <div class="txt" style="margin-top:10px">Subí proxy_read_timeout a 120s y recargué nginx. Ya responde 200.</div>
+    </div>
+    <div class="composer"><div class="box"><input placeholder="message opencode…"><div class="cur"></div><button>SEND</button></div></div>
+  </div>
+</figure>
+</body></html>

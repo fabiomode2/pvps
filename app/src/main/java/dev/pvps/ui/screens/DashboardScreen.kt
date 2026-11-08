@@ -121,6 +121,7 @@ fun DashboardScreen(
     onOpenServices: () -> Unit,
     onOpenProcesses: () -> Unit,
     onManageHosts: () -> Unit,
+    onOpenLink: () -> Unit,
     onBack: (() -> Unit)? = null
 ) {
     val host = viewModel.selectedHost.collectAsStateValue()
@@ -215,6 +216,7 @@ fun DashboardScreen(
                                 onConnect = { viewModel.connect(host.id) },
                                 onDisconnect = { viewModel.disconnect(host.id) },
                                 onRetryOpenCode = { viewModel.connectOpenCode(host, force = true) },
+                                onOpenLink = onOpenLink,
                                 onChat = onOpenChat,
                                 modifier = Modifier.weight(1.15f)
                             )
@@ -243,6 +245,7 @@ fun DashboardScreen(
                             onConnect = { viewModel.connect(host.id) },
                             onDisconnect = { viewModel.disconnect(host.id) },
                             onRetryOpenCode = { viewModel.connectOpenCode(host, force = true) },
+                            onOpenLink = onOpenLink,
                             onChat = onOpenChat,
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -531,6 +534,7 @@ private fun LinkHero(
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
     onRetryOpenCode: () -> Unit,
+    onOpenLink: () -> Unit,
     onChat: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -627,20 +631,23 @@ private fun LinkHero(
                     text = openCodeLabel,
                     color = if (openCodeConnected) Success else if (openCodeConnecting) Warning else TextFaint
                 )
-                if (connected && !openCodeConnected && !openCodeConnecting) {
+                Spacer(Modifier.weight(1f))
+                TinyAction("Details") { onOpenLink() }
+            }
+            if (connected && !openCodeConnected && !openCodeConnecting) {
+                Spacer(Modifier.height(Space.sm))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = openCodeError?.takeIf { it.isNotBlank() } ?: "OpenCode is not answering behind the tunnel.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Warning,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
                     Spacer(Modifier.width(Space.sm))
                     TinyAction("Retry") { onRetryOpenCode() }
                 }
-            }
-            if (connected && !openCodeConnected && !openCodeError.isNullOrBlank()) {
-                Spacer(Modifier.height(Space.sm))
-                Text(
-                    text = openCodeError,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Warning,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
             }
             Spacer(Modifier.height(Space.xl))
             when {

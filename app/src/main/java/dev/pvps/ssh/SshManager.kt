@@ -566,6 +566,9 @@ class SshManager(
         }.getOrNull()
     }
 
+    /** Local port of the live OpenCode tunnel, when there is one. */
+    fun tunnelPort(hostId: String): Int? = forwards[hostId]?.takeIf { it.isOpen }?.port
+
     /** Closes every on-demand forward belonging to [hostId]. */
     fun releaseWebForwards(hostId: String) {
         val prefix = "$hostId:"

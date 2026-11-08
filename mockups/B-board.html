@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>B · Board</title>
+<style>
+:root{--bg:#0B0B0F;--card:#15151C;--line:#242430;--ink:#F1F1F6;--mut:#9A9AAA;--dim:#64647A;
+--violet:#B39DFF;--mint:#6FE7C0;--amber:#FFC46B;--pink:#FF8FB1;--blue:#7FA6FF;
+--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;--mono:ui-monospace,"SF Mono",Menlo,monospace}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:#000;display:flex;justify-content:center;padding:16px;font-family:var(--sans);color:var(--ink)}
+.phone{width:390px;height:844px;background:var(--bg);border-radius:38px;overflow:hidden;position:relative;box-shadow:0 0 0 9px #101014,0 30px 60px rgba(0,0,0,.6)}
+.screen{position:absolute;inset:0;display:none;flex-direction:column;padding-top:44px}
+.screen.on{display:flex}
+.sbar{position:absolute;top:0;left:0;right:0;height:44px;display:flex;justify-content:space-between;align-items:center;padding:0 22px;font:600 11px var(--mono);color:var(--mut);z-index:9}
+.head{display:flex;align-items:center;gap:12px;padding:14px 18px 10px}
+.head .h{font:600 26px/1.1 var(--sans);letter-spacing:-.03em}
+.head .s{font:400 10.5px var(--mono);color:var(--dim);margin-top:3px;display:flex;align-items:center;gap:6px}
+.head .s i{width:6px;height:6px;border-radius:50%;background:var(--mint);display:block}
+.head .sp{flex:1}
+.iconbtn{width:36px;height:36px;border-radius:12px;background:#17171F;border:1px solid var(--line);color:var(--mut);display:grid;place-items:center;font-size:15px}
+.board{flex:1;overflow:auto;padding:6px 14px 108px;display:grid;grid-template-columns:1fr 1fr;gap:10px;align-content:start}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:14px;position:relative;overflow:hidden;cursor:pointer;transition:transform .12s}
+.tile:active{transform:scale(.985)}
+.tile.wide{grid-column:1/-1}
+.tile:after{content:"";position:absolute;inset:-40% -60% auto auto;width:180px;height:180px;border-radius:50%;background:var(--hue,var(--violet));opacity:.10;filter:blur(6px)}
+.tile .lab{font:600 9px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--dim);position:relative}
+.tile .big{font:600 30px/1 var(--sans);letter-spacing:-.03em;margin-top:12px;font-variant-numeric:tabular-nums;position:relative}
+.tile .big small{font:500 11px var(--mono);color:var(--dim);letter-spacing:0}
+.tile .sub{font:400 10px var(--mono);color:var(--mut);margin-top:5px;position:relative;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .ring{position:absolute;right:12px;top:12px;width:38px;height:38px;border-radius:50%;background:conic-gradient(var(--hue) var(--p,50%),#252533 0);display:grid;place-items:center}
+.tile .ring:after{content:"";position:absolute;inset:5px;border-radius:50%;background:var(--card)}
+.tile .live{position:relative;display:flex;align-items:center;gap:7px;font:600 9.5px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--mint)}
+.tile .host{font:600 22px/1.1 var(--sans);letter-spacing:-.02em;margin-top:10px;position:relative}
+.tile .addr{font:400 10.5px var(--mono);color:var(--mut);margin-top:3px;position:relative}
+.tile .cta{position:relative;margin-top:14px;display:flex;align-items:center;justify-content:center;gap:8px;background:var(--violet);color:#14102A;border:0;border-radius:12px;padding:11px;font:600 12.5px var(--sans);width:100%}
+.rail{position:absolute;left:12px;right:12px;bottom:14px;height:64px;border-radius:22px;background:#14141B;border:1px solid var(--line);display:flex;padding:6px;box-shadow:0 14px 34px rgba(0,0,0,.5)}
+.rail a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--dim);text-decoration:none;font:600 9px var(--sans);border-radius:16px}
+.rail a b{font-size:17px;font-weight:400}
+.rail a.on{background:#22222C;color:var(--ink)}
+/* detail */
+.det{flex:1;overflow:auto;padding:4px 18px 40px}
+.back{display:inline-flex;align-items:center;gap:8px;font:600 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--mut);margin-bottom:14px;cursor:pointer}
+.det h2{font:600 30px/1.05 var(--sans);letter-spacing:-.03em;margin:0 0 4px}
+.det .k{font:400 10.5px var(--mono);color:var(--dim);margin-bottom:18px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:10px}
+.panel .r{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #1D1D27;font:400 13px var(--sans)}
+.panel .r:last-child{border:0}
+.panel .r span:last-child{font:500 12px var(--mono);color:var(--mut)}
+.bars{display:flex;align-items:flex-end;gap:4px;height:56px;margin-top:14px}
+.bars i{flex:1;background:#2A2A38;border-radius:3px 3px 0 0}
+/* chat */
+.msgs{flex:1;overflow:auto;padding:8px 16px 110px}
+.msg{max-width:88%;padding:12px 14px;border-radius:18px;font:400 13.5px/1.5 var(--sans);margin:8px 0}
+.msg.me{margin-left:auto;background:var(--violet);color:#14102A;border-bottom-right-radius:5px}
+.msg.ai{background:#191922;border:1px solid var(--line);border-bottom-left-radius:5px;color:#DDDDE8}
+.msg code{display:block;margin-top:8px;background:#0D0D13;border:1px solid var(--line);border-radius:8px;padding:9px;font:400 10.5px/1.6 var(--mono);color:#A9B6CC;white-space:pre-wrap}
+.composer{position:absolute;left:12px;right:12px;bottom:14px}
+.composer .box{display:flex;gap:8px;align-items:center;background:#17171F;border:1px solid var(--line);border-radius:18px;padding:7px 7px 7px 14px}
+.composer input{flex:1;background:none;border:0;outline:none;color:var(--ink);font:400 13.5px var(--sans)}
+.composer button{width:36px;height:36px;border-radius:50%;border:0;background:var(--violet);color:#14102A;font-size:15px}
+/* lists */
+.lst{flex:1;overflow:auto;padding:6px 18px 40px}
+.lrow{display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid #1C1C26}
+.lrow .ic{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;background:#1D1D28;font-size:15px}
+.lrow .t{flex:1;font:400 13.5px var(--sans)}
+.lrow .m{font:400 10px var(--mono);color:var(--dim);margin-top:2px}
+.lrow .v{font:600 11px var(--mono);color:var(--mut)}
+.lrow .v.bad{color:var(--pink)}
+</style></head>
+<body>
+<div class="phone" id="phone">
+  <div class="sbar"><span>21:07</span><span>5G ▲</span></div>
+
+  <!-- BOARD -->
+  <section class="screen on" data-screen="board">
+    <div class="head">
+      <div><div class="h">vps</div><div class="s"><i></i>ubuntu@130.110.235.61</div></div>
+      <div class="sp"></div>
+      <div class="iconbtn" data-go="settings">⋯</div>
+    </div>
+    <div class="board">
+      <div class="tile wide" style="--hue:var(--mint)">
+        <div class="lab">connection</div>
+        <div class="live">● live · tunnel 43359</div>
+        <div class="host">OpenCode ready</div>
+        <div class="addr">v2.4.1 · 3 sessions · 19.4k context</div>
+        <button class="cta" data-go="chat">Open conversation →</button>
+      </div>
+
+      <div class="tile" style="--hue:var(--violet);--p:41%" data-detail="ram">
+        <div class="lab">memory</div><div class="ring"></div>
+        <div class="big">41<small>%</small></div>
+        <div class="sub">4.9 / 11.6 GB</div>
+      </div>
+      <div class="tile" style="--hue:var(--blue);--p:4%" data-detail="cpu">
+        <div class="lab">cpu</div><div class="ring"></div>
+        <div class="big">4<small>%</small></div>
+        <div class="sub">load 0.08 · 2 cores</div>
+      </div>
+
+      <div class="tile" style="--hue:var(--amber);--p:51%" data-detail="disk">
+        <div class="lab">disk</div>
+        <div class="big">51<small>%</small></div>
+        <div class="sub">96.5 / 193 GB</div>
+      </div>
+      <div class="tile" style="--hue:var(--mint)" data-detail="docker">
+        <div class="lab">docker</div>
+        <div class="big">19<small>/19</small></div>
+        <div class="sub">all containers up</div>
+      </div>
+
+      <div class="tile wide" style="--hue:var(--pink)" data-detail="services">
+        <div class="lab">needs attention</div>
+        <div class="big">2<small> services failed</small></div>
+        <div class="sub">auditd · cloudflared</div>
+      </div>
+    </div>
+    <nav class="rail">
+      <a class="on" data-go="board"><b>▦</b>Board</a>
+      <a data-go="chat"><b>◌</b>Agent</a>
+      <a data-go="files"><b>▤</b>Files</a>
+      <a data-go="tools"><b>⌘</b>Tools</a>
+    </nav>
+  </section>
+
+  <!-- DETAIL -->
+  <section class="screen" data-screen="detail">
+    <div class="det">
+      <div class="back" data-go="board">← board</div>
+      <h2 id="d-title">CPU</h2>
+      <div class="k" id="d-sub">live sample · 2 cores</div>
+      <div class="panel">
+        <div class="r"><span>Current</span><span id="d-main">4%</span></div>
+        <div class="r"><span>Average 1m</span><span>12%</span></div>
+        <div class="r"><span>Peak 24h</span><span>88%</span></div>
+        <div class="r"><span>Updated</span><span>just now</span></div>
+      </div>
+      <div class="panel">
+        <div class="r" style="border:0"><span>Last 30 minutes</span><span>sampled</span></div>
+        <div class="bars">
+          <i style="height:18%"></i><i style="height:24%"></i><i style="height:12%"></i><i style="height:30%"></i>
+          <i style="height:52%"></i><i style="height:88%"></i><i style="height:64%"></i><i style="height:22%"></i>
+          <i style="height:16%"></i><i style="height:12%"></i><i style="height:9%"></i><i style="height:14%"></i>
+          <i style="height:20%"></i><i style="height:11%"></i><i style="height:7%"></i><i style="height:10%"></i>
+        </div>
+      </div>
+      <div class="panel" id="d-actions">
+        <div class="r" data-go="services"><span>Ver servicios</span><span>›</span></div>
+        <div class="r" data-go="chat"><span>Preguntar al agente</span><span>›</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CHAT -->
+  <section class="screen" data-screen="chat">
+    <div class="head">
+      <div class="back" data-go="board">←</div>
+      <div><div class="h" style="font-size:18px">agent</div><div class="s"><i></i>ready · deepseek</div></div>
+      <div class="sp"></div><div class="iconbtn" data-go="tools">＋</div>
+    </div>
+    <div class="msgs">
+      <div class="msg me">mira los logs de nginx y dime si hay algo raro con el 502 de esta mañana</div>
+      <div class="msg ai">Revisé access.log y error.log. El 502 es un upstream timeout: nginx espera 60s y el contenedor tarda 74s.
+        <code>upstream timed out (110: Connection timed out)
+"GET /api/chat" 502</code>
+        Subí proxy_read_timeout a 120s y recargué nginx. Ya responde 200.</div>
+    </div>
+    <div class="composer"><div class="box"><input placeholder="Message OpenCode…"><button>↑</button></div></div>
+  </section>
+
+  <!-- FILES -->
+  <section class="screen" data-screen="files">
+    <div class="head"><div><div class="h" style="font-size:18px">files</div><div class="s">/home/ubuntu · sftp</div></div></div>
+    <div class="lst">
+      <div class="lrow"><div class="ic">📁</div><div class="t">nginx<div class="m">dir · 4 items</div></div><div class="v">›</div></div>
+      <div class="lrow"><div class="ic">📁</div><div class="t">pvps<div class="m">dir · 12 items</div></div><div class="v">›</div></div>
+      <div class="lrow"><div class="ic">📄</div><div class="t">install.sh<div class="m">31.7 KB</div></div><div class="v">edit</div></div>
+      <div class="lrow"><div class="ic">🗄</div><div class="t">opencode-backup.tgz<div class="m">932 MB</div></div><div class="v">›</div></div>
+    </div>
+  </section>
+
+  <!-- TOOLS -->
+  <section class="screen" data-screen="tools">
+    <div class="head"><div><div class="h" style="font-size:22px">tools</div><div class="s">shell · docker · keys</div></div></div>
+    <div class="lst">
+      <div class="lrow" data-go="shell"><div class="ic">▦</div><div class="t">Terminal<div class="m">pty session</div></div><div class="v">›</div></div>
+      <div class="lrow" data-detail="docker"><div class="ic">▤</div><div class="t">Docker<div class="m">19/19 running</div></div><div class="v">›</div></div>
+      <div class="lrow" data-detail="services"><div class="ic">◉</div><div class="t">Services<div class="m">148 units</div></div><div class="v bad">2 failed</div></div>
+      <div class="lrow" data-go="settings"><div class="ic">⚙</div><div class="t">Settings<div class="m">security · terminal</div></div><div class="v">›</div></div>
+    </div>
+  </section>
+
+  <!-- SHELL -->
+  <section class="screen" data-screen="shell">
+    <div class="head"><div class="back" data-go="tools">←</div><div><div class="h" style="font-size:18px">shell</div><div class="s">ubuntu@vps</div></div></div>
+    <div style="flex:1;margin:6px 14px 20px;background:#07070B;border:1px solid var(--line);border-radius:16px;padding:14px;font:400 11px/1.8 var(--mono);color:#93A7BD;white-space:pre-wrap;overflow:auto"><span style="color:var(--amber)">ubuntu@vps:~$</span> systemctl --failed
+  auditd.service      failed
+  cloudflared.service failed
+<span style="color:var(--amber)">ubuntu@vps:~$</span> █</div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section class="screen" data-screen="settings">
+    <div class="head"><div class="back" data-go="board">←</div><div><div class="h" style="font-size:18px">settings</div><div class="s">vps · 2.2.0</div></div></div>
+    <div class="lst">
+      <div class="lrow"><div class="t">Always-on tunnel<div class="m">wake lock while SSH is active</div></div><div class="v">on</div></div>
+      <div class="lrow"><div class="t">Device lock<div class="m">PIN / biometrics</div></div><div class="v">off</div></div>
+      <div class="lrow"><div class="t">Host key<div class="m">pinned · SHA256</div></div><div class="v">verified</div></div>
+      <div class="lrow"><div class="t">Theme<div class="m">graphite</div></div><div class="v">›</div></div>
+    </div>
+  </section>
+</div>
+<script>
+const phone=document.getElementById('phone');
+const data={cpu:['CPU','live sample · 2 cores','4%'],ram:['Memory','4.9 GB of 11.6 GB','41%'],disk:['Disk','96.5 GB of 193 GB','51%'],docker:['Docker','19 containers running','19/19'],services:['Services','2 failed of 148 units','2']};
+function go(n){
+  phone.querySelectorAll('[data-screen]').forEach(s=>s.classList.toggle('on',s.dataset.screen===n));
+  phone.querySelectorAll('.rail a').forEach(a=>a.classList.toggle('on',a.dataset.go===n));
+  phone.querySelectorAll('.lst,.msgs,.det,.board,.term').forEach(x=>x.scrollTop=0);
+}
+phone.addEventListener('click',e=>{
+  const d=e.target.closest('[data-detail]');
+  if(d){
+    const x=data[d.dataset.detail];
+    document.getElementById('d-title').textContent=x[0];
+    document.getElementById('d-sub').textContent=x[1];
+    document.getElementById('d-main').textContent=x[2];
+    go('detail');return;
+  }
+  const g=e.target.closest('[data-go]'); if(g) go(g.dataset.go);
+});
+</script>
+</body></html>

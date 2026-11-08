@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>04 · Swiss dark</title>
+<style>
+:root{--bg:#08090B;--panel:#0E1013;--panel2:#121418;--line:#1D2026;--txt:#E9EAEE;--muted:#8A8F9A;--dim:#5A5F6B;--acc:#7C8CFF;--ok:#4ADE80;--warn:#F59E0B;--bad:#F87171;
+--sans:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+--mono:ui-monospace,"SF Mono",Menlo,"JetBrains Mono",monospace}
+*{box-sizing:border-box}
+body{margin:0;background:#14161A;padding:28px 16px 48px;display:flex;gap:26px;justify-content:center;flex-wrap:wrap;font-family:var(--sans);color:var(--txt);-webkit-font-smoothing:antialiased}
+.name{width:100%;text-align:center;font:600 12px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:#6c7280;margin-bottom:4px}
+.device{width:390px;height:844px;border-radius:30px;background:var(--bg);overflow:hidden;position:relative;box-shadow:0 30px 70px rgba(0,0,0,.6),0 0 0 1px #24272e}
+.screen{height:100%;overflow:auto;padding:0 14px 96px}
+.statusbar{display:flex;justify-content:space-between;font:500 11px var(--mono);color:var(--muted);padding:12px 4px 8px}
+.top{display:flex;align-items:center;gap:10px;padding:6px 2px 14px;border-bottom:1px solid var(--line)}
+.top .h{font:600 15px var(--sans);letter-spacing:-.01em}
+.top .s{font:500 11px var(--mono);color:var(--dim);display:flex;align-items:center;gap:6px}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px rgba(74,222,128,.12)}
+.spacer{flex:1}
+.ib{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;border:1px solid var(--line);color:var(--muted);font-size:13px}
+.sec{margin-top:20px}
+.sec h2{font:600 10px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin:0 2px 8px;display:flex;justify-content:space-between}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.prow{display:flex;align-items:center;gap:10px;padding:13px 12px;border-bottom:1px solid var(--line)}
+.prow:last-child{border-bottom:0}
+.prow .lbl{font:500 10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim);width:92px;flex:0 0 auto}
+.prow .val{font:500 12.5px var(--mono);color:var(--txt);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prow .val.dim{color:var(--muted)}
+.primary{width:100%;margin-top:12px;background:var(--acc);color:#0A0B10;border:0;border-radius:8px;padding:13px;font:600 13px var(--sans);letter-spacing:.01em;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer}
+.rowbtns{display:flex;gap:8px;margin-top:8px}
+.ghost{flex:1;background:transparent;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:10px;font:500 12px var(--sans);cursor:pointer}
+.metrics{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line)}
+.metric{background:var(--panel);padding:14px 12px 12px}
+.metric .k{font:500 9.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.metric .v{font:600 26px/1 var(--sans);letter-spacing:-.03em;margin:8px 0 1px;font-variant-numeric:tabular-nums}
+.metric .v small{font:500 11px var(--mono);color:var(--dim);letter-spacing:0}
+.metric .d{font:400 10px var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.track{height:2px;background:#1B1E24;border-radius:2px;margin-top:10px;overflow:hidden}
+.track i{display:block;height:100%;background:var(--acc);border-radius:2px}
+.lrow{display:flex;align-items:center;gap:10px;padding:13px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+.lrow:last-child{border-bottom:0}
+.lrow .t{flex:1;font:500 13.5px var(--sans)}
+.lrow .m{font:400 10.5px var(--mono);color:var(--dim);margin-top:2px}
+.lrow .v{font:500 11.5px var(--mono);color:var(--muted)}
+.lrow .v.bad{color:var(--bad)}
+.foot{font:400 10px/1.6 var(--mono);color:var(--dim);margin:14px 2px 0}
+.dock{position:absolute;left:0;right:0;bottom:0;background:rgba(10,11,14,.92);backdrop-filter:blur(12px);border-top:1px solid var(--line);display:flex;padding:8px 6px 18px}
+.dock a{flex:1;text-align:center;text-decoration:none;color:var(--dim);font:500 9px var(--sans);letter-spacing:.06em;padding:6px 0}
+.dock a b{display:block;font-size:15px;margin-bottom:3px;font-weight:400}
+.dock a.on{color:var(--acc)}
+/* chat */
+.cmsg{padding:14px 2px;border-bottom:1px solid var(--line)}
+.cmeta{font:500 9.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:6px;display:flex;gap:8px;align-items:center}
+.cmeta b{color:var(--acc);font-weight:600}
+.ctext{font:400 13.5px/1.55 var(--sans);color:#D6D8DE}
+.code{margin-top:10px;border:1px solid var(--line);border-left:2px solid var(--acc);border-radius:6px;padding:10px 12px;background:#0A0C10;font:400 11px/1.65 var(--mono);color:#A9B4C7;white-space:pre-wrap}
+.composer{position:absolute;left:0;right:0;bottom:0;padding:10px 14px 22px;background:linear-gradient(to top,#08090B 60%,rgba(8,9,11,0))}
+.composer .box{display:flex;gap:8px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 6px 6px 12px}
+.composer input{flex:1;background:transparent;border:0;outline:none;color:var(--txt);font:400 13px var(--sans)}
+.composer button{width:32px;height:32px;border-radius:7px;border:0;background:var(--acc);color:#0A0B10;font-size:14px}
+</style></head>
+<body>
+<div class="name">04 · Swiss dark — densidad, líneas, precisión</div>
+
+<figure class="device" style="margin:0">
+  <div class="screen">
+    <div class="statusbar"><span>21:07</span><span>5G · 82%</span></div>
+    <div class="top">
+      <div>
+        <div class="h">vps</div>
+        <div class="s"><span class="dot"></span>connected · 43359</div>
+      </div>
+      <div class="spacer"></div>
+      <div class="ib">⟳</div><div class="ib">⋯</div>
+    </div>
+
+    <div class="sec">
+      <h2>Session</h2>
+      <div class="panel">
+        <div class="prow"><div class="lbl">SSH</div><div class="val">ubuntu@130.110.235.61:22</div></div>
+        <div class="prow"><div class="lbl">Tunnel</div><div class="val">127.0.0.1:43359 → :49374</div></div>
+        <div class="prow"><div class="lbl">OpenCode</div><div class="val">v2.4.1 · 3 sessions</div></div>
+        <div class="prow"><div class="lbl">Context</div><div class="val dim">19.4k / 1.0M · $0.03</div></div>
+      </div>
+      <button class="primary">Open conversation →</button>
+      <div class="rowbtns"><button class="ghost">Files</button><button class="ghost">Shell</button><button class="ghost">Disconnect</button></div>
+    </div>
+
+    <div class="sec">
+      <h2>Telemetry <span>auto · 5s</span></h2>
+      <div class="panel">
+        <div class="metrics">
+          <div class="metric"><div class="k">CPU</div><div class="v">4.0<small>%</small></div><div class="d">load 0.08 · 2 cores</div><div class="track"><i style="width:4%"></i></div></div>
+          <div class="metric"><div class="k">Memory</div><div class="v">41<small>%</small></div><div class="d">4.9 / 11.6 GB</div><div class="track"><i style="width:41%"></i></div></div>
+          <div class="metric"><div class="k">Disk</div><div class="v">51<small>%</small></div><div class="d">96.5 / 193 GB</div><div class="track"><i style="width:51%"></i></div></div>
+          <div class="metric"><div class="k">Docker</div><div class="v">19<small>/19</small></div><div class="d">containers</div><div class="track"><i style="width:100%"></i></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>Control</h2>
+      <div class="panel">
+        <div class="lrow"><div class="t">Services<div class="m">systemd units</div></div><div class="v bad">2 failed</div><div style="color:#4b5160">›</div></div>
+        <div class="lrow"><div class="t">Processes<div class="m">cpu · memory</div></div><div class="v">›</div></div>
+        <div class="lrow"><div class="t">Hosts<div class="m">ssh targets</div></div><div class="v">2</div><div style="color:#4b5160">›</div></div>
+      </div>
+    </div>
+    <div class="foot">ubuntu 24.04.5 lts · 6.17.0-1020-oracle · up 6w 6d</div>
+  </div>
+  <div class="dock"><a class="on" href="#"><b>⌂</b>Home</a><a href="#"><b>◌</b>Chat</a><a href="#"><b>▤</b>Files</a><a href="#"><b>▦</b>Shell</a><a href="#"><b>⋯</b>More</a></div>
+</figure>
+
+<figure class="device" style="margin:0">
+  <div class="screen" style="padding-bottom:0">
+    <div class="statusbar"><span>21:07</span><span>5G · 82%</span></div>
+    <div class="top"><div><div class="h">chat</div><div class="s"><span class="dot"></span>ready · 19.4k ctx</div></div><div class="spacer"></div><div class="ib">＋</div><div class="ib">⋯</div></div>
+    <div class="cmsg">
+      <div class="cmeta"><b>You</b><span>· 21:04</span></div>
+      <div class="ctext">mira los logs de nginx y dime si hay algo raro con el 502 de esta mañana</div>
+    </div>
+    <div class="cmsg">
+      <div class="cmeta"><b>Assistant</b><span>· deepseek-v4.1 · 212 tok</span></div>
+      <div class="ctext">Revisé access.log y error.log. El 502 es un upstream timeout: nginx espera 60s y el contenedor tarda 74s.</div>
+      <div class="code">upstream timed out (110: Connection timed out)
+104.21.8.12 - [08/Nov 09:41] "GET /api/chat" 502</div>
+      <div class="ctext" style="margin-top:10px">Subí proxy_read_timeout a 120s y recargué nginx. Ya responde 200.</div>
+    </div>
+    <div class="composer"><div class="box"><input placeholder="Message OpenCode…"><button>↑</button></div></div>
+  </div>
+</figure>
+</body></html>

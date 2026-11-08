@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import dev.pvps.AppContainer
 import dev.pvps.data.model.AppSettings
+import dev.pvps.data.model.AuthType
 import dev.pvps.data.model.Host
 import dev.pvps.data.model.SshKey
 import dev.pvps.service.ConnectionService
@@ -15,11 +16,21 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 class AppViewModel(val container: AppContainer) : ViewModel() {
+
+    private companion object {
+        // One attempt per process: a user who disconnects on purpose must not
+        // be reconnected by the next recomposition.
+        @Volatile
+        private var autoConnectAttempted = false
+    }
 
     val hosts = container.vault.hosts
     val keys = container.vault.keys
@@ -50,6 +61,33 @@ class AppViewModel(val container: AppContainer) : ViewModel() {
                     _selectedHostId.value = list.firstOrNull()?.id
                 }
             }
+        }
+        maybeAutoConnect()
+    }
+
+    /**
+     * A killed process takes the SSH sessions with it: nothing survives inside
+     * the app. Without this, an "always-on" tunnel silently stayed down after
+     * Android reclaimed the process (games, memory pressure) until the user
+     * opened the app and tapped connect again. Reconnecting the last host once
+     * per process matches the always-on setting; disabling it opts out.
+     */
+    private fun maybeAutoConnect() {
+        if (autoConnectAttempted) return
+        autoConnectAttempted = true
+        viewModelScope.launch {
+            val wanted = withTimeoutOrNull(4_000) {
+                settings.first { it.keepConnectionAlive }
+            } ?: return@launch
+            if (!wanted.keepConnectionAlive) return@launch
+            val host = withTimeoutOrNull(4_000) { selectedHost.filterNotNull().first() } ?: return@launch
+            // Only reconnect when the host can actually authenticate: no key and
+            // no password means this is still a half-configured entry.
+            val hasKey = !host.keyId.isNullOrBlank() || host.authType == AuthType.PASSWORD
+            if (!hasKey) return@launch
+            val keyReady = withTimeoutOrNull(3_000) { keys.first { it.isNotEmpty() } } != null
+            if (host.authType == AuthType.KEY && !keyReady) return@launch
+            connect(host.id)
         }
     }
 

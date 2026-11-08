@@ -57,6 +57,20 @@ object Diagnostics {
         }
     }
 
+    /**
+     * Most recent lines, optionally only those emitted by [tags]. Used by the
+     * link detail screen: the last few ssh/opencode events usually explain a
+     * drop faster than the full log.
+     */
+    fun tail(limit: Int = 40, tags: Set<String>? = null): List<String> = synchronized(lock) {
+        val filtered = if (tags == null) {
+            lines.toList()
+        } else {
+            lines.filter { line -> tags.any { line.contains("  $it:") } }
+        }
+        filtered.takeLast(limit.coerceIn(1, MAX_MEMORY_LINES))
+    }
+
     fun snapshot(): String = synchronized(lock) {
         if (lines.isEmpty()) "No diagnostics recorded yet." else lines.joinToString("\n")
     }

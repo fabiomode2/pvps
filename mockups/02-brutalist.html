@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>02 · Brutalist</title>
+<style>
+:root{--bg:#E7E7E1;--ink:#0A0A0A;--lime:#C9FA4B;--white:#fff;--muted:#5A5A55;
+--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:#CFCFC7;padding:28px 16px 48px;display:flex;gap:26px;justify-content:center;flex-wrap:wrap;font-family:var(--sans);color:var(--ink)}
+.name{width:100%;text-align:center;font:800 12px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:#3d3d38;margin-bottom:4px}
+.device{width:390px;height:844px;border:3px solid var(--ink);border-radius:0;background:var(--bg);overflow:hidden;position:relative;box-shadow:10px 10px 0 rgba(10,10,10,.35)}
+.screen{height:100%;overflow:auto;padding:0 16px 104px}
+.statusbar{display:flex;justify-content:space-between;font:700 11px var(--mono);padding:12px 2px 8px}
+.bar{display:flex;align-items:center;justify-content:space-between;background:var(--ink);color:var(--white);padding:12px 14px;margin:4px -16px 0;border-bottom:3px solid var(--ink)}
+.bar b{font:800 12px var(--mono);letter-spacing:.18em;text-transform:uppercase}
+.bar .live{display:flex;align-items:center;gap:7px;font:700 10px var(--mono);letter-spacing:.16em;color:var(--lime)}
+.bar .live i{width:8px;height:8px;background:var(--lime);border-radius:50%;display:block}
+h1{font:800 42px/1 var(--sans);letter-spacing:-.04em;margin:20px 0 6px;text-transform:lowercase}
+.sub{font:600 11px var(--mono);letter-spacing:.04em;color:var(--muted)}
+.card{background:var(--white);border:3px solid var(--ink);box-shadow:6px 6px 0 var(--ink);padding:16px;margin-top:16px}
+.card.tight{padding:0}
+.chip{display:inline-block;background:var(--ink);color:var(--lime);font:800 10px var(--mono);letter-spacing:.14em;padding:5px 9px;text-transform:uppercase}
+.meta{font:600 11.5px/1.6 var(--mono);color:#2b2b27;margin-top:10px}
+.cta{display:flex;justify-content:space-between;align-items:center;width:100%;margin-top:14px;background:var(--lime);border:3px solid var(--ink);box-shadow:5px 5px 0 var(--ink);padding:15px 14px;font:800 13px var(--mono);letter-spacing:.16em;text-transform:uppercase;cursor:pointer}
+.cta:active{transform:translate(3px,3px);box-shadow:2px 2px 0 var(--ink)}
+h2{font:800 11px var(--mono);letter-spacing:.2em;text-transform:uppercase;margin:26px 0 10px;display:flex;justify-content:space-between}
+h2 span{color:var(--muted);font-weight:600}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:0;border:3px solid var(--ink);background:var(--ink)}
+.cell{background:var(--white);padding:14px 12px 12px}
+.cell:nth-child(odd){border-right:3px solid var(--ink)}
+.cell:nth-child(-n+2){border-bottom:3px solid var(--ink)}
+.cell .k{font:800 9.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
+.cell .v{font:800 40px/1 var(--sans);letter-spacing:-.04em;margin:6px 0 2px}
+.cell .v small{font:700 12px var(--mono);letter-spacing:0;color:var(--muted)}
+.cell .d{font:600 10px var(--mono);color:var(--muted)}
+.row{display:flex;align-items:center;justify-content:space-between;padding:16px 14px;border-bottom:3px solid var(--ink);background:var(--white);cursor:pointer}
+.row:last-child{border-bottom:0}
+.row .t{font:800 17px var(--sans);letter-spacing:-.02em}
+.row .s{font:600 10px var(--mono);color:var(--muted);margin-top:2px}
+.row .v{font:800 12px var(--mono);letter-spacing:.06em}
+.row .v.warn{background:var(--ink);color:#FF9DB0;padding:4px 6px}
+.foot{font:600 10px/1.7 var(--mono);color:var(--muted);margin-top:14px}
+.dock{position:absolute;left:0;right:0;bottom:0;display:flex;gap:0;border-top:3px solid var(--ink);background:var(--bg)}
+.dock a{flex:1;text-align:center;font:800 9px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink);text-decoration:none;padding:14px 0 18px;border-right:3px solid var(--ink)}
+.dock a:last-child{border-right:0}
+.dock a.on{background:var(--lime)}
+/* chat */
+.pad{padding-top:14px}
+.bub{border:3px solid var(--ink);background:var(--white);box-shadow:5px 5px 0 var(--ink);padding:13px 14px;margin:14px 0;font:500 14.5px/1.55 var(--sans)}
+.bub.me{background:var(--lime);margin-left:36px}
+.who{font:800 9.5px var(--mono);letter-spacing:.2em;text-transform:uppercase;margin:18px 0 0}
+.code{background:var(--ink);color:var(--lime);border:3px solid var(--ink);padding:12px;font:600 11px/1.7 var(--mono);margin:14px 0;white-space:pre-wrap}
+.composer{position:absolute;left:0;right:0;bottom:0;background:var(--bg);border-top:3px solid var(--ink);padding:12px 14px 22px}
+.composer .box{display:flex;gap:10px}
+.composer input{flex:1;border:3px solid var(--ink);background:var(--white);padding:12px;font:600 13px var(--mono);outline:none}
+.composer button{width:50px;border:3px solid var(--ink);background:var(--lime);box-shadow:4px 4px 0 var(--ink);font:800 18px var(--mono)}
+</style></head>
+<body>
+<div class="name">02 · Brutalist — bloques, bordes duros, lima</div>
+
+<figure class="device" style="margin:0">
+  <div class="screen">
+    <div class="statusbar"><span>21:07</span><span>5G ▲▲</span></div>
+    <div class="bar"><b>PVPS</b><span class="live"><i></i>LIVE</span></div>
+    <h1>vps</h1>
+    <div class="sub">ubuntu@130.110.235.61</div>
+
+    <div class="card">
+      <span class="chip">Connected</span>
+      <div class="meta">SSH session established.<br>OpenCode tunnel :43359 · 3 sessions</div>
+      <button class="cta"><span>Conversation</span><span>→</span></button>
+    </div>
+
+    <h2>Telemetry <span>now</span></h2>
+    <div class="grid">
+      <div class="cell"><div class="k">CPU</div><div class="v">4<small>%</small></div><div class="d">0.08 · 2 cores</div></div>
+      <div class="cell"><div class="k">RAM</div><div class="v">41<small>%</small></div><div class="d">4.9 / 11.6 GB</div></div>
+      <div class="cell"><div class="k">Disk</div><div class="v">51<small>%</small></div><div class="d">96.5 / 193 GB</div></div>
+      <div class="cell"><div class="k">Docker</div><div class="v">19<small>/19</small></div><div class="d">running</div></div>
+    </div>
+
+    <h2>Control</h2>
+    <div class="card tight">
+      <div class="row"><div><div class="t">Services</div><div class="s">systemd units</div></div><div class="v warn">2 FAILED</div></div>
+      <div class="row"><div><div class="t">Processes</div><div class="s">cpu · memory</div></div><div class="v">›</div></div>
+      <div class="row"><div><div class="t">Hosts</div><div class="s">ssh targets</div></div><div class="v">2</div></div>
+    </div>
+    <div class="foot">UBUNTU 24.04.5 LTS · 6.17.0<br>UP 6W 6D · TAILSCALE 100.102.169.49</div>
+  </div>
+  <div class="dock"><a class="on" href="#">Home</a><a href="#">Chat</a><a href="#">Files</a><a href="#">Shell</a><a href="#">More</a></div>
+</figure>
+
+<figure class="device" style="margin:0">
+  <div class="screen" style="padding-bottom:0">
+    <div class="statusbar"><span>21:07</span><span>5G ▲▲</span></div>
+    <div class="bar"><b>← Chat</b><span class="live">READY</span></div>
+    <div class="pad">
+      <div class="who">You</div>
+      <div class="bub me">mira los logs de nginx y dime si hay algo raro con el 502 de esta mañana</div>
+      <div class="who">Assistant</div>
+      <div class="bub">Revisé access.log y error.log. El 502 es upstream timeout: nginx espera 60s y el contenedor tarda 74s.</div>
+      <div class="code">upstream timed out (110)
+"GET /api/chat" 502</div>
+      <div class="bub">Subí proxy_read_timeout a 120s y recargué nginx. Ya responde 200.</div>
+    </div>
+    <div class="composer"><div class="box"><input placeholder="Message OpenCode…"><button>↑</button></div></div>
+  </div>
+</figure>
+</body></html>
