@@ -305,31 +305,26 @@ jobs:
             ```
 
             **What's new in ${{ steps.meta.outputs.version }}:**
-            - OpenCode v2 live streaming: text, reasoning and tool calls now
-              arrive over the native `session.*` event stream. Thinking appears
-              live in a compact 32-word window instead of waiting for a refresh.
-            - Dramatically lower latency. Incremental SSE deltas replace full
-              message re-fetches on every event; HTTP and reconnect timings are
-              visible in Settings → Diagnostics.
-            - Queue messages steer at the next thinking/tool step boundary.
-              Pending items are reconciled against the durable inbox and survive
-              tunnel reconnects.
-            - SSH tunnel keeps a stable local port and requires two consecutive
-              failed probes before reconnecting, ending the disconnect loops
-              when switching apps or tabs.
-            - New chat chrome: no session title, context ring, spend, tok/s and
-              one-line activity summaries. Full-screen telemetry and a project
-              grouped session picker hide read-only subagents.
-            - Files now have a full-screen preview with PDF pages, video, audio,
-              images, text/code and tar listings. Compact Dolphin-style list and
-              grid views, hidden-file toggle and no permission/date clutter.
-            - Process inspector with RAM pressure, top consumers, sortable
-              CPU/RAM/name table, mini bars and kill.
-            - Camera capture joins photos and files: up to 8 attachments,
-              20 MB each, 24 MB total.
-            - Runtime theme and font switching now recompose correctly.
-            - Installer asks only for the phone SSH public key and supports
-              `pvps-setup:` codes. Copy/export redacted diagnostics from Settings.
+            - Always-on SSH: 15s keepalives, TCP keepalive on the socket, and a
+              foreground wake lock so the tunnel survives screen-off and Doze.
+            - Fast self-healing: the watchdog probes every 5s, redials with
+              backoff after a Wi-Fi/LTE handoff, and retries until the host is
+              back instead of leaving the app disconnected.
+            - The SSH forward now closes as soon as its transport dies. That
+              ends the minute-long burst of `Connection reset` errors against a
+              dead loopback listener.
+            - OpenCode rebinds automatically when the tunnel is rebuilt, even
+              when the Chat tab is not open, and keeps the transcript, queue and
+              scroll position. New "Reconnecting…" status instead of a hard
+              error screen.
+            - Idle SSE streams are no longer killed after 120s, and restarted
+              streams reset their backoff after a healthy connection.
+            - Concurrent OpenCode connects are serialised, removing duplicate
+              SSE streams and REST bursts on startup.
+            - Settings → Connection: "Always-on tunnel" and a one-tap battery
+              optimization exemption.
+            - Installer: server-side `ClientAliveInterval 15`, `TCPKeepAlive`
+              and `MaxSessions 64` for long-lived mobile tunnels.
           files: |
             dist/pvps-${{ steps.meta.outputs.version }}.apk
             dist/SHA256SUMS
