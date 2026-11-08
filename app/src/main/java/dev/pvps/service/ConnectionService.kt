@@ -6,7 +6,9 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
@@ -40,6 +42,7 @@ class ConnectionService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var wakeLock: PowerManager.WakeLock? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var screenReceiver: BroadcastReceiver? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -67,6 +70,7 @@ class ConnectionService : Service() {
             container.ssh.states.collectLatest { publishStatus(it) }
         }
         registerNetworkCallback()
+        registerScreenReceiver()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -94,6 +98,7 @@ class ConnectionService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        unregisterScreenReceiver()
         unregisterNetworkCallback()
         releaseWakeLock()
         scope.cancel()
@@ -142,6 +147,42 @@ class ConnectionService : Service() {
             runCatching { if (lock.isHeld) lock.release() }
         }
         wakeLock = null
+    }
+
+    /**
+     * Screen-on is the cheapest moment to prove the link still works: the
+     * carrier may have dropped an idle socket during Doze while the app was
+     * asleep. A probe (not a redial) runs, and only a dead transport triggers
+     * a reconnect.
+     */
+    private fun registerScreenReceiver() {
+        if (screenReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context?, intent: Intent?) {
+                if (intent?.action != Intent.ACTION_SCREEN_ON) return
+                val states = container.ssh.states.value
+                states.values
+                    .filter {
+                        it.status == ConnectionState.Status.CONNECTED ||
+                            it.status == ConnectionState.Status.RECONNECTING
+                    }
+                    .forEach { state ->
+                        container.ssh.requestRecovery(state.hostId, "screen on")
+                    }
+            }
+        }
+        screenReceiver = receiver
+        ContextCompat.registerReceiver(
+            this,
+            receiver,
+            IntentFilter(Intent.ACTION_SCREEN_ON),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+    }
+
+    private fun unregisterScreenReceiver() {
+        screenReceiver?.let { runCatching { unregisterReceiver(it) } }
+        screenReceiver = null
     }
 
     private fun registerNetworkCallback() {
