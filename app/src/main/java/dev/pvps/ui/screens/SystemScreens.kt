@@ -395,8 +395,7 @@ fun ServicesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                     label = { Text("All") },
                     shape = RoundedCornerShape(Radius.pill),
                     colors = filterColors,
-                    border = null,
-                    elevation = null
+                    border = null
                 )
                 FilterChip(
                     selected = filter == "running",
@@ -404,8 +403,7 @@ fun ServicesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                     label = { Text("Running") },
                     shape = RoundedCornerShape(Radius.pill),
                     colors = filterColors,
-                    border = null,
-                    elevation = null
+                    border = null
                 )
                 FilterChip(
                     selected = filter == "failed",
@@ -413,8 +411,7 @@ fun ServicesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                     label = { Text("Failed") },
                     shape = RoundedCornerShape(Radius.pill),
                     colors = filterColors,
-                    border = null,
-                    elevation = null
+                    border = null
                 )
             }
             if (error != null) {

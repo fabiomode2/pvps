@@ -447,7 +447,9 @@ fun ChatScreen(
                 }
             }
             if (chat.error != null) {
-                ErrorBanner(chat.error!!) { viewModel.container.openCode.clearError() }
+                Box(modifier = Modifier.padding(horizontal = Space.gutter, vertical = Space.xs)) {
+                    ErrorBanner(chat.error!!) { viewModel.container.openCode.clearError() }
+                }
             }
             if (chat.connecting) {
                 Row(
@@ -836,7 +838,11 @@ private fun ChatTopBar(
             )
             Text(
                 contextFraction?.let { "${(it * 100).toInt()}%" } ?: "—",
-                style = PvpsType.eyebrow,
+                style = PvpsType.numericHero.copy(
+                    fontSize = 10.5.sp,
+                    lineHeight = 12.sp,
+                    letterSpacing = 0.sp
+                ),
                 color = contextColor,
                 maxLines = 1
             )
@@ -853,7 +859,7 @@ private fun ChatTopBar(
                     },
                     5
                 )
-                Spacer(Modifier.width(Space.sm))
+                Spacer(Modifier.width(Space.xs))
                 Text(
                     hostName ?: "OpenCode",
                     style = MaterialTheme.typography.titleMedium,
@@ -862,7 +868,7 @@ private fun ChatTopBar(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
                 )
-                Spacer(Modifier.width(Space.sm))
+                Spacer(Modifier.width(Space.xs))
                 Text(
                     stateLabel.uppercase(),
                     style = PvpsType.eyebrow,
@@ -957,8 +963,8 @@ private fun WorkingIndicator() {
         verticalAlignment = Alignment.CenterVertically
     ) {
         CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Accent, strokeWidth = 1.6.dp)
-        Spacer(Modifier.width(9.dp))
-        Text("OpenCode is working…", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.width(Space.sm))
+        Text("OpenCode is working…", color = TextSecondary, style = PvpsType.monoBody)
     }
 }
 
@@ -1175,7 +1181,7 @@ private fun MessageBubble(
                     Text(
                         (message.agent ?: "assistant").uppercase(),
                         style = PvpsType.eyebrow,
-                        color = TextSecondary
+                        color = TextFaint
                     )
                     message.model?.let {
                         Text(
@@ -1663,9 +1669,9 @@ private fun RemoteMedia(uri: String, openCode: OpenCodeRepository) {
     when {
         !result.first -> Text(
             "Loading image…",
-            style = MaterialTheme.typography.labelSmall,
+            style = PvpsType.monoBody,
             color = TextSecondary,
-            modifier = Modifier.padding(top = 6.dp)
+            modifier = Modifier.padding(top = Space.sm)
         )
         result.second != null -> {
             val bitmap = result.second!!
@@ -1737,9 +1743,9 @@ private fun RemoteMedia(uri: String, openCode: OpenCodeRepository) {
         }
         else -> Text(
             "Image unavailable",
-            style = MaterialTheme.typography.labelSmall,
+            style = PvpsType.monoBody,
             color = TextSecondary,
-            modifier = Modifier.padding(top = 6.dp)
+            modifier = Modifier.padding(top = Space.sm)
         )
     }
 }
@@ -1782,7 +1788,10 @@ private fun PermissionCard(permission: PermissionRequest, onReply: (String) -> U
                 )
             }
             Spacer(Modifier.height(Space.md))
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(Space.sm)
+            ) {
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(Radius.pill))
@@ -2327,6 +2336,7 @@ private fun Composer(
                         modifier = Modifier
                             .size(40.dp)
                             .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.05f))
                             .pressable(enabled = connected) { showAttachMenu = true },
                         contentAlignment = Alignment.Center
                     ) {
@@ -3013,7 +3023,10 @@ private fun SessionDialog(
                     )
                 )
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = Space.gutter, vertical = Space.sm),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = Space.gutter, vertical = Space.sm),
                     horizontalArrangement = Arrangement.spacedBy(Space.xs),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
