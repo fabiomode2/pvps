@@ -51,6 +51,10 @@ import dev.pvps.ui.components.PvpsTextField
 import dev.pvps.ui.components.SectionLabel
 import dev.pvps.ui.components.SignalButton
 import dev.pvps.ui.components.TerminalWindow
+import dev.pvps.ui.components.PvpsCard
+import dev.pvps.ui.theme.PvpsType
+import dev.pvps.ui.theme.Radius
+import dev.pvps.ui.theme.Space
 import dev.pvps.ui.theme.Accent
 import dev.pvps.ui.theme.Danger
 import dev.pvps.ui.theme.MonoFont
@@ -83,27 +87,33 @@ fun OnboardingScreen(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 16.dp)
+            .padding(horizontal = Space.gutter, vertical = Space.md)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            PvpsMark(46.dp)
-            Spacer(Modifier.width(12.dp))
+            PvpsMark(42.dp)
+            Spacer(Modifier.width(Space.md))
             Column {
-                Text("PVPS", style = MaterialTheme.typography.headlineSmall, color = TextPrimary)
+                Text(
+                    "PVPS",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = TextPrimary,
+                    fontFamily = dev.pvps.ui.theme.DisplayFont
+                )
                 Text(
                     "PORTABLE VPS CONTROL",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = PvpsType.eyebrow,
                     color = Accent
                 )
             }
         }
-        Spacer(Modifier.height(34.dp))
+        Spacer(Modifier.height(Space.huge))
         Text(
             "Your server,\nin your pocket.",
             style = MaterialTheme.typography.displayLarge,
-            color = TextPrimary
+            color = TextPrimary,
+            fontFamily = dev.pvps.ui.theme.DisplayFont
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(Space.md))
         Text(
             "A native SSH control plane for OpenCode, terminals, files, Docker and systemd. No cloud middleman. No public OpenCode port.",
             style = MaterialTheme.typography.bodyLarge,
@@ -165,13 +175,8 @@ fun OnboardingScreen(
             primary = true
         )
         Spacer(Modifier.height(30.dp))
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = Accent.copy(alpha = 0.05f),
-            shape = RoundedCornerShape(20.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Accent.copy(alpha = 0.16f))
-        ) {
-            Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
+        PvpsCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(Radius.lg)) {
+            Row(modifier = Modifier.padding(Space.lg), verticalAlignment = Alignment.Top) {
                 Box(
                     modifier = Modifier
                         .size(32.dp)
@@ -285,9 +290,8 @@ private fun StepRow(
     ) {
         Text(
             number,
-            style = MaterialTheme.typography.labelSmall,
+            style = PvpsType.monoStrong,
             color = Accent,
-            fontWeight = FontWeight.Bold,
             modifier = Modifier.width(30.dp)
         )
         Column(modifier = Modifier.weight(1f)) {
@@ -317,5 +321,11 @@ private fun StepRow(
 
 @Composable
 private fun StepDivider() {
-    HorizontalDivider(color = OutlineDark.copy(alpha = 0.7f))
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 34.dp)
+            .height(1.dp)
+            .background(Color.White.copy(alpha = 0.05f))
+    )
 }

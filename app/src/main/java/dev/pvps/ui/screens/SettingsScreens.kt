@@ -7,45 +7,39 @@ import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Dns
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -60,7 +54,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -68,27 +61,35 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.pvps.BuildConfig
-import dev.pvps.data.model.AppSettings
 import dev.pvps.diagnostics.Diagnostics
 import dev.pvps.terminal.TerminalPalettes
 import dev.pvps.ui.AppViewModel
 import dev.pvps.ui.components.ConfirmDialog
 import dev.pvps.ui.components.MonospaceBox
+import dev.pvps.ui.components.PvpsCard
+import dev.pvps.ui.components.PvpsSwitch
 import dev.pvps.ui.components.ScreenHeader
-import dev.pvps.ui.components.SectionCard
-import dev.pvps.ui.components.SectionLabel
+import dev.pvps.ui.components.TinyAction
 import dev.pvps.ui.components.collectAsStateValue
 import dev.pvps.ui.components.formatDate
 import dev.pvps.ui.theme.Accent
 import dev.pvps.ui.theme.Danger
-import dev.pvps.ui.theme.OutlineDark
+import dev.pvps.ui.theme.DisplayFont
+import dev.pvps.ui.theme.PvpsType
+import dev.pvps.ui.theme.Radius
+import dev.pvps.ui.theme.Space
 import dev.pvps.ui.theme.Success
-import dev.pvps.ui.theme.SurfaceRaised
 import dev.pvps.ui.theme.TextFaint
 import dev.pvps.ui.theme.TextPrimary
 import dev.pvps.ui.theme.TextSecondary
+import dev.pvps.ui.theme.Themes
 import dev.pvps.ui.theme.Violet
 import dev.pvps.ui.theme.Warning
+import dev.pvps.ui.theme.pressable
+
+/* ------------------------------------------------------------------------- */
+/* Control / More                                                             */
+/* ------------------------------------------------------------------------- */
 
 @Composable
 fun MoreScreen(
@@ -119,59 +120,51 @@ fun MoreScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(horizontal = Space.gutter),
+            verticalArrangement = Arrangement.spacedBy(Space.block)
         ) {
             item {
-                Spacer(Modifier.height(4.dp))
-                SectionLabel("Server")
-            }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                Spacer(Modifier.height(Space.xs))
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.block)) {
                     MoreTile("Docker", "Containers", Icons.Default.Storage, Violet, onDocker, Modifier.weight(1f))
                     MoreTile("Services", "systemd", Icons.Default.Dns, Warning, onServices, Modifier.weight(1f))
                 }
             }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                    MoreTile("Processes", "CPU / RAM", Icons.Default.Memory, Danger, onProcesses, Modifier.weight(1f))
-                    MoreTile("Hosts", "SSH targets", Icons.Default.Dns, Violet, onHosts, Modifier.weight(1f))
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.block)) {
+                    MoreTile("Processes", "CPU · RAM", Icons.Default.Memory, Danger, onProcesses, Modifier.weight(1f))
+                    MoreTile("Hosts", "SSH targets", Icons.Default.Dns, Success, onHosts, Modifier.weight(1f))
                 }
             }
+
+            item { SettingsGroup(title = "Access") {
+                GroupRow("SSH keys", "Generate ed25519 or import existing", Icons.Default.Key, Accent, onKeys)
+                RowDivider()
+                GroupRow("Audit log", "Connections and destructive actions", Icons.Default.Archive, Violet, onAudit)
+            } }
+
+            item { SettingsGroup(title = "App") {
+                GroupRow("Settings", "Security, terminal and chat", Icons.Default.Settings, TextSecondary, onSettings)
+                RowDivider()
+                GroupRow(
+                    "Check for updates",
+                    "Installed ${BuildConfig.VERSION_NAME}",
+                    Icons.Default.Refresh,
+                    TextSecondary,
+                    onCheckUpdates
+                )
+            } }
+
             item {
-                Spacer(Modifier.height(4.dp))
-                SectionLabel("Access")
-            }
-            item {
-                SectionCard(title = "Security") {
-                    MoreRow("SSH keys", "Generate ed25519 or import existing keys", Icons.Default.Key, onKeys)
-                    MoreRow("Audit log", "Connections and destructive actions", Icons.Default.Archive, onAudit)
-                }
-            }
-            item {
-                Spacer(Modifier.height(4.dp))
-                SectionLabel("App")
-            }
-            item {
-                SectionCard(title = "PVPS") {
-                    MoreRow("Settings", "Security, terminal and chat", Icons.Default.Settings, onSettings)
-                    MoreRow(
-                        "Check for updates",
-                        "Installed ${BuildConfig.VERSION_NAME}",
-                        Icons.Default.Refresh,
-                        onCheckUpdates
-                    )
-                }
-            }
-            item {
+                Spacer(Modifier.height(Space.sm))
                 Text(
                     "PVPS ${BuildConfig.VERSION_NAME}  ·  OpenCode v2  ·  SSH only",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = PvpsType.monoBody,
                     color = TextFaint,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp)
+                    modifier = Modifier.padding(horizontal = Space.xs)
                 )
             }
-            item { Spacer(Modifier.height(96.dp)) }
+            item { Spacer(Modifier.height(Space.dockClearance)) }
         }
     }
 }
@@ -185,68 +178,48 @@ private fun MoreTile(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        modifier = modifier
-            .clip(RoundedCornerShape(22.dp))
-            .clickable(onClick = onClick),
-        color = SurfaceRaised.copy(alpha = 0.42f),
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.72f))
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+    PvpsCard(modifier = modifier, shape = RoundedCornerShape(Radius.md)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .pressable(onClick = onClick)
+                .padding(Space.lg)
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
-                        .size(34.dp)
-                        .clip(RoundedCornerShape(11.dp))
-                        .background(tint.copy(alpha = 0.10f)),
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(Radius.xs))
+                        .background(tint.copy(alpha = 0.12f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
                 }
                 Spacer(Modifier.weight(1f))
-                Text("↗", color = TextFaint, style = MaterialTheme.typography.titleMedium)
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = TextFaint,
+                    modifier = Modifier.size(16.dp)
+                )
             }
-            Spacer(Modifier.height(12.dp))
-            Text(title, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-            Spacer(Modifier.height(2.dp))
+            Spacer(Modifier.height(Space.lg))
+            Text(title, style = MaterialTheme.typography.titleMedium, color = TextPrimary, maxLines = 1)
+            Spacer(Modifier.height(Space.xxs))
             Text(
                 subtitle.uppercase(),
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary,
-                letterSpacing = 0.7.sp
+                style = PvpsType.eyebrow,
+                color = TextFaint,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
 }
 
-@Composable
-private fun MoreRow(title: String, subtitle: String, icon: ImageVector, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .clickable { onClick() }
-            .padding(vertical = 10.dp, horizontal = 2.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(Accent.copy(alpha = 0.08f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(icon, contentDescription = null, tint = Accent, modifier = Modifier.size(17.dp))
-        }
-        Spacer(Modifier.width(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, color = TextPrimary)
-            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-        }
-        Text("›", color = TextFaint, style = MaterialTheme.typography.titleLarge)
-    }
-}
+/* ------------------------------------------------------------------------- */
+/* Settings                                                                   */
+/* ------------------------------------------------------------------------- */
 
 @Composable
 fun SettingsScreen(
@@ -274,43 +247,56 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = Space.gutter),
+            verticalArrangement = Arrangement.spacedBy(Space.lg)
         ) {
-            item { Spacer(Modifier.height(4.dp)) }
             item {
-                SectionCard(title = "Security") {
+                Spacer(Modifier.height(Space.xs))
+                SettingsGroup(title = "Security") {
                     SettingSwitch(
                         title = "Device lock",
-                        subtitle = "Ask for the device PIN/pattern/biometric when the app opens",
+                        subtitle = "Ask for the device PIN, pattern or biometrics when the app opens",
                         checked = settings.biometricLock,
                         onChecked = { value -> viewModel.updateSettings { it.copy(biometricLock = value) } }
                     )
+                    RowDivider()
                     SettingSwitch(
                         title = "Block screenshots",
                         subtitle = "FLAG_SECURE while the app is visible",
                         checked = settings.blockScreenshots,
                         onChecked = { value -> viewModel.updateSettings { it.copy(blockScreenshots = value) } }
                     )
+                    RowDivider()
                     SettingSwitch(
                         title = "Strict host keys",
                         subtitle = "Reject unknown or changed SSH host keys",
                         checked = settings.strictHostKeys,
                         onChecked = { value -> viewModel.updateSettings { it.copy(strictHostKeys = value) } }
                     )
-                    Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = onHosts) { Text("Hosts") }
-                        TextButton(onClick = onKeys) { Text("SSH keys") }
-                        TextButton(onClick = onAudit) { Text("Audit") }
+                    RowDivider()
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(Space.md),
+                        horizontalArrangement = Arrangement.spacedBy(Space.sm)
+                    ) {
+                        TinyAction("Hosts", onClick = onHosts)
+                        TinyAction("SSH keys", onClick = onKeys)
+                        TinyAction("Audit", onClick = onAudit)
                     }
-                    TextButton(onClick = { viewModel.disconnectAll() }) {
-                        Text("Disconnect all and stop the SSH service", color = Danger)
-                    }
+                    RowDivider()
+                    Text(
+                        "Disconnect all and stop the SSH service",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Danger,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .pressable { viewModel.disconnectAll() }
+                            .padding(Space.lg)
+                    )
                 }
             }
+
             item {
-                SectionCard(title = "Connection") {
+                SettingsGroup(title = "Connection") {
                     SettingSwitch(
                         title = "Always-on tunnel",
                         subtitle = "Hold a wake lock while SSH is active so keepalives run with the screen off. Uses more battery.",
@@ -319,88 +305,106 @@ fun SettingsScreen(
                             viewModel.updateSettings { it.copy(keepConnectionAlive = value) }
                         }
                     )
+                    RowDivider()
                     BatteryOptimizationRow()
                 }
             }
+
             item {
-                SectionCard(title = "Appearance") {
-                    Text("Theme", style = MaterialTheme.typography.bodyLarge)
-                    Spacer(Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        dev.pvps.ui.theme.Themes.forEach { palette ->
-                            FilterChip(
-                                selected = settings.uiTheme == palette.id,
-                                onClick = { viewModel.updateSettings { it.copy(uiTheme = palette.id) } },
-                                label = { Text(palette.label, style = MaterialTheme.typography.labelSmall) }
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        "App font size: ${(settings.fontScale * 100).toInt()}%",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Slider(
-                        value = settings.fontScale,
-                        onValueChange = { value -> viewModel.updateSettings { it.copy(fontScale = value) } },
-                        valueRange = 0.8f..1.35f,
-                        steps = 10
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        "Interface zoom: ${(settings.uiScale * 100).toInt()}%",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Text(
-                        "Scales spacing and controls, not just text. Useful for tuning density without rebuilding.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary
-                    )
-                    Slider(
-                        value = settings.uiScale,
-                        onValueChange = { value -> viewModel.updateSettings { it.copy(uiScale = value) } },
-                        valueRange = 0.85f..1.2f,
-                        steps = 6
-                    )
-                }
-            }
-            item {
-                SectionCard(title = "Terminal") {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Palette, contentDescription = null, tint = Accent)
-                        Spacer(Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Theme", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                TerminalPalettes.byId(settings.terminalTheme).name,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = TextSecondary
-                            )
-                        }
-                        TextButton(onClick = { showThemeMenu = !showThemeMenu }) { Text("Change") }
-                    }
-                    if (showThemeMenu) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            TerminalPalettes.all.forEach { palette ->
-                                FilterChip(
-                                    selected = settings.terminalTheme == palette.id,
-                                    onClick = {
-                                        viewModel.updateSettings { it.copy(terminalTheme = palette.id) }
-                                        showThemeMenu = false
-                                    },
-                                    label = { Text(palette.name, style = MaterialTheme.typography.labelSmall) }
+                SettingsGroup(title = "Appearance") {
+                    Column(modifier = Modifier.padding(Space.lg)) {
+                        Text("Theme", style = MaterialTheme.typography.titleSmall, color = TextPrimary)
+                        Spacer(Modifier.height(Space.md))
+                        Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+                            Themes.forEach { palette ->
+                                ThemeChip(
+                                    label = palette.label,
+                                    selected = settings.uiTheme == palette.id,
+                                    onClick = { viewModel.updateSettings { it.copy(uiTheme = palette.id) } }
                                 )
                             }
                         }
                     }
-                    Spacer(Modifier.height(10.dp))
-                    Text("Font size: ${settings.terminalFontSize.toInt()} sp", style = MaterialTheme.typography.bodyMedium)
-                    Slider(
-                        value = settings.terminalFontSize,
-                        onValueChange = { value -> viewModel.updateSettings { it.copy(terminalFontSize = value) } },
-                        valueRange = 9f..22f,
-                        steps = 12
+                    RowDivider()
+                    Column(modifier = Modifier.padding(Space.lg)) {
+                        SliderRow(
+                            label = "App font size",
+                            value = "${(settings.fontScale * 100).toInt()}%",
+                            hint = "Scales text across the whole app."
+                        )
+                        Slider(
+                            value = settings.fontScale,
+                            onValueChange = { value -> viewModel.updateSettings { it.copy(fontScale = value) } },
+                            valueRange = 0.8f..1.35f,
+                            steps = 10,
+                            colors = sliderColors()
+                        )
+                        Spacer(Modifier.height(Space.sm))
+                        SliderRow(
+                            label = "Interface zoom",
+                            value = "${(settings.uiScale * 100).toInt()}%",
+                            hint = "Scales spacing and controls, not just text."
+                        )
+                        Slider(
+                            value = settings.uiScale,
+                            onValueChange = { value -> viewModel.updateSettings { it.copy(uiScale = value) } },
+                            valueRange = 0.85f..1.2f,
+                            steps = 6,
+                            colors = sliderColors()
+                        )
+                    }
+                }
+            }
+
+            item {
+                SettingsGroup(title = "Terminal") {
+                    GroupRow(
+                        title = "Palette",
+                        subtitle = TerminalPalettes.byId(settings.terminalTheme).name,
+                        icon = Icons.Default.Palette,
+                        tint = Accent,
+                        onClick = { showThemeMenu = !showThemeMenu },
+                        trailing = {
+                            Text(
+                                if (showThemeMenu) "Hide" else "Change",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = Accent
+                            )
+                        }
                     )
+                    if (showThemeMenu) {
+                        Row(
+                            modifier = Modifier.padding(start = Space.lg, end = Space.lg, bottom = Space.md),
+                            horizontalArrangement = Arrangement.spacedBy(Space.sm)
+                        ) {
+                            TerminalPalettes.all.forEach { palette ->
+                                ThemeChip(
+                                    label = palette.name,
+                                    selected = settings.terminalTheme == palette.id,
+                                    onClick = {
+                                        viewModel.updateSettings { it.copy(terminalTheme = palette.id) }
+                                        showThemeMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    RowDivider()
+                    Column(modifier = Modifier.padding(Space.lg)) {
+                        SliderRow(
+                            label = "Font size",
+                            value = "${settings.terminalFontSize.toInt()} sp",
+                            hint = null
+                        )
+                        Slider(
+                            value = settings.terminalFontSize,
+                            onValueChange = { value -> viewModel.updateSettings { it.copy(terminalFontSize = value) } },
+                            valueRange = 9f..22f,
+                            steps = 12,
+                            colors = sliderColors()
+                        )
+                    }
+                    RowDivider()
                     SettingSwitch(
                         title = "Keep screen on",
                         subtitle = "While the terminal is open",
@@ -409,32 +413,37 @@ fun SettingsScreen(
                     )
                 }
             }
+
             item {
-                SectionCard(title = "Chat") {
+                SettingsGroup(title = "Chat") {
                     SettingSwitch(
                         title = "Show reasoning",
-                        subtitle = "Render model reasoning blocks (collapsed by default)",
+                        subtitle = "Render model reasoning blocks, collapsed by default",
                         checked = settings.showReasoning,
                         onChecked = { value -> viewModel.updateSettings { it.copy(showReasoning = value) } }
                     )
+                    RowDivider()
                     SettingSwitch(
                         title = "Compact tool cards",
                         subtitle = "Collapse thinking and tool calls into one activity line",
                         checked = settings.compactToolCards,
                         onChecked = { value -> viewModel.updateSettings { it.copy(compactToolCards = value) } }
                     )
+                    RowDivider()
                     SettingSwitch(
                         title = "Response notifications",
                         subtitle = "Notify when an agent finishes, asks a question or needs permission",
                         checked = settings.notifyResponses,
                         onChecked = { value -> viewModel.updateSettings { it.copy(notifyResponses = value) } }
                     )
+                    RowDivider()
                     SettingSwitch(
                         title = "Show hidden files",
                         subtitle = "Dotfiles in the SFTP browser",
                         checked = settings.showHiddenFiles,
                         onChecked = { value -> viewModel.updateSettings { it.copy(showHiddenFiles = value) } }
                     )
+                    RowDivider()
                     SettingSwitch(
                         title = "File grid view",
                         subtitle = "Adaptive two-column SFTP layout",
@@ -443,83 +452,96 @@ fun SettingsScreen(
                     )
                 }
             }
+
             item {
-                SectionCard(title = "Diagnostics") {
-                    Text(
-                        "Redacted app, SSH, tunnel, SSE and queue events. Stored in a small rotating on-device log; secrets are removed before writing.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        TextButton(onClick = {
-                            diagnosticsText = Diagnostics.snapshot()
-                            showDiagnostics = !showDiagnostics
-                        }) {
-                            Text(if (showDiagnostics) "Hide log" else "Show log")
-                        }
-                        TextButton(onClick = {
-                            val text = Diagnostics.exportText()
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("PVPS diagnostics", text))
-                            diagnosticsNotice = "Copied ${text.length} characters"
-                        }) {
-                            Text("Copy")
-                        }
-                        TextButton(onClick = {
-                            val text = Diagnostics.exportText()
-                            val send = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(Intent.EXTRA_SUBJECT, "PVPS diagnostics")
-                                putExtra(Intent.EXTRA_TEXT, text)
-                            }
-                            context.startActivity(Intent.createChooser(send, "Export diagnostics"))
-                        }) {
-                            Text("Export")
-                        }
-                        TextButton(onClick = { showClearDiagnostics = true }) {
-                            Text("Clear", color = Danger)
-                        }
-                    }
-                    diagnosticsNotice?.let {
-                        Text(it, style = MaterialTheme.typography.labelSmall, color = Success)
-                    }
-                    if (showDiagnostics) {
-                        Spacer(Modifier.height(6.dp))
-                        MonospaceBox(diagnosticsText.takeLast(30_000))
+                SettingsGroup(title = "Diagnostics") {
+                    Column(modifier = Modifier.padding(Space.lg)) {
                         Text(
-                            "${diagnosticsText.lines().size} lines",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TextFaint,
-                            modifier = Modifier.padding(top = 4.dp)
+                            "Redacted app, SSH, tunnel, SSE and queue events. Stored in a small rotating on-device log; secrets are removed before writing.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                        Spacer(Modifier.height(Space.md))
+                        Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+                            TinyAction(if (showDiagnostics) "Hide log" else "Show log") {
+                                diagnosticsText = Diagnostics.snapshot()
+                                showDiagnostics = !showDiagnostics
+                            }
+                            TinyAction("Copy") {
+                                val text = Diagnostics.exportText()
+                                val clipboard =
+                                    context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("PVPS diagnostics", text))
+                                diagnosticsNotice = "Copied ${text.length} characters"
+                            }
+                            TinyAction("Export") {
+                                val text = Diagnostics.exportText()
+                                val send = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, "PVPS diagnostics")
+                                    putExtra(Intent.EXTRA_TEXT, text)
+                                }
+                                context.startActivity(Intent.createChooser(send, "Export diagnostics"))
+                            }
+                            TinyAction("Clear") { showClearDiagnostics = true }
+                        }
+                        diagnosticsNotice?.let {
+                            Spacer(Modifier.height(Space.sm))
+                            Text(it, style = MaterialTheme.typography.labelSmall, color = Success)
+                        }
+                        if (showDiagnostics) {
+                            Spacer(Modifier.height(Space.md))
+                            MonospaceBox(diagnosticsText.takeLast(30_000))
+                            Text(
+                                "${diagnosticsText.lines().size} lines",
+                                style = PvpsType.monoBody,
+                                color = TextFaint,
+                                modifier = Modifier.padding(top = Space.sm)
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                SettingsGroup(title = "Data") {
+                    Column(modifier = Modifier.padding(Space.lg)) {
+                        Text(
+                            "The vault (hosts, keys and OpenCode passwords) is encrypted with an Android Keystore AES-GCM key and excluded from backups.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                        Spacer(Modifier.height(Space.md))
+                        Text(
+                            "Clear audit log",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Danger,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(Radius.sm))
+                                .pressable { showClearAudit = true }
+                                .padding(vertical = Space.sm)
                         )
                     }
                 }
             }
+
             item {
-                SectionCard(title = "Data") {
+                Column(modifier = Modifier.padding(horizontal = Space.xs)) {
                     Text(
-                        "The vault (hosts, keys and OpenCode passwords) is encrypted with an Android Keystore AES-GCM key. It is excluded from backups.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary
+                        "PVPS ${BuildConfig.VERSION_NAME}",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = TextPrimary,
+                        fontFamily = DisplayFont
                     )
-                    Spacer(Modifier.height(8.dp))
-                    TextButton(onClick = { showClearAudit = true }) {
-                        Text("Clear audit log", color = Danger)
-                    }
-                }
-            }
-            item {
-                SectionCard(title = "About") {
-                    Text("PVPS ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyLarge)
+                    Spacer(Modifier.height(Space.xs))
                     Text(
-                        "Native Android control plane for SSH hosts, OpenCode v2 and Termux terminal. OpenCode must be v2.x; the server is never exposed publicly.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary
+                        "Native Android control plane for SSH hosts, OpenCode v2 and a Termux terminal. OpenCode must be v2.x; the server is never exposed publicly.",
+                        style = PvpsType.monoBody,
+                        color = TextFaint
                     )
                 }
             }
-            item { Spacer(Modifier.height(80.dp)) }
+            item { Spacer(Modifier.height(Space.dockClearance)) }
         }
     }
 
@@ -551,6 +573,36 @@ fun SettingsScreen(
     }
 }
 
+/* ------------------------------------------------------------------------- */
+/* Rows                                                                      */
+/* ------------------------------------------------------------------------- */
+
+@Composable
+private fun RowDivider() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = Space.lg)
+            .height(1.dp)
+            .background(Color.White.copy(alpha = 0.05f))
+    )
+}
+
+@Composable
+private fun SettingsGroup(title: String, content: @Composable () -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            title.uppercase(),
+            style = PvpsType.eyebrow,
+            color = TextFaint,
+            modifier = Modifier.padding(start = Space.xs, bottom = Space.sm)
+        )
+        PvpsCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(Radius.lg)) {
+            Column { content() }
+        }
+    }
+}
+
 @Composable
 private fun SettingSwitch(
     title: String,
@@ -561,16 +613,113 @@ private fun SettingSwitch(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
+            .pressable { onChecked(!checked) }
+            .padding(horizontal = Space.lg, vertical = Space.md),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+            Text(title, style = MaterialTheme.typography.bodyLarge, color = TextPrimary)
+            Spacer(Modifier.height(Space.xxs))
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary
+            )
         }
-        dev.pvps.ui.components.PvpsSwitch(checked = checked, onCheckedChange = onChecked)
+        Spacer(Modifier.width(Space.md))
+        PvpsSwitch(checked = checked, onCheckedChange = onChecked)
     }
 }
+
+@Composable
+private fun GroupRow(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    tint: Color,
+    onClick: () -> Unit,
+    trailing: (@Composable () -> Unit)? = null
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .pressable(onClick = onClick)
+            .padding(horizontal = Space.lg, vertical = Space.md),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(Radius.xs))
+                .background(tint.copy(alpha = 0.11f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(17.dp))
+        }
+        Spacer(Modifier.width(Space.md))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, color = TextPrimary, maxLines = 1)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        if (trailing != null) {
+            trailing()
+        } else {
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = TextFaint,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ThemeChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelLarge,
+        color = if (selected) Accent else TextSecondary,
+        maxLines = 1,
+        modifier = Modifier
+            .clip(RoundedCornerShape(Radius.pill))
+            .background(if (selected) Accent.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.04f))
+            .pressable(onClick = onClick)
+            .padding(horizontal = Space.md, vertical = Space.sm)
+    )
+}
+
+@Composable
+private fun SliderRow(label: String, value: String, hint: String?) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.titleSmall, color = TextPrimary)
+            if (hint != null) {
+                Text(hint, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+            }
+        }
+        Text(value, style = PvpsType.monoStrong, color = Accent)
+    }
+}
+
+@Composable
+private fun sliderColors() = SliderDefaults.colors(
+    thumbColor = Accent,
+    activeTrackColor = Accent,
+    inactiveTrackColor = Color.White.copy(alpha = 0.10f),
+    activeTickColor = Color.Transparent,
+    inactiveTickColor = Color.Transparent
+)
+
+/* ------------------------------------------------------------------------- */
+/* Audit                                                                      */
+/* ------------------------------------------------------------------------- */
 
 @Composable
 fun AuditScreen(viewModel: AppViewModel, onBack: () -> Unit) {
@@ -585,8 +734,8 @@ fun AuditScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                 subtitle = "${entries.size} entries",
                 onBack = onBack,
                 actions = {
-                    TextButton(onClick = { showClear = true }, enabled = entries.isNotEmpty()) {
-                        Text("Clear", color = Danger)
+                    if (entries.isNotEmpty()) {
+                        TinyAction("Clear") { showClear = true }
                     }
                 }
             )
@@ -596,27 +745,40 @@ fun AuditScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+                .padding(horizontal = Space.gutter),
+            verticalArrangement = Arrangement.spacedBy(Space.sm)
         ) {
-            item { Spacer(Modifier.height(4.dp)) }
+            item { Spacer(Modifier.height(Space.xs)) }
             items(entries.asReversed(), key = { "${it.timestamp}-${it.action}-${it.detail}" }) { entry ->
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                    Column(modifier = Modifier.padding(10.dp)) {
+                PvpsCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(Radius.md)) {
+                    Column(modifier = Modifier.padding(Space.lg)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                if (entry.success) "OK" else "FAIL",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (entry.success) Success else Danger
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(if (entry.success) Success else Danger)
                             )
-                            Spacer(Modifier.width(8.dp))
-                            Text(entry.action, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                            Text(formatDate(entry.timestamp), style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                            Spacer(Modifier.width(Space.sm))
+                            Text(
+                                entry.action,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = TextPrimary,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(Modifier.width(Space.sm))
+                            Text(
+                                formatDate(entry.timestamp),
+                                style = PvpsType.monoBody,
+                                color = TextFaint
+                            )
                         }
+                        Spacer(Modifier.height(Space.xs))
                         Text(
                             "${entry.hostName} · ${entry.detail}",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontFamily = FontFamily.Monospace,
+                            style = PvpsType.monoBody,
                             color = TextSecondary,
                             maxLines = 3,
                             overflow = TextOverflow.Ellipsis
@@ -624,7 +786,7 @@ fun AuditScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                     }
                 }
             }
-            item { Spacer(Modifier.height(80.dp)) }
+            item { Spacer(Modifier.height(Space.dockClearance)) }
         }
     }
     if (showClear) {
@@ -638,6 +800,10 @@ fun AuditScreen(viewModel: AppViewModel, onBack: () -> Unit) {
         )
     }
 }
+
+/* ------------------------------------------------------------------------- */
+/* Battery                                                                    */
+/* ------------------------------------------------------------------------- */
 
 @Composable
 private fun BatteryOptimizationRow() {
@@ -654,23 +820,27 @@ private fun BatteryOptimizationRow() {
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Space.lg, vertical = Space.md),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text("Battery optimization", style = MaterialTheme.typography.bodyLarge)
+            Text("Battery optimization", style = MaterialTheme.typography.bodyLarge, color = TextPrimary)
+            Spacer(Modifier.height(Space.xxs))
             Text(
                 if (ignoring) {
-                    "Unrestricted: keepalives keep running in the background"
+                    "Unrestricted · keepalives keep running in the background"
                 } else {
-                    "Optimized: Android may freeze the tunnel while the screen is off"
+                    "Optimized · Android may freeze the tunnel while the screen is off"
                 },
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.bodySmall,
                 color = if (ignoring) Success else TextSecondary
             )
         }
         if (!ignoring) {
-            TextButton(onClick = { requestIgnoreBatteryOptimizations(context) }) {
-                Text("Allow")
-            }
+            TinyAction("Allow") { requestIgnoreBatteryOptimizations(context) }
         }
     }
 }

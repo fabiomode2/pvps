@@ -1,19 +1,11 @@
 package dev.pvps.ui.components
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
@@ -38,13 +31,11 @@ import androidx.compose.material.icons.filled.Power
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -57,7 +48,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -79,12 +69,16 @@ import dev.pvps.data.model.ConnectionState
 import dev.pvps.data.model.Host
 import dev.pvps.ui.theme.Accent
 import dev.pvps.ui.theme.AccentDim
+import dev.pvps.ui.theme.CardRadius
+import dev.pvps.ui.theme.DisplayFont
 import dev.pvps.ui.theme.Danger
 import dev.pvps.ui.theme.DeepBackground
-import dev.pvps.ui.theme.DisplayFont
 import dev.pvps.ui.theme.MonoFont
 import dev.pvps.ui.theme.OutlineDark
 import dev.pvps.ui.theme.OutlineSoft
+import dev.pvps.ui.theme.PvpsType
+import dev.pvps.ui.theme.Radius
+import dev.pvps.ui.theme.Space
 import dev.pvps.ui.theme.Success
 import dev.pvps.ui.theme.SurfaceDark
 import dev.pvps.ui.theme.SurfaceHigh
@@ -94,40 +88,46 @@ import dev.pvps.ui.theme.TextPrimary
 import dev.pvps.ui.theme.TextSecondary
 import dev.pvps.ui.theme.Violet
 import dev.pvps.ui.theme.Warning
+import dev.pvps.ui.theme.cardFill
+import dev.pvps.ui.theme.pressable
+import dev.pvps.ui.theme.topEdgeLight
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
+/* ------------------------------------------------------------------------- */
+/* Canvas                                                                     */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Ambient backdrop: two very soft light sources under a dark wash. Static on
+ * purpose — a static gradient costs nothing per frame, and the life in the UI
+ * comes from the elements themselves.
+ */
 @Composable
 fun PvpsBackdrop(modifier: Modifier = Modifier) {
     Canvas(modifier = modifier.fillMaxSize()) {
         drawRect(color = DeepBackground)
-        // Soft signal glow instead of a hard engineering grid: the backdrop
-        // should recede and let content carry the hierarchy.
-        // One quiet light source. No dot grid: the old texture made every screen
-        // feel like a dashboard and competed with the type.
         drawRect(
             brush = Brush.verticalGradient(
-                colors = listOf(
-                    Color.White.copy(alpha = 0.018f),
-                    Color.Transparent,
-                    Color.Black.copy(alpha = 0.12f)
-                )
+                0f to Color.White.copy(alpha = 0.022f),
+                0.45f to Color.Transparent,
+                1f to Color.Black.copy(alpha = 0.28f)
             )
         )
         drawRect(
             brush = Brush.radialGradient(
-                colors = listOf(Accent.copy(alpha = 0.055f), Color.Transparent),
-                center = Offset(size.width * 0.9f, -size.height * 0.05f),
-                radius = size.width * 0.85f
+                colors = listOf(Accent.copy(alpha = 0.075f), Color.Transparent),
+                center = Offset(size.width * 0.86f, -size.height * 0.02f),
+                radius = size.width * 0.95f
             )
         )
         drawRect(
             brush = Brush.radialGradient(
-                colors = listOf(Violet.copy(alpha = 0.035f), Color.Transparent),
-                center = Offset(size.width * 0.05f, size.height * 0.95f),
-                radius = size.width * 0.9f
+                colors = listOf(Violet.copy(alpha = 0.05f), Color.Transparent),
+                center = Offset(size.width * 0.08f, size.height * 1.02f),
+                radius = size.width * 1.05f
             )
         )
     }
@@ -138,20 +138,49 @@ fun PvpsMark(size: Dp = 36.dp) {
     Box(
         modifier = Modifier
             .size(size)
-            .shadow(10.dp, RoundedCornerShape(size * 0.3f), ambientColor = Accent.copy(alpha = 0.18f))
-            .clip(RoundedCornerShape(size * 0.3f))
-            .background(Brush.linearGradient(listOf(SurfaceHigh, SurfaceDark)))
-            .border(BorderStroke(1.dp, Accent.copy(alpha = 0.28f)), RoundedCornerShape(size * 0.3f)),
+            .shadow(12.dp, RoundedCornerShape(size * 0.32f), ambientColor = Accent.copy(alpha = 0.22f))
+            .clip(RoundedCornerShape(size * 0.32f))
+            .background(cardFill(SurfaceHigh, SurfaceDark))
+            .border(1.dp, topEdgeLight(0.14f), RoundedCornerShape(size * 0.32f)),
         contentAlignment = Alignment.Center
     ) {
         Icon(
             painter = painterResource(R.drawable.ic_pvps_mark),
             contentDescription = null,
             tint = Color.Unspecified,
-            modifier = Modifier.size(size * 0.84f)
+            modifier = Modifier.size(size * 0.82f)
         )
     }
 }
+
+/* ------------------------------------------------------------------------- */
+/* Surfaces                                                                   */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * The one raised surface used across the app: soft vertical wash, hairline that
+ * catches the light on the top edge, and no heavy outline.
+ */
+@Composable
+fun PvpsCard(
+    modifier: Modifier = Modifier,
+    shape: RoundedCornerShape = RoundedCornerShape(CardRadius),
+    fill: Brush = cardFill(SurfaceRaised.copy(alpha = 0.86f), SurfaceDark.copy(alpha = 0.92f)),
+    content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit
+) {
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(fill, shape)
+            .border(1.dp, topEdgeLight(0.075f), shape)
+    ) {
+        content()
+    }
+}
+
+/* ------------------------------------------------------------------------- */
+/* Headers                                                                    */
+/* ------------------------------------------------------------------------- */
 
 @Composable
 fun ScreenHeader(
@@ -160,53 +189,50 @@ fun ScreenHeader(
     onBack: (() -> Unit)? = null,
     actions: @Composable () -> Unit = {}
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = Color.Transparent
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = if (onBack != null) Space.md else Space.gutter, end = Space.sm, top = Space.sm, bottom = Space.md),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (onBack != null) {
-                GlassIconButton(onClick = onBack, size = 40.dp) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = TextPrimary,
-                        modifier = Modifier.size(19.dp)
-                    )
-                }
-            } else {
-                PvpsMark(36.dp)
+        if (onBack != null) {
+            GlassIconButton(onClick = onBack, size = 40.dp) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = TextPrimary,
+                    modifier = Modifier.size(19.dp)
+                )
             }
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
+            Spacer(Modifier.width(Space.md))
+        } else {
+            PvpsMark(36.dp)
+            Spacer(Modifier.width(Space.md))
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineMedium,
+                color = TextPrimary,
+                fontFamily = DisplayFont,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (subtitle != null) {
+                Spacer(Modifier.height(1.dp))
                 Text(
-                    text = title,
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = TextPrimary,
-                    fontFamily = DisplayFont,
+                    text = subtitle.uppercase(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextFaint,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                if (subtitle != null) {
-                    Text(
-                        text = subtitle.uppercase(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextFaint,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
             }
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) { actions() }
         }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(Space.xs),
+            verticalAlignment = Alignment.CenterVertically
+        ) { actions() }
     }
 }
 
@@ -217,18 +243,56 @@ fun GlassIconButton(
     size: Dp = 40.dp,
     content: @Composable () -> Unit
 ) {
-    Surface(
+    Box(
         modifier = modifier
             .size(size)
             .clip(CircleShape)
-            .clickable(onClick = onClick),
-        color = SurfaceRaised.copy(alpha = 0.72f),
-        shape = CircleShape,
-        border = BorderStroke(1.dp, OutlineDark)
+            .background(SurfaceRaised.copy(alpha = 0.78f))
+            .border(1.dp, hairlineTint(0.09f), CircleShape)
+            .pressable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) { content() }
+}
+
+private fun hairlineTint(strength: Float): Color = Color.White.copy(alpha = strength)
+
+/* ------------------------------------------------------------------------- */
+/* Status                                                                     */
+/* ------------------------------------------------------------------------- */
+
+@Composable
+fun StatusDot(color: Color, size: Int = 9) {
+    Box(
+        modifier = Modifier
+            .size(size.dp)
+            .clip(CircleShape)
+            .background(color)
+    )
+}
+
+@Composable
+fun StatusPill(text: String, color: Color) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(Radius.pill))
+            .background(color.copy(alpha = 0.10f))
+            .border(1.dp, color.copy(alpha = 0.22f), RoundedCornerShape(Radius.pill))
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(contentAlignment = Alignment.Center) { content() }
+        StatusDot(color, 5)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = text.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            color = color
+        )
     }
 }
+
+/* ------------------------------------------------------------------------- */
+/* Host switcher                                                              */
+/* ------------------------------------------------------------------------- */
 
 @Composable
 fun HostSwitcher(
@@ -249,33 +313,28 @@ fun HostSwitcher(
         ConnectionState.Status.ERROR -> Danger
         else -> TextFaint
     }
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = SurfaceRaised.copy(alpha = 0.66f),
-        shape = RoundedCornerShape(22.dp),
-        border = BorderStroke(1.dp, OutlineDark)
-    ) {
+    PvpsCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(Radius.lg)) {
         Row(
-            modifier = Modifier.padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            modifier = Modifier.padding(start = Space.md, end = Space.sm, top = Space.md, bottom = Space.md),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(38.dp)
+                    .size(40.dp)
                     .clip(CircleShape)
                     .background(statusColor.copy(alpha = 0.10f))
-                    .border(1.dp, statusColor.copy(alpha = 0.32f), CircleShape),
+                    .border(1.dp, statusColor.copy(alpha = 0.26f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                StatusDot(statusColor, 8)
+                StatusDot(statusColor, 7)
             }
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(Space.md))
             Box(modifier = Modifier.weight(1f)) {
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { expanded = true }
-                        .padding(vertical = 4.dp, horizontal = 2.dp),
+                        .clip(RoundedCornerShape(Radius.sm))
+                        .pressable { expanded = true }
+                        .padding(vertical = Space.xs, horizontal = Space.xxs),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
@@ -288,13 +347,18 @@ fun HostSwitcher(
                         )
                         Text(
                             text = selected?.let { "${it.sshUser}@${it.sshHost}" } ?: "Add a host to begin",
-                            style = MaterialTheme.typography.labelSmall,
+                            style = PvpsType.monoBody,
                             color = TextSecondary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Icon(Icons.Default.ExpandMore, contentDescription = "Switch host", tint = TextSecondary)
+                    Icon(
+                        Icons.Default.ExpandMore,
+                        contentDescription = "Switch host",
+                        tint = TextFaint,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                     hosts.forEach { host ->
@@ -304,7 +368,7 @@ fun HostSwitcher(
                                     Text(host.name, style = MaterialTheme.typography.titleMedium)
                                     Text(
                                         "${host.sshUser}@${host.sshHost}",
-                                        style = MaterialTheme.typography.labelSmall,
+                                        style = PvpsType.monoBody,
                                         color = TextSecondary
                                     )
                                 }
@@ -317,24 +381,26 @@ fun HostSwitcher(
                     }
                 }
             }
-            Spacer(Modifier.width(8.dp))
-            Surface(
+            Spacer(Modifier.width(Space.sm))
+            Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(14.dp))
-                    .clickable { if (connected) onDisconnect() else onConnect() },
-                color = if (connected) Success.copy(alpha = 0.10f) else Accent.copy(alpha = 0.10f),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, if (connected) Success.copy(alpha = 0.28f) else Accent.copy(alpha = 0.30f))
+                    .clip(RoundedCornerShape(Radius.pill))
+                    .background(if (connected) Success.copy(alpha = 0.10f) else Accent.copy(alpha = 0.12f))
+                    .border(
+                        1.dp,
+                        if (connected) Success.copy(alpha = 0.26f) else Accent.copy(alpha = 0.30f),
+                        RoundedCornerShape(Radius.pill)
+                    )
+                    .pressable { if (connected) onDisconnect() else onConnect() }
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                contentAlignment = Alignment.Center
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         imageVector = if (connected) Icons.Default.LinkOff else Icons.Default.Power,
                         contentDescription = if (connected) "Disconnect" else "Connect",
                         tint = if (connected) Success else Accent,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(15.dp)
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
@@ -348,37 +414,70 @@ fun HostSwitcher(
     }
 }
 
+/* ------------------------------------------------------------------------- */
+/* Section rhythm                                                             */
+/* ------------------------------------------------------------------------- */
+
 @Composable
-fun StatusDot(color: Color, size: Int = 9) {
-    Box(
-        modifier = Modifier
-            .size(size.dp)
-            .clip(CircleShape)
-            .background(color)
+fun SectionLabel(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text.uppercase(),
+        style = PvpsType.eyebrow,
+        color = TextFaint,
+        modifier = modifier.fillMaxWidth()
     )
 }
 
+/** Eyebrow plus an optional trailing slot, with consistent block spacing. */
 @Composable
-fun StatusPill(text: String, color: Color) {
-    Surface(
-        color = color.copy(alpha = 0.09f),
-        shape = RoundedCornerShape(50),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.28f))
+fun SectionHead(
+    title: String,
+    modifier: Modifier = Modifier,
+    trailing: @Composable () -> Unit = {}
+) {
+    Row(
+        modifier = modifier.fillMaxWidth().padding(top = Space.section, bottom = Space.md),
+        verticalAlignment = Alignment.CenterVertically
     ) {
+        Text(
+            text = title.uppercase(),
+            style = PvpsType.eyebrow,
+            color = TextFaint,
+            modifier = Modifier.weight(1f)
+        )
+        trailing()
+    }
+}
+
+@Composable
+fun SectionCard(
+    title: String,
+    modifier: Modifier = Modifier,
+    actions: @Composable () -> Unit = {},
+    content: @Composable () -> Unit
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(bottom = Space.sm),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            StatusDot(color, 6)
-            Spacer(Modifier.width(5.dp))
             Text(
-                text = text.uppercase(),
-                style = MaterialTheme.typography.labelSmall,
-                color = color
+                title.uppercase(),
+                style = PvpsType.eyebrow,
+                color = TextFaint,
+                modifier = Modifier.weight(1f)
             )
+            actions()
+        }
+        PvpsCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(Radius.lg)) {
+            Column(modifier = Modifier.padding(Space.lg)) { content() }
         }
     }
 }
+
+/* ------------------------------------------------------------------------- */
+/* Metrics                                                                    */
+/* ------------------------------------------------------------------------- */
 
 @Composable
 fun StatCard(
@@ -389,58 +488,67 @@ fun StatCard(
     modifier: Modifier = Modifier,
     progress: Float? = null
 ) {
-    Surface(
-        modifier = modifier,
-        color = SurfaceRaised.copy(alpha = 0.48f),
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.72f))
-    ) {
-        Column(modifier = Modifier.padding(15.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(5.dp)
-                        .clip(CircleShape)
-                        .background(accent)
-                )
-                Spacer(Modifier.width(7.dp))
-                Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-            }
-            Spacer(Modifier.height(9.dp))
+    PvpsCard(modifier = modifier, shape = RoundedCornerShape(Radius.lg)) {
+        Column(modifier = Modifier.padding(Space.lg)) {
+            Text(
+                label.uppercase(),
+                style = PvpsType.eyebrow,
+                color = TextFaint,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(Space.sm))
             Text(
                 value,
-                style = MaterialTheme.typography.displaySmall,
+                style = PvpsType.numericHero,
                 color = accent,
                 maxLines = 1
             )
             if (detail != null) {
+                Spacer(Modifier.height(Space.xs))
                 Text(
                     detail,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = PvpsType.monoBody,
                     color = TextSecondary,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
             }
             if (progress != null) {
-                Spacer(Modifier.height(10.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(OutlineSoft)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(progress.coerceIn(0f, 1f))
-                            .height(3.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(Brush.horizontalGradient(listOf(accent.copy(alpha = 0.45f), accent)))
-                    )
-                }
+                Spacer(Modifier.height(Space.md))
+                MeterBar(progress = progress, accent = accent)
             }
         }
+    }
+}
+
+/** Thin progress line with a soft head; used under telemetry values. */
+@Composable
+fun MeterBar(
+    progress: Float,
+    accent: Color = Accent,
+    modifier: Modifier = Modifier,
+    height: Dp = 3.dp
+) {
+    val animated by animateFloatAsState(
+        targetValue = progress.coerceIn(0f, 1f),
+        animationSpec = tween(520),
+        label = "meter"
+    )
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(RoundedCornerShape(Radius.pill))
+            .background(Color.White.copy(alpha = 0.07f))
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(animated)
+                .height(height)
+                .clip(RoundedCornerShape(Radius.pill))
+                .background(Brush.horizontalGradient(listOf(accent.copy(alpha = 0.42f), accent)))
+        )
     }
 }
 
@@ -458,21 +566,16 @@ fun MetricRing(
         animationSpec = tween(700),
         label = "ring"
     )
-    Surface(
-        modifier = modifier,
-        color = SurfaceRaised.copy(alpha = 0.62f),
-        shape = RoundedCornerShape(22.dp),
-        border = BorderStroke(1.dp, OutlineDark)
-    ) {
+    PvpsCard(modifier = modifier, shape = RoundedCornerShape(Radius.lg)) {
         Row(
-            modifier = Modifier.padding(14.dp),
+            modifier = Modifier.padding(Space.lg),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(modifier = Modifier.size(66.dp), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.size(68.dp), contentAlignment = Alignment.Center) {
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val stroke = 5.dp.toPx()
                     drawArc(
-                        color = OutlineSoft,
+                        color = Color.White.copy(alpha = 0.08f),
                         startAngle = -90f,
                         sweepAngle = 360f,
                         useCenter = false,
@@ -488,81 +591,25 @@ fun MetricRing(
                 }
                 Text(
                     value,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = TextPrimary,
-                    fontFamily = MonoFont
+                    style = PvpsType.numeric,
+                    color = TextPrimary
                 )
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(Space.lg))
             Column {
-                Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                Text(label.uppercase(), style = PvpsType.eyebrow, color = TextFaint)
                 if (detail != null) {
-                    Text(detail, style = MaterialTheme.typography.bodySmall, color = TextSecondary, maxLines = 2)
+                    Spacer(Modifier.height(Space.xxs))
+                    Text(detail, style = PvpsType.monoBody, color = TextSecondary, maxLines = 2)
                 }
             }
         }
     }
 }
 
-@Composable
-fun SectionLabel(text: String, modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .width(14.dp)
-                .height(1.dp)
-                .background(Accent.copy(alpha = 0.55f))
-        )
-        Spacer(Modifier.width(7.dp))
-        Text(
-            text.uppercase(),
-            style = MaterialTheme.typography.labelMedium,
-            color = TextSecondary,
-            letterSpacing = 1.2.sp
-        )
-    }
-}
-
-@Composable
-fun SectionCard(
-    title: String,
-    modifier: Modifier = Modifier,
-    actions: @Composable () -> Unit = {},
-    content: @Composable () -> Unit
-) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = SurfaceRaised.copy(alpha = 0.44f),
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.72f))
-    ) {
-        Column(modifier = Modifier.padding(15.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .width(2.dp)
-                        .height(13.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(Accent)
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    title.uppercase(),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = TextSecondary,
-                    letterSpacing = 1.1.sp,
-                    modifier = Modifier.weight(1f)
-                )
-                actions()
-            }
-            Spacer(Modifier.height(11.dp))
-            content()
-        }
-    }
-}
+/* ------------------------------------------------------------------------- */
+/* Actions                                                                    */
+/* ------------------------------------------------------------------------- */
 
 @Composable
 fun SignalButton(
@@ -572,25 +619,22 @@ fun SignalButton(
     enabled: Boolean = true,
     icon: ImageVector? = null
 ) {
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(Radius.pill)
     Box(
         modifier = modifier
             .shadow(
-                14.dp,
+                if (enabled) 18.dp else 0.dp,
                 shape,
-                ambientColor = Accent.copy(alpha = 0.18f),
+                ambientColor = Accent.copy(alpha = 0.22f),
                 spotColor = Accent.copy(alpha = 0.18f)
             )
             .clip(shape)
             .background(
-                if (enabled) {
-                    Brush.linearGradient(listOf(Accent, AccentDim))
-                } else {
-                    Brush.linearGradient(listOf(OutlineDark, OutlineDark))
-                }
+                if (enabled) Brush.linearGradient(listOf(Accent, AccentDim))
+                else Brush.linearGradient(listOf(OutlineDark, OutlineDark))
             )
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 13.dp),
+            .pressable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = Space.xl, vertical = 13.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -598,17 +642,18 @@ fun SignalButton(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = if (enabled) Color(0xFF03100B) else TextFaint,
+                    tint = if (enabled) Color(0xFF10160A) else TextFaint,
                     modifier = Modifier.size(17.dp)
                 )
-                Spacer(Modifier.width(7.dp))
+                Spacer(Modifier.width(Space.sm))
             }
             Text(
                 text = text.uppercase(),
                 style = MaterialTheme.typography.labelLarge,
-                color = if (enabled) Color(0xFF03100B) else TextFaint,
+                color = if (enabled) Color(0xFF10160A) else TextFaint,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 0.4.sp
+                letterSpacing = 0.6.sp,
+                maxLines = 1
             )
         }
     }
@@ -622,26 +667,73 @@ fun GhostButton(
     icon: ImageVector? = null,
     color: Color = TextPrimary
 ) {
-    Surface(
+    Row(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick),
-        color = SurfaceRaised.copy(alpha = 0.5f),
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, OutlineDark)
+            .clip(RoundedCornerShape(Radius.pill))
+            .background(Color.White.copy(alpha = 0.05f))
+            .border(1.dp, Color.White.copy(alpha = 0.09f), RoundedCornerShape(Radius.pill))
+            .pressable(onClick = onClick)
+            .padding(horizontal = Space.lg, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
+        if (icon != null) {
+            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(Space.sm))
+        }
+        Text(text.uppercase(), style = MaterialTheme.typography.labelLarge, color = color, maxLines = 1)
+    }
+}
+
+/** Square-ish icon action used in the quick action grid. */
+@Composable
+fun ActionTile(
+    label: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    meta: String? = null,
+    tint: Color = Accent
+) {
+    PvpsCard(modifier = modifier, shape = RoundedCornerShape(Radius.md)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .pressable(onClick = onClick)
+                .padding(Space.md),
+            verticalArrangement = Arrangement.spacedBy(Space.sm)
         ) {
-            if (icon != null) {
-                Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(7.dp))
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(Radius.xs))
+                    .background(tint.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(17.dp))
             }
-            Text(text.uppercase(), style = MaterialTheme.typography.labelLarge, color = color)
+            Text(
+                label,
+                style = MaterialTheme.typography.titleSmall,
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (meta != null) {
+                Text(
+                    meta,
+                    style = PvpsType.monoBody,
+                    color = TextFaint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }
+
+/* ------------------------------------------------------------------------- */
+/* States                                                                     */
+/* ------------------------------------------------------------------------- */
 
 @Composable
 fun EmptyState(
@@ -653,30 +745,28 @@ fun EmptyState(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 30.dp, vertical = 48.dp),
+            .padding(horizontal = Space.xxl, vertical = Space.huge),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
             modifier = Modifier
-                .size(112.dp)
+                .size(128.dp)
                 .background(
-                    Brush.radialGradient(
-                        listOf(Accent.copy(alpha = 0.16f), Color.Transparent)
-                    ),
+                    Brush.radialGradient(listOf(Accent.copy(alpha = 0.14f), Color.Transparent)),
                     CircleShape
                 ),
             contentAlignment = Alignment.Center
         ) {
-            PvpsMark(58.dp)
+            PvpsMark(62.dp)
         }
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(Space.xl))
         Text(
             title,
-            style = MaterialTheme.typography.headlineSmall,
+            style = MaterialTheme.typography.headlineMedium,
             color = TextPrimary,
             textAlign = TextAlign.Center
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(Space.sm))
         Text(
             message,
             style = MaterialTheme.typography.bodyMedium,
@@ -684,7 +774,7 @@ fun EmptyState(
             textAlign = TextAlign.Center
         )
         if (actionLabel != null && onAction != null) {
-            Spacer(Modifier.height(22.dp))
+            Spacer(Modifier.height(Space.xl))
             SignalButton(actionLabel, onAction)
         }
     }
@@ -692,36 +782,24 @@ fun EmptyState(
 
 @Composable
 fun ErrorBanner(message: String, onDismiss: (() -> Unit)? = null) {
-    Surface(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        color = Danger.copy(alpha = 0.08f),
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, Danger.copy(alpha = 0.24f))
+            .clip(RoundedCornerShape(Radius.md))
+            .background(Danger.copy(alpha = 0.09f))
+            .border(1.dp, Danger.copy(alpha = 0.22f), RoundedCornerShape(Radius.md))
+            .padding(start = Space.md, end = Space.xs, top = Space.xs, bottom = Space.xs),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.padding(start = 0.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .width(3.dp)
-                    .height(34.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(Danger)
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = Danger,
-                modifier = Modifier.weight(1f)
-            )
-            if (onDismiss != null) {
-                IconButton(onClick = onDismiss, modifier = Modifier.size(30.dp)) {
-                    Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = Danger, modifier = Modifier.size(17.dp))
-                }
+        Text(
+            message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Danger,
+            modifier = Modifier.weight(1f).padding(vertical = Space.sm)
+        )
+        if (onDismiss != null) {
+            IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = Danger, modifier = Modifier.size(16.dp))
             }
         }
     }
@@ -739,7 +817,7 @@ fun ConfirmDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = SurfaceHigh,
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(Radius.xl),
         titleContentColor = TextPrimary,
         textContentColor = TextSecondary,
         title = { Text(title, style = MaterialTheme.typography.headlineSmall) },
@@ -749,7 +827,11 @@ fun ConfirmDialog(
                 onDismiss()
                 onConfirm()
             }) {
-                Text(confirmLabel.uppercase(), color = if (destructive) Danger else Accent, style = MaterialTheme.typography.labelLarge)
+                Text(
+                    confirmLabel.uppercase(),
+                    color = if (destructive) Danger else Accent,
+                    style = MaterialTheme.typography.labelLarge
+                )
             }
         },
         dismissButton = {
@@ -760,45 +842,46 @@ fun ConfirmDialog(
     )
 }
 
+/* ------------------------------------------------------------------------- */
+/* Data bits                                                                  */
+/* ------------------------------------------------------------------------- */
+
 @Composable
 fun MonospaceBox(text: String, modifier: Modifier = Modifier) {
     val clipboard = LocalClipboardManager.current
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = DeepBackground.copy(alpha = 0.72f),
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.65f))
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Radius.sm))
+            .background(Color.Black.copy(alpha = 0.28f))
+            .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(Radius.sm))
     ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = Space.md, end = Space.xs, top = Space.xxs, bottom = Space.xxs),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("OUTPUT", style = PvpsType.eyebrow, color = TextFaint)
+            Spacer(Modifier.weight(1f))
+            IconButton(
+                onClick = { clipboard.setText(AnnotatedString(text)) },
+                modifier = Modifier.size(28.dp)
             ) {
-                Text("CODE", style = MaterialTheme.typography.labelSmall, color = TextFaint)
-                Spacer(Modifier.weight(1f))
-                IconButton(
-                    onClick = { clipboard.setText(AnnotatedString(text)) },
-                    modifier = Modifier.size(26.dp)
-                ) {
-                    Icon(
-                        Icons.Default.ContentCopy,
-                        contentDescription = "Copy",
-                        tint = TextFaint,
-                        modifier = Modifier.size(13.dp)
-                    )
-                }
+                Icon(
+                    Icons.Default.ContentCopy,
+                    contentDescription = "Copy",
+                    tint = TextFaint,
+                    modifier = Modifier.size(13.dp)
+                )
             }
-            HorizontalDivider(color = OutlineSoft.copy(alpha = 0.7f))
-            Text(
-                text = text.ifBlank { "(no output)" },
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = MonoFont,
-                color = Color(0xFFC3D1CC)
-            )
         }
+        Text(
+            text = text.ifBlank { "(no output)" },
+            modifier = Modifier.padding(horizontal = Space.md, vertical = Space.sm),
+            style = PvpsType.monoBody,
+            color = Color(0xFFC6D2CB)
+        )
     }
 }
 
@@ -807,20 +890,19 @@ fun InfoRow(label: String, value: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 7.dp),
+            .padding(vertical = Space.sm),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             label.uppercase(),
-            style = MaterialTheme.typography.labelSmall,
+            style = PvpsType.eyebrow,
             color = TextFaint,
             modifier = Modifier.weight(1f)
         )
         Text(
             value,
-            style = MaterialTheme.typography.bodySmall,
+            style = PvpsType.monoStrong,
             color = TextPrimary,
-            fontFamily = MonoFont,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
         )
@@ -829,23 +911,19 @@ fun InfoRow(label: String, value: String) {
 
 @Composable
 fun TinyAction(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Surface(
+    Text(
+        label.uppercase(),
         modifier = modifier
-            .clip(RoundedCornerShape(50))
-            .clickable(onClick = onClick),
-        color = SurfaceRaised.copy(alpha = 0.7f),
-        shape = RoundedCornerShape(50),
-        border = BorderStroke(1.dp, OutlineDark)
-    ) {
-        Text(
-            label.uppercase(),
-            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
-            style = MaterialTheme.typography.labelSmall,
-            color = TextPrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
+            .clip(RoundedCornerShape(Radius.pill))
+            .background(Color.White.copy(alpha = 0.05f))
+            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(Radius.pill))
+            .pressable(onClick = onClick)
+            .padding(horizontal = Space.md, vertical = 7.dp),
+        style = MaterialTheme.typography.labelSmall,
+        color = TextPrimary,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
+    )
 }
 
 @Composable
@@ -854,64 +932,48 @@ fun TerminalWindow(
     lines: List<String>,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = Color(0xFF040705),
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, OutlineDark)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Radius.lg))
+            .background(Color(0xFF040705))
+            .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(Radius.lg))
     ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(SurfaceRaised.copy(alpha = 0.45f))
-                    .padding(horizontal = 13.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                StatusDot(Danger, 7)
-                Spacer(Modifier.width(6.dp))
-                StatusDot(Warning, 7)
-                Spacer(Modifier.width(6.dp))
-                StatusDot(Success, 7)
-                Spacer(Modifier.weight(1f))
-                Text(title.uppercase(), style = MaterialTheme.typography.labelSmall, color = TextFaint)
-            }
-            Column(modifier = Modifier.padding(14.dp)) {
-                lines.forEach { line ->
-                    Text(
-                        text = line,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = MonoFont,
-                        color = when {
-                            line.startsWith("$") -> Accent
-                            line.startsWith("#") -> TextFaint
-                            else -> Color(0xFFB8C9BE)
-                        },
-                        modifier = Modifier.padding(vertical = 2.dp)
-                    )
-                }
-                BlinkingCursor()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color.White.copy(alpha = 0.03f))
+                .padding(horizontal = Space.md, vertical = Space.sm),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            StatusDot(Danger.copy(alpha = 0.8f), 6)
+            Spacer(Modifier.width(6.dp))
+            StatusDot(Warning.copy(alpha = 0.8f), 6)
+            Spacer(Modifier.width(6.dp))
+            StatusDot(Success.copy(alpha = 0.8f), 6)
+            Spacer(Modifier.weight(1f))
+            Text(title.uppercase(), style = PvpsType.eyebrow, color = TextFaint)
+        }
+        Column(modifier = Modifier.padding(Space.lg)) {
+            lines.forEach { line ->
+                Text(
+                    text = line,
+                    style = PvpsType.monoBody,
+                    color = when {
+                        line.startsWith("$") -> Accent
+                        line.startsWith("#") -> TextFaint
+                        else -> Color(0xFFB8C9BE)
+                    },
+                    modifier = Modifier.padding(vertical = 2.dp)
+                )
             }
         }
     }
 }
 
-@Composable
-private fun BlinkingCursor() {
-    val transition = rememberInfiniteTransition(label = "cursor")
-    val alpha by transition.animateFloat(
-        initialValue = 0.15f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(650), RepeatMode.Reverse),
-        label = "cursorAlpha"
-    )
-    Box(
-        modifier = Modifier
-            .padding(top = 2.dp)
-            .size(width = 8.dp, height = 15.dp)
-            .background(Accent.copy(alpha = alpha), RoundedCornerShape(2.dp))
-    )
-}
+/* ------------------------------------------------------------------------- */
+/* Inputs                                                                     */
+/* ------------------------------------------------------------------------- */
 
 @Composable
 fun PvpsSwitch(
@@ -920,26 +982,34 @@ fun PvpsSwitch(
     modifier: Modifier = Modifier
 ) {
     val knobOffset by animateDpAsState(
-        targetValue = if (checked) 21.dp else 3.dp,
-        animationSpec = tween(180),
+        targetValue = if (checked) 22.dp else 3.dp,
+        animationSpec = tween(220),
         label = "switchKnob"
+    )
+    val trackAlpha by animateFloatAsState(
+        targetValue = if (checked) 1f else 0f,
+        animationSpec = tween(220),
+        label = "switchTrack"
     )
     Box(
         modifier = modifier
-            .size(width = 46.dp, height = 26.dp)
-            .clip(RoundedCornerShape(50))
-            .background(if (checked) Accent.copy(alpha = 0.22f) else SurfaceHigh)
+            .size(width = 48.dp, height = 28.dp)
+            .clip(RoundedCornerShape(Radius.pill))
+            .background(
+                if (checked) Accent.copy(alpha = 0.22f)
+                else Color.White.copy(alpha = 0.06f + 0.02f * (1f - trackAlpha))
+            )
             .border(
                 1.dp,
-                if (checked) Accent.copy(alpha = 0.75f) else OutlineDark,
-                RoundedCornerShape(50)
+                if (checked) Accent.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.10f),
+                RoundedCornerShape(Radius.pill)
             )
-            .clickable { onCheckedChange(!checked) }
+            .pressable { onCheckedChange(!checked) }
     ) {
         Box(
             modifier = Modifier
                 .offset(x = knobOffset, y = 3.dp)
-                .size(18.dp)
+                .size(20.dp)
                 .clip(CircleShape)
                 .background(if (checked) Accent else TextSecondary)
         )
@@ -964,29 +1034,33 @@ fun PvpsTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label.uppercase(), style = MaterialTheme.typography.labelSmall) },
-        placeholder = placeholder?.let { { Text(it, color = TextFaint) } },
+        placeholder = placeholder?.let { { Text(it, color = TextFaint, style = MaterialTheme.typography.bodyMedium) } },
         modifier = modifier.fillMaxWidth(),
         singleLine = singleLine,
         minLines = minLines,
         maxLines = maxLines,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(Radius.md),
         textStyle = MaterialTheme.typography.bodyLarge,
         keyboardOptions = keyboardOptions,
         visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
         trailingIcon = trailingIcon,
         colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = Accent.copy(alpha = 0.8f),
-            unfocusedBorderColor = OutlineDark,
+            focusedBorderColor = Accent.copy(alpha = 0.70f),
+            unfocusedBorderColor = Color.White.copy(alpha = 0.10f),
             focusedLabelColor = Accent,
-            unfocusedLabelColor = TextSecondary,
+            unfocusedLabelColor = TextFaint,
             cursorColor = Accent,
-            focusedContainerColor = SurfaceRaised.copy(alpha = 0.45f),
-            unfocusedContainerColor = SurfaceRaised.copy(alpha = 0.25f),
+            focusedContainerColor = SurfaceRaised.copy(alpha = 0.55f),
+            unfocusedContainerColor = Color.White.copy(alpha = 0.035f),
             focusedTextColor = TextPrimary,
             unfocusedTextColor = TextPrimary
         )
     )
 }
+
+/* ------------------------------------------------------------------------- */
+/* Helpers                                                                    */
+/* ------------------------------------------------------------------------- */
 
 fun formatBytes(bytes: Long): String {
     if (bytes <= 0) return "0 B"
@@ -1016,3 +1090,6 @@ fun formatDate(timestamp: Long): String {
     if (timestamp <= 0) return "-"
     return SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(timestamp))
 }
+
+/** OutlineSoft kept for legacy call sites that tint dividers by hand. */
+val Divider: Color get() = OutlineSoft.copy(alpha = 0.9f)

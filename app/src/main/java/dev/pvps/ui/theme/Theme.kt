@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
@@ -19,6 +20,11 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 
+/**
+ * A complete color story for one theme. Besides the Material roles this carries
+ * the few extra neutrals the visual language needs: hairlines, glass fills and
+ * a soft accent wash for "quiet emphasis" surfaces.
+ */
 data class PvpsPalette(
     val id: String,
     val label: String,
@@ -29,9 +35,11 @@ data class PvpsPalette(
     val surfaceHigh: Color,
     val outlineDark: Color,
     val outlineSoft: Color,
+    val hairline: Color,
     val accent: Color,
     val onAccent: Color,
     val accentDim: Color,
+    val accentSoft: Color,
     val signalDeep: Color,
     val violet: Color,
     val irisDeep: Color,
@@ -45,54 +53,62 @@ data class PvpsPalette(
 
 val Graphite = PvpsPalette(
     id = "graphite", label = "Graphite", isLight = false,
-    void = Color(0xFF09090A), surfaceDark = Color(0xFF101011),
-    surfaceRaised = Color(0xFF18181A), surfaceHigh = Color(0xFF212124),
-    outlineDark = Color(0xFF303035), outlineSoft = Color(0xFF1D1D20),
-    accent = Color(0xFFD8F36B), onAccent = Color(0xFF181F06),
-    accentDim = Color(0xFFA6BE4C), signalDeep = Color(0xFF2A3310),
-    violet = Color(0xFFBDB1FF), irisDeep = Color(0xFF26203F),
-    ember = Color(0xFFF5C77E), danger = Color(0xFFFF858F),
-    success = Color(0xFF7FE2B6), textPrimary = Color(0xFFF2EFE8),
-    textSecondary = Color(0xFFAAA69C), textFaint = Color(0xFF747169)
+    void = Color(0xFF08090B), surfaceDark = Color(0xFF0D0F13),
+    surfaceRaised = Color(0xFF14171D), surfaceHigh = Color(0xFF1C2028),
+    outlineDark = Color(0xFF262B35), outlineSoft = Color(0xFF171A20),
+    hairline = Color(0x1AFFFFFF),
+    accent = Color(0xFFD9F76B), onAccent = Color(0xFF111507),
+    accentDim = Color(0xFFAEC64F), accentSoft = Color(0xFF3A4513),
+    signalDeep = Color(0xFF232B12),
+    violet = Color(0xFFB7A6FF), irisDeep = Color(0xFF201B38),
+    ember = Color(0xFFF6C57C), danger = Color(0xFFFF7B8F),
+    success = Color(0xFF62E0A8), textPrimary = Color(0xFFF3F1EA),
+    textSecondary = Color(0xFFA9A79E), textFaint = Color(0xFF8C8A82)
 )
 
 val Midnight = PvpsPalette(
     id = "midnight", label = "Midnight", isLight = false,
-    void = Color(0xFF060A12), surfaceDark = Color(0xFF0B111C),
-    surfaceRaised = Color(0xFF111A29), surfaceHigh = Color(0xFF18243A),
-    outlineDark = Color(0xFF27364F), outlineSoft = Color(0xFF192337),
-    accent = Color(0xFF8FD8FF), onAccent = Color(0xFF03202E),
-    accentDim = Color(0xFF4EA8D8), signalDeep = Color(0xFF0E2C3D),
+    void = Color(0xFF05080F), surfaceDark = Color(0xFF0A101A),
+    surfaceRaised = Color(0xFF101827), surfaceHigh = Color(0xFF172133),
+    outlineDark = Color(0xFF23324A), outlineSoft = Color(0xFF141D2B),
+    hairline = Color(0x1FFFFFFF),
+    accent = Color(0xFF8FD8FF), onAccent = Color(0xFF03151F),
+    accentDim = Color(0xFF54A8CF), accentSoft = Color(0xFF123246),
+    signalDeep = Color(0xFF0E2C3D),
     violet = Color(0xFFC3B5FF), irisDeep = Color(0xFF211C3D),
     ember = Color(0xFFFFCE8A), danger = Color(0xFFFF8D9B),
     success = Color(0xFF84E9C5), textPrimary = Color(0xFFEAF2FF),
-    textSecondary = Color(0xFF9AAAC4), textFaint = Color(0xFF66768F)
+    textSecondary = Color(0xFF9CAEC8), textFaint = Color(0xFF7C8CA6)
 )
 
 val EmberTheme = PvpsPalette(
     id = "ember", label = "Ember", isLight = false,
-    void = Color(0xFF0D0907), surfaceDark = Color(0xFF15100C),
-    surfaceRaised = Color(0xFF1E1711), surfaceHigh = Color(0xFF2A2018),
-    outlineDark = Color(0xFF3D3025), outlineSoft = Color(0xFF291F18),
-    accent = Color(0xFFFFB878), onAccent = Color(0xFF2C1604),
-    accentDim = Color(0xFFD68A4D), signalDeep = Color(0xFF3A2310),
+    void = Color(0xFF0C0806), surfaceDark = Color(0xFF14100B),
+    surfaceRaised = Color(0xFF1D1610), surfaceHigh = Color(0xFF292019),
+    outlineDark = Color(0xFF3A2E23), outlineSoft = Color(0xFF241B13),
+    hairline = Color(0x1FFFE7D0),
+    accent = Color(0xFFFFB878), onAccent = Color(0xFF2B1403),
+    accentDim = Color(0xFFD68A4D), accentSoft = Color(0xFF4A2C12),
+    signalDeep = Color(0xFF3A2310),
     violet = Color(0xFFD9B8FF), irisDeep = Color(0xFF2E1F3D),
     ember = Color(0xFFFFD29A), danger = Color(0xFFFF8A8A),
     success = Color(0xFFAED8A0), textPrimary = Color(0xFFFFF1E7),
-    textSecondary = Color(0xFFC0A997), textFaint = Color(0xFF8C7665)
+    textSecondary = Color(0xFFC0A997), textFaint = Color(0xFFA08A78)
 )
 
 val Paper = PvpsPalette(
     id = "paper", label = "Paper", isLight = true,
-    void = Color(0xFFF4F2EA), surfaceDark = Color(0xFFFBF9F2),
+    void = Color(0xFFF5F3EC), surfaceDark = Color(0xFFFCFAF4),
     surfaceRaised = Color(0xFFFFFFFF), surfaceHigh = Color(0xFFEDE9DC),
-    outlineDark = Color(0xFFD3CCBC), outlineSoft = Color(0xFFE5DFD2),
+    outlineDark = Color(0xFFD6CFBF), outlineSoft = Color(0xFFE7E1D4),
+    hairline = Color(0x14000000),
     accent = Color(0xFF3B4A20), onAccent = Color(0xFFF8FFE8),
-    accentDim = Color(0xFF64783C), signalDeep = Color(0xFFE2EACB),
+    accentDim = Color(0xFF64783C), accentSoft = Color(0xFFDCE7C4),
+    signalDeep = Color(0xFFE2EACB),
     violet = Color(0xFF6B5CA5), irisDeep = Color(0xFFEAE3FF),
     ember = Color(0xFF9A641C), danger = Color(0xFFB33145),
     success = Color(0xFF276B50), textPrimary = Color(0xFF1B1D17),
-    textSecondary = Color(0xFF5E6155), textFaint = Color(0xFF8A8D80)
+    textSecondary = Color(0xFF5A5D51), textFaint = Color(0xFF6F7264)
 )
 
 val Themes = listOf(Graphite, Midnight, EmberTheme, Paper)
@@ -106,6 +122,9 @@ private var activePalette: PvpsPalette
 
 fun paletteFor(id: String): PvpsPalette = Themes.firstOrNull { it.id == id } ?: Graphite
 
+/** Full palette for composables that need several roles at once (gradients, glows). */
+val LocalPvpsPalette = staticCompositionLocalOf { Graphite }
+
 // Existing composables import these names directly. They are getters so a
 // theme switch re-colors the whole app without touching hundreds of call sites.
 val Void: Color get() = activePalette.void
@@ -115,9 +134,11 @@ val SurfaceRaised: Color get() = activePalette.surfaceRaised
 val SurfaceHigh: Color get() = activePalette.surfaceHigh
 val OutlineDark: Color get() = activePalette.outlineDark
 val OutlineSoft: Color get() = activePalette.outlineSoft
+val Hairline: Color get() = activePalette.hairline
 val Accent: Color get() = activePalette.accent
 val OnAccent: Color get() = activePalette.onAccent
 val AccentDim: Color get() = activePalette.accentDim
+val AccentSoft: Color get() = activePalette.accentSoft
 val SignalDeep: Color get() = activePalette.signalDeep
 val Violet: Color get() = activePalette.violet
 val IrisDeep: Color get() = activePalette.irisDeep
@@ -129,12 +150,15 @@ val TextPrimary: Color get() = activePalette.textPrimary
 val TextSecondary: Color get() = activePalette.textSecondary
 val TextFaint: Color get() = activePalette.textFaint
 
+/** Background of the whole app: a slightly lifted version of the void. */
+val AppCanvas: Color get() = activePalette.surfaceDark
+
 private val PvpsShapes = Shapes(
-    extraSmall = RoundedCornerShape(8.dp),
-    small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(18.dp),
-    large = RoundedCornerShape(24.dp),
-    extraLarge = RoundedCornerShape(32.dp)
+    extraSmall = RoundedCornerShape(Radius.xs),
+    small = RoundedCornerShape(Radius.sm),
+    medium = RoundedCornerShape(Radius.md),
+    large = RoundedCornerShape(Radius.lg),
+    extraLarge = RoundedCornerShape(Radius.xl)
 )
 
 @Composable
@@ -228,6 +252,7 @@ fun PvpsTheme(
     val safeScale = fontScale.coerceIn(0.8f, 1.35f)
     val safeUiScale = uiScale.coerceIn(0.85f, 1.2f)
     CompositionLocalProvider(
+        LocalPvpsPalette provides palette,
         LocalDensity provides Density(
             density.density * safeUiScale,
             density.fontScale * safeScale

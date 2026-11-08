@@ -12,6 +12,7 @@ import java.io.File
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -35,6 +36,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -69,7 +71,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -96,6 +97,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -146,9 +148,12 @@ import dev.pvps.opencode.stringOrNull
 import dev.pvps.ui.AppViewModel
 import dev.pvps.ui.components.EmptyState
 import dev.pvps.ui.components.ErrorBanner
+import dev.pvps.ui.components.GlassIconButton
 import dev.pvps.ui.components.InfoRow
 import dev.pvps.ui.components.MarkdownText
+import dev.pvps.ui.components.MeterBar
 import dev.pvps.ui.components.MonospaceBox
+import dev.pvps.ui.components.PvpsCard
 import dev.pvps.ui.components.ScreenHeader
 import dev.pvps.ui.components.StatusDot
 import dev.pvps.ui.components.TinyAction
@@ -160,6 +165,9 @@ import dev.pvps.ui.theme.Danger
 import dev.pvps.ui.theme.DeepBackground
 import dev.pvps.ui.theme.MonoFont
 import dev.pvps.ui.theme.OutlineDark
+import dev.pvps.ui.theme.PvpsType
+import dev.pvps.ui.theme.Radius
+import dev.pvps.ui.theme.Space
 import dev.pvps.ui.theme.SurfaceHigh
 import dev.pvps.ui.theme.SurfaceRaised
 import dev.pvps.ui.theme.Success
@@ -169,6 +177,7 @@ import dev.pvps.ui.theme.TextSecondary
 import dev.pvps.ui.theme.Violet
 import dev.pvps.ui.theme.Void
 import dev.pvps.ui.theme.Warning
+import dev.pvps.ui.theme.pressable
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -421,7 +430,7 @@ fun ChatScreen(
         ) {
             if (connection?.status == ConnectionState.Status.RECONNECTING) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = Space.gutter, vertical = Space.sm),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     CircularProgressIndicator(
@@ -429,11 +438,11 @@ fun ChatScreen(
                         color = Warning,
                         strokeWidth = 2.dp
                     )
-                    Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.width(Space.sm))
                     Text(
                         "SSH link lost. Reconnecting automatically…",
                         color = Warning,
-                        style = MaterialTheme.typography.bodySmall
+                        style = PvpsType.monoBody
                     )
                 }
             }
@@ -442,12 +451,12 @@ fun ChatScreen(
             }
             if (chat.connecting) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = Space.gutter, vertical = Space.md),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Accent, strokeWidth = 2.dp)
-                    Spacer(Modifier.width(10.dp))
-                    Text("Connecting to OpenCode…", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.width(Space.sm))
+                    Text("Connecting to OpenCode…", color = TextSecondary, style = PvpsType.monoBody)
                 }
             }
             if (!chat.connected && !chat.connecting) {
@@ -461,26 +470,24 @@ fun ChatScreen(
             }
 
             chat.parentSession?.let { parent ->
-                Surface(
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable {
+                        .padding(horizontal = Space.gutter, vertical = Space.xs)
+                        .clip(RoundedCornerShape(Radius.sm))
+                        .background(Violet.copy(alpha = 0.08f))
+                        .pressable {
                             scope.launch { viewModel.container.openCode.selectSession(parent.id) }
-                        },
-                    color = Violet.copy(alpha = 0.08f),
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, Violet.copy(alpha = 0.18f))
+                        }
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = Space.md, vertical = Space.sm),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("←", color = Violet, style = MaterialTheme.typography.bodyMedium)
-                        Spacer(Modifier.width(8.dp))
+                        Spacer(Modifier.width(Space.sm))
                         Column(Modifier.weight(1f)) {
-                            Text("SUBAGENT", style = MaterialTheme.typography.labelSmall, color = Violet)
+                            Text("SUBAGENT", style = PvpsType.eyebrow, color = Violet)
                             Text(
                                 "Back to ${parent.displayTitle}",
                                 style = MaterialTheme.typography.bodySmall,
@@ -522,12 +529,12 @@ fun ChatScreen(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                            start = 16.dp,
-                            end = 16.dp,
-                            top = 10.dp,
-                            bottom = 16.dp
+                            start = Space.gutter,
+                            end = Space.gutter,
+                            top = Space.md,
+                            bottom = Space.lg
                         ),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        verticalArrangement = Arrangement.spacedBy(Space.lg)
                     ) {
                         items(conversation, key = { it.key }) { item ->
                             val turn = item.turn
@@ -573,21 +580,20 @@ fun ChatScreen(
                     }
                 }
                 if (activeForm == null && conversation.isNotEmpty() && !atBottom) {
-                    Surface(
-                        onClick = {
-                            scope.launch {
-                                runCatching { listState.animateScrollToItem(conversation.lastIndex) }
-                            }
-                        },
+                    Box(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .padding(14.dp),
-                        color = SurfaceHigh.copy(alpha = 0.94f),
-                        shape = RoundedCornerShape(50),
-                        border = BorderStroke(1.dp, Accent.copy(alpha = 0.30f))
+                            .padding(Space.block)
+                            .clip(RoundedCornerShape(Radius.pill))
+                            .background(SurfaceHigh.copy(alpha = 0.94f))
+                            .pressable {
+                                scope.launch {
+                                    runCatching { listState.animateScrollToItem(conversation.lastIndex) }
+                                }
+                            }
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp),
+                            modifier = Modifier.padding(horizontal = Space.md, vertical = Space.sm),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
@@ -596,10 +602,10 @@ fun ChatScreen(
                                 tint = Accent,
                                 modifier = Modifier.size(17.dp)
                             )
-                            Spacer(Modifier.width(5.dp))
+                            Spacer(Modifier.width(Space.xs))
                             Text(
                                 "Latest",
-                                style = MaterialTheme.typography.labelSmall,
+                                style = PvpsType.eyebrow,
                                 color = TextPrimary
                             )
                         }
@@ -619,17 +625,18 @@ fun ChatScreen(
             }
 
             if (activeForm == null && session?.parentID != null) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                    color = Violet.copy(alpha = 0.08f),
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, Violet.copy(alpha = 0.18f))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Space.gutter, vertical = Space.sm)
+                        .clip(RoundedCornerShape(Radius.md))
+                        .background(Violet.copy(alpha = 0.08f))
                 ) {
                     Text(
                         "Read-only subagent. Messages can only be sent to the parent session.",
-                        style = MaterialTheme.typography.labelMedium,
+                        style = PvpsType.monoBody,
                         color = Violet,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                        modifier = Modifier.padding(horizontal = Space.md, vertical = Space.md)
                     )
                 }
             } else if (activeForm == null) {
@@ -798,132 +805,148 @@ private fun ChatTopBar(
         contextFraction > 0.65 -> Warning
         else -> Accent
     }
-    Surface(modifier = Modifier.fillMaxWidth(), color = Color.Transparent) {
-        Row(
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Space.gutter, vertical = Space.sm),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        GlassIconButton(onClick = onBack, size = 36.dp) {
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+                tint = TextSecondary,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        Spacer(Modifier.width(Space.sm))
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 6.dp, end = 6.dp, top = 8.dp, bottom = 9.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .size(42.dp)
+                .clip(CircleShape)
+                .pressable(onClick = onStats),
+            contentAlignment = Alignment.Center
         ) {
-            IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = TextSecondary,
-                    modifier = Modifier.size(19.dp)
+            CircularProgressIndicator(
+                progress = { (contextFraction ?: 0.0).toFloat() },
+                modifier = Modifier.fillMaxSize().padding(2.dp),
+                color = contextColor,
+                trackColor = Color.White.copy(alpha = 0.07f),
+                strokeWidth = 2.5.dp
+            )
+            Text(
+                contextFraction?.let { "${(it * 100).toInt()}%" } ?: "—",
+                style = PvpsType.eyebrow,
+                color = contextColor,
+                maxLines = 1
+            )
+        }
+        Spacer(Modifier.width(Space.sm))
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                StatusDot(
+                    when {
+                        busy -> Warning
+                        stateLabel == "ready" -> Success
+                        stateLabel == "offline" -> Danger
+                        else -> TextFaint
+                    },
+                    5
                 )
-            }
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .clickable(onClick = onStats),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(
-                    progress = { (contextFraction ?: 0.0).toFloat() },
-                    modifier = Modifier.fillMaxSize().padding(2.dp),
-                    color = contextColor,
-                    trackColor = OutlineDark.copy(alpha = 0.7f),
-                    strokeWidth = 3.dp
-                )
+                Spacer(Modifier.width(Space.sm))
                 Text(
-                    contextFraction?.let { "${(it * 100).toInt()}%" } ?: "—",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = contextColor,
+                    hostName ?: "OpenCode",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Spacer(Modifier.width(Space.sm))
+                Text(
+                    stateLabel.uppercase(),
+                    style = PvpsType.eyebrow,
+                    color = TextFaint,
                     maxLines = 1
                 )
             }
-            Spacer(Modifier.width(9.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    StatusDot(
-                        when {
-                            busy -> Warning
-                            stateLabel == "ready" -> Success
-                            stateLabel == "offline" -> Danger
-                            else -> TextFaint
-                        },
-                        5
-                    )
-                    Spacer(Modifier.width(5.dp))
-                    Text(
-                        hostName ?: "OpenCode",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = TextPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        " · $stateLabel",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextFaint,
-                        maxLines = 1
-                    )
-                }
-                Text(
-                    buildString {
-                        append(spentLabel.lowercase())
-                        append(" ")
-                        append(spentValue)
-                        if (tps != null) {
-                            append("  ·  ")
-                            append(
-                                if (tps >= 100) "${tps.toInt()}"
-                                else String.format(Locale.US, "%.1f", tps)
-                            )
-                            append(" tok/s")
-                        }
-                        if (contextUsed != null && contextLimit > 0) {
-                            append("  ·  ")
-                            append(compactTokens(contextUsed))
-                            append("/")
-                            append(compactTokens(contextLimit))
-                        }
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (busy && tps != null) Warning else TextFaint,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            IconButton(
-                onClick = onCollapse,
-                enabled = canCollapse,
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    Icons.Default.UnfoldLess,
-                    contentDescription = "Collapse all thinking and tools",
-                    tint = if (canCollapse) TextSecondary else TextFaint,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-            IconButton(
-                onClick = onSessions,
-                enabled = sessionsEnabled,
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    Icons.Default.List,
-                    contentDescription = "Sessions",
-                    tint = TextSecondary,
-                    modifier = Modifier.size(19.dp)
-                )
-            }
-            IconButton(
-                onClick = onNewSession,
-                enabled = newSessionEnabled,
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    Icons.Default.Add,
-                    contentDescription = "New session",
-                    tint = Accent,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
+            Spacer(Modifier.height(Space.xxs))
+            Text(
+                buildString {
+                    append(spentLabel.lowercase())
+                    append(" ")
+                    append(spentValue)
+                    if (tps != null) {
+                        append("  ·  ")
+                        append(
+                            if (tps >= 100) "${tps.toInt()}"
+                            else String.format(Locale.US, "%.1f", tps)
+                        )
+                        append(" tok/s")
+                    }
+                    if (contextUsed != null && contextLimit > 0) {
+                        append("  ·  ")
+                        append(compactTokens(contextUsed))
+                        append("/")
+                        append(compactTokens(contextLimit))
+                    }
+                },
+                style = PvpsType.monoBody,
+                color = if (busy && tps != null) Warning else TextFaint,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(Space.xxs),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TopBarIconAction(
+                icon = Icons.Default.UnfoldLess,
+                description = "Collapse all thinking and tools",
+                enabled = canCollapse,
+                tint = if (canCollapse) TextSecondary else TextFaint,
+                onClick = onCollapse
+            )
+            TopBarIconAction(
+                icon = Icons.Default.List,
+                description = "Sessions",
+                enabled = sessionsEnabled,
+                tint = if (sessionsEnabled) TextSecondary else TextFaint,
+                onClick = onSessions
+            )
+            TopBarIconAction(
+                icon = Icons.Default.Add,
+                description = "New session",
+                enabled = newSessionEnabled,
+                tint = if (newSessionEnabled) TextSecondary else TextFaint,
+                onClick = onNewSession
+            )
+        }
+    }
+}
+
+@Composable
+private fun TopBarIconAction(
+    icon: ImageVector,
+    description: String,
+    enabled: Boolean,
+    tint: Color,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(34.dp)
+            .clip(CircleShape)
+            .pressable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            icon,
+            contentDescription = description,
+            tint = tint,
+            modifier = Modifier.size(18.dp)
+        )
     }
 }
 
@@ -988,16 +1011,16 @@ private fun AssistantTurnBlock(
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             StatusDot(if (last.completed == null) Warning else Accent, 6)
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(Space.sm))
             Text(
                 (last.agent ?: "assistant").uppercase(),
-                style = MaterialTheme.typography.labelSmall,
-                color = Accent
+                style = PvpsType.eyebrow,
+                color = TextSecondary
             )
             last.model?.let {
                 Text(
                     " · $it",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = PvpsType.monoBody,
                     color = TextFaint,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -1012,10 +1035,10 @@ private fun AssistantTurnBlock(
                 }
             }
             if (meta.isNotBlank()) {
-                Text(meta, style = MaterialTheme.typography.labelSmall, color = TextFaint)
+                Text(meta, style = PvpsType.eyebrow, color = TextFaint)
             }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(10.dp))
         turn.forEach { message ->
             message.error?.let { ErrorBanner(it) }
             val texts = message.parts.filterIsInstance<UiPart.Text>().map { it.text }
@@ -1065,27 +1088,28 @@ private fun LiveReasoningWindow(text: String) {
             append(tail.joinToString(" "))
         }
     }
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-        color = Warning.copy(alpha = 0.055f),
-        shape = RoundedCornerShape(10.dp),
-        border = BorderStroke(1.dp, Warning.copy(alpha = 0.16f))
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = Space.sm)
+            .clip(RoundedCornerShape(Radius.sm))
+            .background(Warning.copy(alpha = 0.055f))
     ) {
-        Column(modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp)) {
+        Column(modifier = Modifier.padding(horizontal = Space.md, vertical = Space.sm)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(11.dp),
                     color = Warning,
                     strokeWidth = 1.3.dp
                 )
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(Space.sm))
                 Text(
                     "THINKING · LIVE",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = PvpsType.eyebrow,
                     color = Warning
                 )
             }
-            Spacer(Modifier.height(5.dp))
+            Spacer(Modifier.height(Space.xs))
             Text(
                 window,
                 style = MaterialTheme.typography.bodySmall,
@@ -1116,16 +1140,17 @@ private fun MessageBubble(
             ) {
                 Text(
                     "YOU · ${relativeTime(message.created)}",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = PvpsType.eyebrow,
                     color = TextFaint,
-                    modifier = Modifier.padding(end = 4.dp, bottom = 4.dp)
+                    modifier = Modifier.padding(end = Space.xs, bottom = 6.dp)
                 )
-                Surface(
-                    modifier = Modifier.fillMaxWidth(0.92f),
-                    color = Accent.copy(alpha = 0.13f),
-                    shape = RoundedCornerShape(20.dp, 20.dp, 5.dp, 20.dp)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.92f)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(Accent.copy(alpha = 0.12f))
                 ) {
-                    Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)) {
+                    Column(modifier = Modifier.padding(horizontal = Space.lg, vertical = Space.md)) {
                         MarkdownText(
                             message.text.ifBlank { "(empty message)" },
                             compact = true
@@ -1146,16 +1171,16 @@ private fun MessageBubble(
                             .clip(CircleShape)
                             .background(if (message.completed == null) Warning else Accent)
                     )
-                    Spacer(Modifier.width(7.dp))
+                    Spacer(Modifier.width(Space.sm))
                     Text(
                         (message.agent ?: "assistant").uppercase(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Accent
+                        style = PvpsType.eyebrow,
+                        color = TextSecondary
                     )
                     message.model?.let {
                         Text(
                             " · $it",
-                            style = MaterialTheme.typography.labelSmall,
+                            style = PvpsType.monoBody,
                             color = TextFaint,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -1170,10 +1195,10 @@ private fun MessageBubble(
                         }
                     }
                     if (meta.isNotBlank()) {
-                        Text(meta, style = MaterialTheme.typography.labelSmall, color = TextFaint)
+                        Text(meta, style = PvpsType.eyebrow, color = TextFaint)
                     }
                 }
-                Spacer(Modifier.height(7.dp))
+                Spacer(Modifier.height(10.dp))
                 if (message.error != null) ErrorBanner(message.error)
                 val segments = remember(message.id, message.parts, showReasoning, compactTools) {
                     buildMessageSegments(message.parts, showReasoning, compactTools)
@@ -1202,9 +1227,9 @@ private fun MessageBubble(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                 Text(
                     message.text.ifBlank { message.type.replace('_', ' ') }.uppercase(),
-                    style = MaterialTheme.typography.labelSmall,
+                    style = PvpsType.eyebrow,
                     color = TextFaint,
-                    modifier = Modifier.padding(vertical = 2.dp)
+                    modifier = Modifier.padding(vertical = Space.xxs)
                 )
             }
         }
@@ -1298,9 +1323,12 @@ private fun ActivityGroup(
     }
     Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
         Row(
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp))
-                .clickable { onToggle(groupKey) }
-                .padding(horizontal = 6.dp, vertical = 7.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(Radius.sm))
+                .background(Color.White.copy(alpha = 0.035f))
+                .pressable { onToggle(groupKey) }
+                .padding(horizontal = Space.md, vertical = Space.sm),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (running) {
@@ -1312,10 +1340,10 @@ private fun ActivityGroup(
             } else {
                 StatusDot(if (failed) Danger else TextFaint, 5)
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(Space.sm))
             Text(
                 summary,
-                style = MaterialTheme.typography.labelMedium,
+                style = PvpsType.eyebrow,
                 color = if (failed) Danger else TextFaint,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1329,13 +1357,13 @@ private fun ActivityGroup(
             )
         }
         if (groupKey in expanded) {
-            Column(modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)) {
+            Column(modifier = Modifier.padding(horizontal = Space.xs, vertical = Space.xxs)) {
                 activePart?.let { part ->
                     Text(
                         if (running) "CURRENT STEP" else "LATEST STEP",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = PvpsType.eyebrow,
                         color = if (running) Warning else TextFaint,
-                        modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 1.dp)
+                        modifier = Modifier.padding(start = Space.xs, top = Space.sm, bottom = Space.xxs)
                     )
                     ActivityPartView(
                         part = part,
@@ -1347,26 +1375,11 @@ private fun ActivityGroup(
                     )
                 }
                 if (previousCount > 0) {
-                    TextButton(
-                        onClick = { showHistory = true },
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                            horizontal = 6.dp,
-                            vertical = 4.dp
-                        )
-                    ) {
-                        Icon(
-                            Icons.Default.List,
-                            contentDescription = null,
-                            tint = TextFaint,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(Modifier.width(5.dp))
-                        Text(
-                            "Show previous · $previousCount",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TextSecondary
-                        )
-                    }
+                    TinyAction(
+                        label = "Show previous · $previousCount",
+                        modifier = Modifier.padding(start = Space.xs, top = Space.sm),
+                        onClick = { showHistory = true }
+                    )
                 }
             }
         }
@@ -1379,23 +1392,25 @@ private fun ActivityGroup(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(14.dp)
+                    .padding(Space.block)
                     .heightIn(max = 680.dp),
                 color = SurfaceHigh,
-                shape = RoundedCornerShape(22.dp),
-                border = BorderStroke(1.dp, OutlineDark)
+                shape = RoundedCornerShape(Radius.xl)
             ) {
-                Column(modifier = Modifier.padding(12.dp)) {
+                Column(modifier = Modifier.padding(Space.lg)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             "ACTIVITY HISTORY · $previousCount",
-                            style = MaterialTheme.typography.labelSmall,
+                            style = PvpsType.eyebrow,
                             color = TextSecondary,
                             modifier = Modifier.weight(1f)
                         )
-                        IconButton(
-                            onClick = { showHistory = false },
-                            modifier = Modifier.size(30.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .pressable { showHistory = false },
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 Icons.Default.Close,
@@ -1405,12 +1420,12 @@ private fun ActivityGroup(
                             )
                         }
                     }
-                    HorizontalDivider(color = OutlineDark.copy(alpha = 0.7f))
+                    Spacer(Modifier.height(Space.md))
                     Column(
                         modifier = Modifier
                             .verticalScroll(rememberScrollState())
-                            .padding(top = 4.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                            .padding(top = Space.xxs),
+                        verticalArrangement = Arrangement.spacedBy(Space.xs)
                     ) {
                         parts.forEachIndexed { index, part ->
                             if (index != activeIndex) {
@@ -1460,21 +1475,28 @@ private fun ActivityPartView(
 @Composable
 private fun ReasoningBlock(text: String, expanded: Boolean, onToggle: () -> Unit) {
     if (text.isBlank()) return
-    Surface(
-        color = SurfaceRaised.copy(alpha = 0.40f),
-        shape = RoundedCornerShape(10.dp),
-        border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.7f)),
-        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+    PvpsCard(
+        modifier = Modifier.fillMaxWidth().padding(top = Space.sm),
+        shape = RoundedCornerShape(Radius.md)
     ) {
-        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+        Column(modifier = Modifier.padding(horizontal = Space.md, vertical = Space.sm)) {
             Row(
-                modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(Radius.xs))
+                    .pressable(onClick = onToggle)
+                    .padding(vertical = Space.xxs),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("REASONING", style = MaterialTheme.typography.labelSmall, color = TextFaint, modifier = Modifier.weight(1f))
+                Text(
+                    "REASONING",
+                    style = PvpsType.eyebrow,
+                    color = TextFaint,
+                    modifier = Modifier.weight(1f)
+                )
                 Text(
                     if (expanded) "HIDE" else "SHOW",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = PvpsType.eyebrow,
                     color = TextSecondary
                 )
                 Icon(
@@ -1485,7 +1507,7 @@ private fun ReasoningBlock(text: String, expanded: Boolean, onToggle: () -> Unit
                 )
             }
             if (expanded) {
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(Space.sm))
                 SelectionContainer {
                     Text(
                         text,
@@ -1512,15 +1534,17 @@ private fun ToolCard(
     val isSubagent = tool.name.contains("task", ignoreCase = true) ||
         tool.name.contains("subagent", ignoreCase = true) ||
         childSession != null
-    Surface(
-        color = SurfaceRaised.copy(alpha = 0.36f),
-        shape = RoundedCornerShape(10.dp),
-        border = BorderStroke(1.dp, if (isSubagent) Violet.copy(alpha = 0.24f) else OutlineDark.copy(alpha = 0.65f)),
-        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+    PvpsCard(
+        modifier = Modifier.fillMaxWidth().padding(top = Space.sm),
+        shape = RoundedCornerShape(Radius.md)
     ) {
-        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+        Column(modifier = Modifier.padding(horizontal = Space.md, vertical = Space.md)) {
             Row(
-                modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(Radius.xs))
+                    .pressable(onClick = onToggle)
+                    .padding(vertical = Space.xxs),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
@@ -1529,18 +1553,18 @@ private fun ToolCard(
                     tint = if (isSubagent) Violet else statusColor,
                     modifier = Modifier.size(15.dp)
                 )
-                Spacer(Modifier.width(7.dp))
+                Spacer(Modifier.width(Space.sm))
                 Text(
                     tool.name,
-                    style = MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.titleSmall,
                     color = TextPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(Modifier.width(7.dp))
+                Spacer(Modifier.width(Space.sm))
                 StatusDot(statusColor, 6)
-                Spacer(Modifier.width(5.dp))
-                Text(tool.status, style = MaterialTheme.typography.labelSmall, color = statusColor)
+                Spacer(Modifier.width(Space.xs))
+                Text(tool.status, style = PvpsType.eyebrow, color = statusColor)
                 Spacer(Modifier.weight(1f))
                 Icon(
                     if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
@@ -1551,50 +1575,50 @@ private fun ToolCard(
             }
             Text(
                 toolSummary(tool),
-                style = MaterialTheme.typography.labelSmall,
+                style = PvpsType.monoBody,
                 color = TextSecondary,
                 maxLines = if (expanded) Int.MAX_VALUE else 2,
                 overflow = TextOverflow.Ellipsis,
-                fontFamily = MonoFont,
-                modifier = Modifier.padding(top = 4.dp)
+                modifier = Modifier.padding(top = Space.xs)
             )
             if (isSubagent && childSession != null) {
                 Row(
                     modifier = Modifier
-                        .padding(top = 7.dp)
-                        .clip(RoundedCornerShape(7.dp))
-                        .clickable { onOpenSubagent(childSession) }
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                        .padding(top = Space.sm)
+                        .clip(RoundedCornerShape(Radius.xs))
+                        .background(Violet.copy(alpha = 0.10f))
+                        .pressable { onOpenSubagent(childSession) }
+                        .padding(horizontal = Space.sm, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("OPEN SUBAGENT", style = MaterialTheme.typography.labelSmall, color = Violet)
-                    Spacer(Modifier.width(6.dp))
+                    Text("OPEN SUBAGENT", style = PvpsType.eyebrow, color = Violet)
+                    Spacer(Modifier.width(Space.sm))
                     Text("→", color = Violet, style = MaterialTheme.typography.bodySmall)
                 }
             }
             if (expanded) {
                 if (tool.input.isNotBlank()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text("INPUT", style = MaterialTheme.typography.labelSmall, color = TextFaint)
-                    Spacer(Modifier.height(3.dp))
+                    Spacer(Modifier.height(Space.sm))
+                    Text("INPUT", style = PvpsType.eyebrow, color = TextFaint)
+                    Spacer(Modifier.height(Space.xs))
                     MonospaceBox(tool.input.take(1_600))
                 }
                 tool.content.forEach { content ->
                     when (content) {
                         is ToolContent.Text -> {
-                            Spacer(Modifier.height(8.dp))
-                            Text("OUTPUT", style = MaterialTheme.typography.labelSmall, color = TextFaint)
-                            Spacer(Modifier.height(3.dp))
+                            Spacer(Modifier.height(Space.sm))
+                            Text("OUTPUT", style = PvpsType.eyebrow, color = TextFaint)
+                            Spacer(Modifier.height(Space.xs))
                             MonospaceBox(content.text.take(2_400))
                         }
                         is ToolContent.File -> {
-                            Spacer(Modifier.height(8.dp))
+                            Spacer(Modifier.height(Space.sm))
                             if (content.mime.startsWith("image/")) {
                                 RemoteMedia(uri = content.uri, openCode = openCode)
                             } else {
                                 Text(
                                     "File: ${content.name ?: content.uri.take(60)} (${content.mime})",
-                                    style = MaterialTheme.typography.labelSmall,
+                                    style = PvpsType.monoBody,
                                     color = TextSecondary
                                 )
                             }
@@ -1602,7 +1626,7 @@ private fun ToolCard(
                     }
                 }
                 tool.error?.let {
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(Space.sm))
                     Text(it, color = Danger, style = MaterialTheme.typography.bodySmall)
                 }
             }
@@ -1618,9 +1642,9 @@ private fun AttachmentChip(file: FileAttachment, openCode: OpenCodeRepository) {
     } else {
         Text(
             file.name ?: uri.take(60).ifBlank { "attachment" },
-            style = MaterialTheme.typography.labelSmall,
+            style = PvpsType.monoBody,
             color = TextSecondary,
-            modifier = Modifier.padding(top = 4.dp)
+            modifier = Modifier.padding(top = Space.xs)
         )
     }
 }
@@ -1648,10 +1672,10 @@ private fun RemoteMedia(uri: String, openCode: OpenCodeRepository) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 8.dp)
-                    .clip(RoundedCornerShape(14.dp))
+                    .padding(top = Space.sm)
+                    .clip(RoundedCornerShape(Radius.md))
                     .background(DeepBackground.copy(alpha = 0.5f))
-                    .clickable { zoom = true }
+                    .pressable { zoom = true }
             ) {
                 Image(
                     bitmap = bitmap,
@@ -1670,7 +1694,7 @@ private fun RemoteMedia(uri: String, openCode: OpenCodeRepository) {
                 ) {
                     Text(
                         "TAP TO OPEN",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = PvpsType.eyebrow,
                         color = TextSecondary,
                         modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
                     )
@@ -1733,36 +1757,74 @@ private fun decodeSampledBitmap(data: ByteArray, maxDimension: Int = 1600): Imag
 
 @Composable
 private fun PermissionCard(permission: PermissionRequest, onReply: (String) -> Unit) {
-    Surface(
-        color = Warning.copy(alpha = 0.10f),
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, Warning.copy(alpha = 0.24f)),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
+    PvpsCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Space.gutter, vertical = Space.xs),
+        shape = RoundedCornerShape(Radius.md)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text("PERMISSION REQUESTED", style = MaterialTheme.typography.labelSmall, color = Warning)
-            Spacer(Modifier.height(4.dp))
+        Column(modifier = Modifier.padding(Space.lg)) {
+            Text("PERMISSION REQUESTED", style = PvpsType.eyebrow, color = Warning)
+            Spacer(Modifier.height(Space.sm))
             Text(
                 permission.message ?: permission.action,
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextPrimary
             )
             if (permission.resources.isNotEmpty()) {
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(Space.xs))
                 Text(
                     permission.resources.joinToString("\n"),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = Monospace,
+                    style = PvpsType.monoBody,
                     color = TextSecondary,
                     maxLines = 4,
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Button(onClick = { onReply("once") }) { Text("Allow once") }
-                TextButton(onClick = { onReply("always") }) { Text("Always") }
-                TextButton(onClick = { onReply("reject") }) { Text("Deny", color = Danger) }
+            Spacer(Modifier.height(Space.md))
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(Radius.pill))
+                        .background(Accent)
+                        .pressable { onReply("once") }
+                        .padding(horizontal = Space.md, vertical = 8.dp)
+                ) {
+                    Text(
+                        "Allow once".uppercase(),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Void,
+                        maxLines = 1
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(Radius.pill))
+                        .background(Color.White.copy(alpha = 0.06f))
+                        .pressable { onReply("always") }
+                        .padding(horizontal = Space.md, vertical = 8.dp)
+                ) {
+                    Text(
+                        "Always".uppercase(),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = TextPrimary,
+                        maxLines = 1
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(Radius.pill))
+                        .background(Danger.copy(alpha = 0.10f))
+                        .pressable { onReply("reject") }
+                        .padding(horizontal = Space.md, vertical = 8.dp)
+                ) {
+                    Text(
+                        "Deny".uppercase(),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Danger,
+                        maxLines = 1
+                    )
+                }
             }
         }
     }
@@ -1833,15 +1895,15 @@ private fun Composer(
     }
 
     Surface(color = DeepBackground.copy(alpha = 0.97f)) {
-        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)) {
+        Column(modifier = Modifier.padding(horizontal = Space.gutter, vertical = Space.sm)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(Space.xs)
             ) {
                 Row(
                     modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Space.xs),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     TinyAction(compactModelLabel, Modifier.weight(1.15f)) {
@@ -1861,7 +1923,7 @@ private fun Composer(
                         panel = if (panel == ComposerPanel.Agent) ComposerPanel.None else ComposerPanel.Agent
                     }
                 }
-                Spacer(Modifier.width(2.dp))
+                Spacer(Modifier.width(Space.xxs))
                 StatusDot(
                     when {
                         sending -> Accent
@@ -1871,7 +1933,7 @@ private fun Composer(
                     },
                     6
                 )
-                Spacer(Modifier.width(5.dp))
+                Spacer(Modifier.width(Space.xs))
                 Text(
                     when {
                         sending -> "SENDING"
@@ -1879,7 +1941,7 @@ private fun Composer(
                         connected -> "READY"
                         else -> "OFFLINE"
                     },
-                    style = MaterialTheme.typography.labelSmall,
+                    style = PvpsType.eyebrow,
                     color = when {
                         sending -> Accent
                         busy -> Warning
@@ -1892,22 +1954,25 @@ private fun Composer(
             }
 
             if (attachments.isNotEmpty() || attachmentError != null) {
-                Spacer(Modifier.height(7.dp))
+                Spacer(Modifier.height(Space.sm))
                 if (attachments.isNotEmpty()) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(Space.sm)
                     ) {
                         attachments.forEach { item ->
-                            Surface(
-                                color = SurfaceRaised.copy(alpha = 0.72f),
-                                shape = RoundedCornerShape(50),
-                                border = BorderStroke(1.dp, OutlineDark)
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(Radius.pill))
+                                    .background(Color.White.copy(alpha = 0.05f))
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(start = if (item.mime.startsWith("image/")) 4.dp else 10.dp, end = 2.dp),
+                                    modifier = Modifier.padding(
+                                        start = if (item.mime.startsWith("image/")) Space.xs else Space.md,
+                                        end = Space.xxs
+                                    ),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     if (item.mime.startsWith("image/")) {
@@ -1917,13 +1982,13 @@ private fun Composer(
                                             contentScale = ContentScale.Crop,
                                             modifier = Modifier
                                                 .size(28.dp)
-                                                .clip(RoundedCornerShape(6.dp))
+                                                .clip(RoundedCornerShape(Radius.xs))
                                         )
-                                        Spacer(Modifier.width(7.dp))
+                                        Spacer(Modifier.width(Space.sm))
                                     }
                                     Text(
                                         item.name,
-                                        style = MaterialTheme.typography.labelSmall,
+                                        style = PvpsType.monoBody,
                                         color = TextSecondary,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
@@ -1931,13 +1996,16 @@ private fun Composer(
                                     )
                                     Text(
                                         " · ${formatAttachmentSize(item.size)}",
-                                        style = MaterialTheme.typography.labelSmall,
+                                        style = PvpsType.monoBody,
                                         color = TextFaint,
                                         maxLines = 1
                                     )
-                                    IconButton(
-                                        onClick = { onRemoveAttachment(item.uri) },
-                                        modifier = Modifier.size(28.dp)
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .pressable { onRemoveAttachment(item.uri) },
+                                        contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
                                             Icons.Default.Close,
@@ -1954,42 +2022,39 @@ private fun Composer(
                 attachmentError?.let {
                     Text(
                         it,
-                        style = MaterialTheme.typography.labelSmall,
+                        style = PvpsType.monoBody,
                         color = Warning,
-                        modifier = Modifier.padding(top = 4.dp, start = 2.dp)
+                        modifier = Modifier.padding(top = Space.xs, start = Space.xxs)
                     )
                 }
             }
 
             if (showCommands && filteredCommands.isNotEmpty()) {
-                Spacer(Modifier.height(7.dp))
-                Surface(
+                Spacer(Modifier.height(Space.sm))
+                PvpsCard(
                     modifier = Modifier.fillMaxWidth(),
-                    color = SurfaceRaised.copy(alpha = 0.82f),
-                    shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(1.dp, OutlineDark)
+                    shape = RoundedCornerShape(Radius.md)
                 ) {
                     LazyColumn(modifier = Modifier.heightIn(max = 164.dp)) {
                         items(filteredCommands, key = { "cmd-${it.name}" }) { command ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable {
+                                    .pressable {
                                         onPickCommand(command)
                                     }
-                                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                                    .padding(horizontal = Space.md, vertical = Space.sm),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
                                     "/${command.name}",
-                                    style = MaterialTheme.typography.bodySmall,
+                                    style = PvpsType.monoBody,
                                     color = Accent,
-                                    fontFamily = MonoFont,
                                     modifier = Modifier.widthIn(min = 72.dp)
                                 )
                                 Text(
                                     command.description.orEmpty(),
-                                    style = MaterialTheme.typography.labelSmall,
+                                    style = PvpsType.monoBody,
                                     color = TextFaint,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -2002,27 +2067,28 @@ private fun Composer(
             }
 
             if (panel != ComposerPanel.None) {
-                Spacer(Modifier.height(7.dp))
-                Surface(
+                Spacer(Modifier.height(Space.sm))
+                PvpsCard(
                     modifier = Modifier.fillMaxWidth(),
-                    color = SurfaceRaised.copy(alpha = 0.72f),
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, OutlineDark)
+                    shape = RoundedCornerShape(Radius.md)
                 ) {
-                    Column(modifier = Modifier.padding(10.dp)) {
+                    Column(modifier = Modifier.padding(Space.md)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 if (panel == ComposerPanel.Model) "MODEL & EFFORT" else "AGENT",
-                                style = MaterialTheme.typography.labelSmall,
+                                style = PvpsType.eyebrow,
                                 color = TextFaint,
                                 modifier = Modifier.weight(1f)
                             )
-                            IconButton(
-                                onClick = {
-                                    panel = ComposerPanel.None
-                                    pendingModel = null
-                                },
-                                modifier = Modifier.size(28.dp)
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .pressable {
+                                        panel = ComposerPanel.None
+                                        pendingModel = null
+                                    },
+                                contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     Icons.Default.Close,
@@ -2039,7 +2105,7 @@ private fun Composer(
                                     onValueChange = { modelQuery = it },
                                     modifier = Modifier.fillMaxWidth(),
                                     placeholder = {
-                                        Text("Search models or providers", style = MaterialTheme.typography.labelSmall)
+                                        Text("Search models or providers", style = MaterialTheme.typography.bodySmall, color = TextFaint)
                                     },
                                     singleLine = true,
                                     textStyle = MaterialTheme.typography.bodySmall,
@@ -2051,12 +2117,12 @@ private fun Composer(
                                             modifier = Modifier.size(16.dp)
                                         )
                                     },
-                                    shape = RoundedCornerShape(10.dp),
+                                    shape = RoundedCornerShape(Radius.sm),
                                     colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = Accent.copy(alpha = 0.28f),
-                                        unfocusedBorderColor = OutlineDark,
-                                        focusedContainerColor = SurfaceHigh.copy(alpha = 0.30f),
-                                        unfocusedContainerColor = SurfaceHigh.copy(alpha = 0.18f),
+                                        focusedBorderColor = Color.White.copy(alpha = 0.12f),
+                                        unfocusedBorderColor = Color.White.copy(alpha = 0.08f),
+                                        focusedContainerColor = Color.Transparent,
+                                        unfocusedContainerColor = Color.Transparent,
                                         cursorColor = Accent,
                                         focusedTextColor = TextPrimary,
                                         unfocusedTextColor = TextPrimary
@@ -2071,7 +2137,7 @@ private fun Composer(
                                             it.family.contains(query, true)
                                     }
                                 }
-                                Spacer(Modifier.height(5.dp))
+                                Spacer(Modifier.height(Space.xs))
                                 LazyColumn(modifier = Modifier.heightIn(max = 148.dp)) {
                                     items(filteredModels, key = { "model-${it.providerID}-${it.modelID}" }) { item ->
                                         val selected = model?.modelID == item.modelID &&
@@ -2092,16 +2158,16 @@ private fun Composer(
                                     }
                                 }
                                 if (efforts.isNotEmpty()) {
-                                    Spacer(Modifier.height(7.dp))
+                                    Spacer(Modifier.height(Space.sm))
                                     Text(
                                         "REASONING EFFORT",
-                                        style = MaterialTheme.typography.labelSmall,
+                                        style = PvpsType.eyebrow,
                                         color = TextFaint
                                     )
-                                    Spacer(Modifier.height(4.dp))
+                                    Spacer(Modifier.height(Space.xs))
                                     Row(
                                         modifier = Modifier.horizontalScroll(rememberScrollState()),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(Space.xs)
                                     ) {
                                         efforts.forEach { effort ->
                                             ComposerChoice(
@@ -2124,13 +2190,13 @@ private fun Composer(
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(if (selected) Accent.copy(alpha = 0.10f) else Color.Transparent)
-                                                .clickable {
+                                                .clip(RoundedCornerShape(Radius.sm))
+                                                .background(if (selected) Accent.copy(alpha = 0.09f) else Color.Transparent)
+                                                .pressable {
                                                     onSelectAgent(item)
                                                     panel = ComposerPanel.None
                                                 }
-                                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                                                .padding(horizontal = Space.sm, vertical = Space.sm),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Column(Modifier.weight(1f)) {
@@ -2144,7 +2210,7 @@ private fun Composer(
                                                 item.description?.takeIf { it.isNotBlank() }?.let {
                                                     Text(
                                                         it,
-                                                        style = MaterialTheme.typography.labelSmall,
+                                                        style = PvpsType.monoBody,
                                                         color = TextFaint,
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis
@@ -2170,32 +2236,35 @@ private fun Composer(
             }
 
             if (queued.isNotEmpty()) {
-                Spacer(Modifier.height(7.dp))
+                Spacer(Modifier.height(Space.sm))
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 126.dp)
                         .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    verticalArrangement = Arrangement.spacedBy(Space.xs)
                 ) {
                     Text(
                         "PENDING · ${queued.size} · delivers at the next step boundary",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = PvpsType.eyebrow,
                         color = Warning,
-                        modifier = Modifier.padding(start = 2.dp, bottom = 1.dp)
+                        modifier = Modifier.padding(start = Space.xxs, bottom = Space.xxs)
                     )
                     queued.forEach { item ->
-                        Surface(
-                            color = Warning.copy(alpha = 0.07f),
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, Warning.copy(alpha = 0.16f))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Warning.copy(alpha = 0.07f))
                         ) {
                             Row(
-                                modifier = Modifier.fillMaxWidth().padding(start = 9.dp, end = 2.dp, top = 3.dp, bottom = 3.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = Space.md, end = Space.xxs, top = Space.xxs, bottom = Space.xxs),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("NEXT STEP", style = MaterialTheme.typography.labelSmall, color = Warning)
-                                Spacer(Modifier.width(8.dp))
+                                Text("NEXT STEP", style = PvpsType.eyebrow, color = Warning)
+                                Spacer(Modifier.width(Space.sm))
                                 Text(
                                     item.text.replace('\n', ' '),
                                     style = MaterialTheme.typography.bodySmall,
@@ -2207,7 +2276,7 @@ private fun Composer(
                                 if (item.files > 0) {
                                     Text(
                                         " +${item.files} files",
-                                        style = MaterialTheme.typography.labelSmall,
+                                        style = PvpsType.monoBody,
                                         color = TextFaint,
                                         maxLines = 1
                                     )
@@ -2215,19 +2284,27 @@ private fun Composer(
                                 if (!busy) {
                                     Text(
                                         "DELIVER NOW",
-                                        style = MaterialTheme.typography.labelSmall,
+                                        style = PvpsType.eyebrow,
                                         color = Accent,
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .clickable { onSendQueuedNow(item) }
-                                            .padding(horizontal = 7.dp, vertical = 5.dp)
+                                            .clip(RoundedCornerShape(Radius.xs))
+                                            .pressable { onSendQueuedNow(item) }
+                                            .padding(horizontal = Space.sm, vertical = 6.dp)
                                     )
                                 }
-                                IconButton(
-                                    onClick = { onCancelQueued(item.id) },
-                                    modifier = Modifier.size(30.dp)
+                                Box(
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .clip(CircleShape)
+                                        .pressable { onCancelQueued(item.id) },
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(Icons.Default.Close, contentDescription = "Cancel queued message", tint = TextFaint, modifier = Modifier.size(15.dp))
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "Cancel queued message",
+                                        tint = TextFaint,
+                                        modifier = Modifier.size(15.dp)
+                                    )
                                 }
                             }
                         }
@@ -2235,22 +2312,75 @@ private fun Composer(
                 }
             }
 
-            Spacer(Modifier.height(7.dp))
-            Row(verticalAlignment = Alignment.Bottom) {
-                OutlinedTextField(
+            Spacer(Modifier.height(Space.sm))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(Color.White.copy(alpha = 0.045f))
+                    .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(26.dp))
+                    .padding(Space.xs),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Box {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .pressable(enabled = connected) { showAttachMenu = true },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.AttachFile,
+                            contentDescription = "Attach photos or files",
+                            tint = if (connected) TextSecondary else TextFaint,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showAttachMenu,
+                        onDismissRequest = { showAttachMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Photos", color = TextPrimary) },
+                            leadingIcon = {
+                                Icon(Icons.Default.Image, contentDescription = null, tint = Accent)
+                            },
+                            onClick = {
+                                showAttachMenu = false
+                                onAttachPhotos()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Camera", color = TextPrimary) },
+                            leadingIcon = {
+                                Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = Warning)
+                            },
+                            onClick = {
+                                showAttachMenu = false
+                                onAttachCamera()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Files", color = TextPrimary) },
+                            leadingIcon = {
+                                Icon(Icons.Default.Folder, contentDescription = null, tint = TextSecondary)
+                            },
+                            onClick = {
+                                showAttachMenu = false
+                                onAttachFiles()
+                            }
+                        )
+                    }
+                }
+                BasicTextField(
                     value = value,
                     onValueChange = onValueChange,
-                    modifier = Modifier.weight(1f),
-                    placeholder = {
-                        Text(
-                            if (busy) "Message for the next step…" else "Message OpenCode…",
-                            color = TextFaint,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    },
-                    maxLines = 6,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = Space.sm, vertical = 10.dp),
                     enabled = connected,
-                    textStyle = MaterialTheme.typography.bodyLarge,
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = TextPrimary),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(
                         onSend = {
@@ -2259,68 +2389,21 @@ private fun Composer(
                             ) onSend()
                         }
                     ),
-                    leadingIcon = {
+                    maxLines = 6,
+                    cursorBrush = SolidColor(Accent),
+                    decorationBox = { innerTextField ->
                         Box {
-                            IconButton(
-                                onClick = { showAttachMenu = true },
-                                enabled = connected
-                            ) {
-                                Icon(
-                                    Icons.Default.AttachFile,
-                                    contentDescription = "Attach photos or files",
-                                    tint = if (connected) TextSecondary else TextFaint,
-                                    modifier = Modifier.size(19.dp)
+                            if (value.isEmpty()) {
+                                Text(
+                                    if (busy) "Message for the next step…" else "Message OpenCode…",
+                                    color = TextFaint,
+                                    style = MaterialTheme.typography.bodyMedium
                                 )
                             }
-                            DropdownMenu(
-                                expanded = showAttachMenu,
-                                onDismissRequest = { showAttachMenu = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("Photos", color = TextPrimary) },
-                                    leadingIcon = {
-                                        Icon(Icons.Default.Image, contentDescription = null, tint = Accent)
-                                    },
-                                    onClick = {
-                                        showAttachMenu = false
-                                        onAttachPhotos()
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Camera", color = TextPrimary) },
-                                    leadingIcon = {
-                                        Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = Warning)
-                                    },
-                                    onClick = {
-                                        showAttachMenu = false
-                                        onAttachCamera()
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Files", color = TextPrimary) },
-                                    leadingIcon = {
-                                        Icon(Icons.Default.Folder, contentDescription = null, tint = TextSecondary)
-                                    },
-                                    onClick = {
-                                        showAttachMenu = false
-                                        onAttachFiles()
-                                    }
-                                )
-                            }
+                            innerTextField()
                         }
-                    },
-                    shape = RoundedCornerShape(18.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Accent.copy(alpha = 0.30f),
-                        unfocusedBorderColor = Color.Transparent,
-                        focusedContainerColor = SurfaceRaised.copy(alpha = 0.40f),
-                        unfocusedContainerColor = SurfaceRaised.copy(alpha = 0.34f),
-                        cursorColor = Accent,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary
-                    )
+                    }
                 )
-                Spacer(Modifier.width(7.dp))
                 if (busy) {
                     CircleAction(
                         icon = Icons.Default.Stop,
@@ -2329,14 +2412,14 @@ private fun Composer(
                         tint = Danger,
                         onClick = onStop
                     )
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(Space.xs))
                 }
                 val sendEnabled = connected && !sending &&
                     (value.isNotBlank() || attachments.isNotEmpty())
                 CircleAction(
                     icon = Icons.Default.Send,
                     description = if (busy) "Queue message" else "Send",
-                    background = if (sendEnabled) Accent else OutlineDark,
+                    background = if (sendEnabled) Accent else Color.White.copy(alpha = 0.06f),
                     tint = if (sendEnabled) Void else TextFaint,
                     enabled = sendEnabled,
                     onClick = onSend
@@ -2355,10 +2438,10 @@ private fun ComposerModelRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (selected) Accent.copy(alpha = 0.10f) else Color.Transparent)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 7.dp),
+            .clip(RoundedCornerShape(Radius.sm))
+            .background(if (selected) Accent.copy(alpha = 0.09f) else Color.Transparent)
+            .pressable(onClick = onClick)
+            .padding(horizontal = Space.sm, vertical = Space.sm),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
@@ -2371,10 +2454,10 @@ private fun ComposerModelRow(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
                 )
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(Space.sm))
                 Text(
                     model.providerID,
-                    style = MaterialTheme.typography.labelSmall,
+                    style = PvpsType.monoBody,
                     color = TextFaint,
                     maxLines = 1
                 )
@@ -2391,7 +2474,7 @@ private fun ComposerModelRow(
                         append(model.variants.size).append(" effort")
                     }
                 },
-                style = MaterialTheme.typography.labelSmall,
+                style = PvpsType.monoBody,
                 color = TextFaint,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -2410,18 +2493,16 @@ private fun ComposerModelRow(
 
 @Composable
 private fun ComposerChoice(label: String, selected: Boolean, onClick: () -> Unit) {
-    Surface(
+    Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .clickable(onClick = onClick),
-        color = if (selected) Accent else SurfaceRaised.copy(alpha = 0.7f),
-        shape = RoundedCornerShape(50),
-        border = BorderStroke(1.dp, if (selected) Accent else OutlineDark)
+            .clip(RoundedCornerShape(Radius.pill))
+            .background(if (selected) Accent else Color.White.copy(alpha = 0.05f))
+            .pressable(onClick = onClick)
+            .padding(horizontal = Space.md, vertical = 7.dp)
     ) {
         Text(
             label.uppercase(),
-            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
-            style = MaterialTheme.typography.labelSmall,
+            style = PvpsType.eyebrow,
             color = if (selected) Void else TextPrimary,
             maxLines = 1
         )
@@ -2439,13 +2520,13 @@ private fun CircleAction(
 ) {
     Box(
         modifier = Modifier
-            .size(46.dp)
+            .size(40.dp)
             .clip(CircleShape)
             .background(background)
-            .clickable(enabled = enabled, onClick = onClick),
+            .pressable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, contentDescription = description, tint = tint, modifier = Modifier.size(20.dp))
+        Icon(icon, contentDescription = description, tint = tint, modifier = Modifier.size(19.dp))
     }
 }
 
@@ -2870,60 +2951,70 @@ private fun SessionDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Surface(Modifier.fillMaxSize(), color = DeepBackground) {
+        Surface(
+            modifier = Modifier.fillMaxSize().padding(Space.sm),
+            color = DeepBackground,
+            shape = RoundedCornerShape(Radius.xl)
+        ) {
             Column(
                 Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = Space.gutter, vertical = Space.md),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text("Sessions", style = MaterialTheme.typography.headlineSmall, color = TextPrimary)
                         Text(
                             "${sessions.size} sessions · ${sessions.count { it.isRunning }} running",
-                            style = MaterialTheme.typography.bodySmall,
+                            style = PvpsType.monoBody,
                             color = TextSecondary
                         )
                     }
-                    Surface(
-                        color = Accent,
-                        shape = RoundedCornerShape(50),
+                    Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .clickable(onClick = onNew)
+                            .clip(RoundedCornerShape(Radius.pill))
+                            .background(Accent)
+                            .pressable(onClick = onNew)
+                            .padding(horizontal = Space.md, vertical = 7.dp)
                     ) {
                         Text(
                             "NEW",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = Void,
-                            modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp)
+                            style = PvpsType.eyebrow,
+                            color = Void
                         )
                     }
-                    Spacer(Modifier.width(8.dp))
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+                    Spacer(Modifier.width(Space.sm))
+                    GlassIconButton(onClick = onDismiss, size = 36.dp) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                 }
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    placeholder = { Text("Search sessions or projects", color = TextFaint) },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = Space.gutter),
+                    placeholder = { Text("Search sessions or projects", color = TextFaint, style = PvpsType.monoBody) },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextFaint) },
                     singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(Radius.sm),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Accent.copy(alpha = 0.55f),
-                        unfocusedBorderColor = OutlineDark,
+                        focusedBorderColor = Color.White.copy(alpha = 0.14f),
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.08f),
+                        focusedContainerColor = Color.White.copy(alpha = 0.045f),
+                        unfocusedContainerColor = Color.White.copy(alpha = 0.045f),
                         focusedTextColor = TextPrimary,
                         unfocusedTextColor = TextPrimary,
                         cursorColor = Accent
                     )
                 )
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 9.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = Space.gutter, vertical = Space.sm),
+                    horizontalArrangement = Arrangement.spacedBy(Space.xs),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     ComposerChoice(
@@ -2940,16 +3031,16 @@ private fun SessionDialog(
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        start = 14.dp, end = 14.dp, bottom = 24.dp
+                        start = Space.gutter, end = Space.gutter, bottom = Space.xxl
                     ),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    verticalArrangement = Arrangement.spacedBy(Space.xs)
                 ) {
                     grouped.forEach { (directory, list) ->
                         val label = projectByID[list.first().projectID]?.displayName
                             ?: directory.trimEnd('/').substringAfterLast('/').ifBlank { "Global" }
                         item(key = "project-$directory") {
                             Row(
-                                modifier = Modifier.fillMaxWidth().padding(start = 4.dp, top = 8.dp, bottom = 2.dp),
+                                modifier = Modifier.fillMaxWidth().padding(start = Space.xs, top = Space.sm, bottom = Space.xxs),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
@@ -2958,10 +3049,10 @@ private fun SessionDialog(
                                     tint = Accent.copy(alpha = 0.8f),
                                     modifier = Modifier.size(14.dp)
                                 )
-                                Spacer(Modifier.width(6.dp))
+                                Spacer(Modifier.width(Space.xs))
                                 Text(
                                     label.uppercase(),
-                                    style = MaterialTheme.typography.labelSmall,
+                                    style = PvpsType.eyebrow,
                                     color = TextSecondary,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -2969,7 +3060,7 @@ private fun SessionDialog(
                                 Spacer(Modifier.weight(1f))
                                 Text(
                                     "${list.size}",
-                                    style = MaterialTheme.typography.labelSmall,
+                                    style = PvpsType.eyebrow,
                                     color = TextFaint
                                 )
                             }
@@ -2994,37 +3085,31 @@ private fun SessionRow(
     active: Boolean,
     onClick: () -> Unit
 ) {
+    val shape = RoundedCornerShape(Radius.md)
     Surface(
         color = when {
             active -> Accent.copy(alpha = 0.075f)
-            else -> SurfaceRaised.copy(alpha = 0.34f)
+            else -> Color.White.copy(alpha = 0.035f)
         },
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(
-            1.dp,
-            when {
-                active -> Accent.copy(alpha = 0.34f)
-                else -> OutlineDark.copy(alpha = 0.58f)
-            }
-        ),
+        shape = shape,
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
+            .clip(shape)
+            .pressable(onClick = onClick)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 13.dp, vertical = 12.dp),
+            modifier = Modifier.padding(horizontal = Space.md, vertical = Space.md),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
                     .size(28.dp)
-                    .clip(RoundedCornerShape(9.dp))
+                    .clip(RoundedCornerShape(Radius.xs))
                     .background(
                         when {
                             session.isRunning -> Warning.copy(alpha = 0.13f)
                             active -> Accent.copy(alpha = 0.13f)
-                            else -> OutlineDark.copy(alpha = 0.35f)
+                            else -> Color.White.copy(alpha = 0.06f)
                         }
                     ),
                 contentAlignment = Alignment.Center
@@ -3038,7 +3123,7 @@ private fun SessionRow(
                     6
                 )
             }
-            Spacer(Modifier.width(11.dp))
+            Spacer(Modifier.width(Space.md))
             Column(Modifier.weight(1f)) {
                 Text(
                     session.displayTitle,
@@ -3047,7 +3132,7 @@ private fun SessionRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(Modifier.height(2.dp))
+                Spacer(Modifier.height(Space.xxs))
                 Text(
                     buildString {
                         append(session.agent ?: "agent")
@@ -3058,7 +3143,7 @@ private fun SessionRow(
                             append(formatCost(session.cost))
                         }
                     },
-                    style = MaterialTheme.typography.labelSmall,
+                    style = PvpsType.monoBody,
                     color = TextFaint,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -3067,12 +3152,12 @@ private fun SessionRow(
             if (session.isRunning) {
                 Text(
                     "LIVE",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = PvpsType.eyebrow,
                     color = Warning,
-                    modifier = Modifier.padding(horizontal = 6.dp)
+                    modifier = Modifier.padding(horizontal = Space.sm)
                 )
             } else if (active) {
-                Text("●", color = Accent, modifier = Modifier.padding(horizontal = 7.dp))
+                Text("●", color = Accent, style = PvpsType.eyebrow)
             }
         }
     }
@@ -3103,31 +3188,39 @@ private fun StatsDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Surface(Modifier.fillMaxSize(), color = DeepBackground) {
+        Surface(
+            modifier = Modifier.fillMaxSize().padding(Space.sm),
+            color = DeepBackground,
+            shape = RoundedCornerShape(Radius.xl)
+        ) {
             Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = Space.gutter, vertical = Space.md),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text("Telemetry", style = MaterialTheme.typography.headlineSmall, color = TextPrimary)
                         Text(
                             "Live session · context · spend · usage",
-                            style = MaterialTheme.typography.labelSmall,
+                            style = PvpsType.monoBody,
                             color = TextFaint
                         )
                     }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close telemetry", tint = TextSecondary)
+                    GlassIconButton(onClick = onDismiss, size = 36.dp) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Close telemetry",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                 }
-                HorizontalDivider(color = OutlineDark.copy(alpha = 0.7f))
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 18.dp, vertical = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                        .padding(horizontal = Space.gutter, vertical = Space.md),
+                    verticalArrangement = Arrangement.spacedBy(Space.md)
                 ) {
                 Text(
                     session?.displayTitle ?: "No active session",
@@ -3142,7 +3235,7 @@ private fun StatsDialog(
                         session?.model?.let { append("${it.providerID}/${it.id} · ") }
                         append(if (session?.isRunning == true) "working" else "idle")
                     },
-                    style = MaterialTheme.typography.labelSmall,
+                    style = PvpsType.monoBody,
                     color = TextSecondary
                 )
                 parent?.let { p ->
@@ -3152,25 +3245,23 @@ private fun StatsDialog(
                 }
 
                 if (contextFraction != null) {
-                    Text("CONTEXT WINDOW", style = MaterialTheme.typography.labelSmall, color = TextFaint)
-                    LinearProgressIndicator(
-                        progress = { contextFraction.toFloat() },
-                        modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(50)),
-                        color = when {
+                    Text("CONTEXT WINDOW", style = PvpsType.eyebrow, color = TextFaint)
+                    MeterBar(
+                        progress = contextFraction.toFloat(),
+                        accent = when {
                             contextFraction > 0.85 -> Danger
                             contextFraction > 0.65 -> Warning
                             else -> Accent
-                        },
-                        trackColor = OutlineDark
+                        }
                     )
                     Text(
                         "${contextUsed?.let { compactTokens(it) } ?: "—"} / ${compactTokens(contextLimit)} · ${(contextFraction * 100).toInt()}%",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = PvpsType.monoBody,
                         color = TextSecondary
                     )
                     Text(
                         "Measured from the live session context and the latest assistant usage. Refreshes after each step and when the SSE stream resyncs.",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.bodySmall,
                         color = TextFaint
                     )
                 }
@@ -3190,19 +3281,19 @@ private fun StatsDialog(
                             "The local provider reports $0.00 for this session. The dollar figure is estimated from model list price; the Go allowance below is authoritative."
                         else -> "Cost reported by the provider for this session."
                     },
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.bodySmall,
                     color = TextFaint
                 )
                 usage?.go?.let { go ->
-                    Text("OPENCODE GO ALLOWANCE", style = MaterialTheme.typography.labelSmall, color = TextFaint)
-                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text("OPENCODE GO ALLOWANCE", style = PvpsType.eyebrow, color = TextFaint)
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                         StatBox("ROLLING", "${go.rolling.percent.toInt()}%", Modifier.weight(1f))
                         StatBox("WEEKLY", "${go.weekly.percent.toInt()}%", Modifier.weight(1f))
                         StatBox("MONTHLY", "${go.monthly.percent.toInt()}%", Modifier.weight(1f))
                     }
                 }
                 if (usage != null && usage.budgets.isNotEmpty()) {
-                    Text("REPORTED BUDGETS", style = MaterialTheme.typography.labelSmall, color = TextFaint)
+                    Text("REPORTED BUDGETS", style = PvpsType.eyebrow, color = TextFaint)
                     usage.budgets.take(4).forEach { budget ->
                         InfoRow(
                             label = listOf(budget.scope, budget.per)
@@ -3215,26 +3306,25 @@ private fun StatsDialog(
                 }
 
                 if (subagents.isNotEmpty()) {
-                    Text("SUBAGENTS", style = MaterialTheme.typography.labelSmall, color = TextFaint)
+                    Text("SUBAGENTS", style = PvpsType.eyebrow, color = TextFaint)
                     subagents
                         .sortedWith(compareByDescending<SessionInfo> { it.isRunning }
                             .thenByDescending { it.time.updated })
                         .forEach { sub ->
                         Surface(
                             color = Violet.copy(alpha = 0.06f),
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, Violet.copy(alpha = 0.16f)),
+                            shape = RoundedCornerShape(Radius.sm),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { onOpenSubagent(sub.id) }
+                                .clip(RoundedCornerShape(Radius.sm))
+                                .pressable { onOpenSubagent(sub.id) }
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                modifier = Modifier.padding(horizontal = Space.md, vertical = Space.sm),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 StatusDot(if (sub.isRunning) Warning else Violet, 6)
-                                Spacer(Modifier.width(8.dp))
+                                Spacer(Modifier.width(Space.sm))
                                 Column(Modifier.weight(1f)) {
                                     Text(
                                         sub.displayTitle,
@@ -3245,7 +3335,7 @@ private fun StatsDialog(
                                     )
                                     Text(
                                         "${sub.agent ?: "subagent"} · ${if (sub.isRunning) "running" else "done"} · ${formatCost(sub.cost)}",
-                                        style = MaterialTheme.typography.labelSmall,
+                                        style = PvpsType.monoBody,
                                         color = TextFaint
                                     )
                                 }
@@ -3260,11 +3350,11 @@ private fun StatsDialog(
                 if (session != null) {
                     Text(
                         "created ${relativeTime(session.time.created)} · updated ${relativeTime(session.time.updated)}",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = PvpsType.monoBody,
                         color = TextFaint
                     )
                 }
-                Spacer(Modifier.height(30.dp))
+                Spacer(Modifier.height(Space.xxl))
                 }
             }
         }
@@ -3279,16 +3369,16 @@ private fun StatsGrid(
     tps: Double?,
     messages: Int
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.sm)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
             StatBox(if (estimated) "SPENT · EST" else "SPENT", formatCost(cost), Modifier.weight(1f))
             StatBox("TOK/S", tps?.let { String.format(Locale.US, "%.1f", it) } ?: "—", Modifier.weight(1f))
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
             StatBox("INPUT", compactTokens(totalTokens.input), Modifier.weight(1f))
             StatBox("OUTPUT", compactTokens(totalTokens.output + totalTokens.reasoning), Modifier.weight(1f))
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
             StatBox("CACHE", compactTokens(totalTokens.cache.read + totalTokens.cache.write), Modifier.weight(1f))
             StatBox("MESSAGES", messages.toString(), Modifier.weight(1f))
         }
@@ -3297,15 +3387,14 @@ private fun StatsGrid(
 
 @Composable
 private fun StatBox(label: String, value: String, modifier: Modifier = Modifier) {
-    Surface(
+    PvpsCard(
         modifier = modifier,
-        color = DeepBackground.copy(alpha = 0.55f),
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.65f))
+        shape = RoundedCornerShape(Radius.sm)
     ) {
-        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
-            Text(label, style = MaterialTheme.typography.labelSmall, color = TextFaint)
-            Text(value, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+        Column(Modifier.padding(horizontal = Space.md, vertical = Space.sm)) {
+            Text(label, style = PvpsType.eyebrow, color = TextFaint)
+            Spacer(Modifier.height(Space.xxs))
+            Text(value, style = PvpsType.numeric, color = TextPrimary, maxLines = 1)
         }
     }
 }

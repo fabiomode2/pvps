@@ -17,8 +17,8 @@ android {
     compileSdk = 36
     buildToolsVersion = "36.0.0"
 
-    val pvpsVersionName = (project.findProperty("pvpsVersionName") as String?) ?: "2.1.0"
-    val pvpsVersionCode = (project.findProperty("pvpsVersionCode") as String?)?.toIntOrNull() ?: 20100
+    val pvpsVersionName = (project.findProperty("pvpsVersionName") as String?) ?: "2.2.0"
+    val pvpsVersionCode = (project.findProperty("pvpsVersionCode") as String?)?.toIntOrNull() ?: 20200
 
     defaultConfig {
         applicationId = "dev.pvps"

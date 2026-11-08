@@ -1,7 +1,11 @@
 package dev.pvps.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -42,11 +46,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import dev.pvps.ui.theme.Hairline
+import dev.pvps.ui.theme.PvpsType
+import dev.pvps.ui.theme.Radius
+import dev.pvps.ui.theme.Space
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -314,57 +327,68 @@ fun AppRoot(viewModel: AppViewModel) {
 
 @Composable
 private fun PvpsDock(route: String, onSelect: (String) -> Unit) {
+    val haptics = LocalHapticFeedback.current
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 14.dp, vertical = 7.dp)
+            .padding(horizontal = 20.dp, vertical = 10.dp)
     ) {
-        Surface(
-            color = SurfaceHigh.copy(alpha = 0.94f),
-            shape = RoundedCornerShape(24.dp),
-            border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.75f)),
-            modifier = Modifier.fillMaxWidth()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .shadow(24.dp, RoundedCornerShape(Radius.xl), ambientColor = Color.Black.copy(alpha = 0.5f))
+                .clip(RoundedCornerShape(Radius.xl))
+                .background(SurfaceHigh.copy(alpha = 0.96f))
+                .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(Radius.xl))
+                .padding(horizontal = 6.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().height(62.dp).padding(horizontal = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                bottomItems.forEach { item ->
-                    val selected = route == item.route
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
+            bottomItems.forEach { item ->
+                val selected = route == item.route
+                val tint by animateColorAsState(
+                    targetValue = if (selected) Accent else TextFaint,
+                    animationSpec = tween(220),
+                    label = "dockTint"
+                )
+                val iconScale by animateFloatAsState(
+                    targetValue = if (selected) 1f else 0.94f,
+                    animationSpec = tween(220),
+                    label = "dockScale"
+                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(Radius.md))
+                        .background(
+                            if (selected) Accent.copy(alpha = 0.10f) else Color.Transparent
+                        )
+                        .clickable {
+                            if (!selected) {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSelect(item.route)
+                            }
+                        }
+                        .padding(vertical = 8.dp)
+                ) {
+                    Icon(
+                        imageVector = item.icon,
+                        contentDescription = item.label,
+                        tint = tint,
                         modifier = Modifier
-                            .weight(1f)
-                            .height(50.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(if (selected) Accent.copy(alpha = 0.11f) else Color.Transparent)
-                            .clickable { onSelect(item.route) }
-                    ) {
-                        Icon(
-                            imageVector = item.icon,
-                            contentDescription = item.label,
-                            tint = if (selected) Accent else TextSecondary,
-                            modifier = Modifier.size(21.dp)
-                        )
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            item.label.uppercase(),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (selected) Accent else TextFaint,
-                            maxLines = 1
-                        )
-                        Spacer(Modifier.height(3.dp))
-                        Box(
-                            modifier = Modifier
-                                .width(if (selected) 14.dp else 4.dp)
-                                .height(2.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(if (selected) Accent else Color.Transparent)
-                        )
-                    }
+                            .size(21.dp)
+                            .scale(iconScale)
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        item.label.uppercase(),
+                        style = PvpsType.eyebrow.copy(letterSpacing = 1.1.sp),
+                        color = tint,
+                        maxLines = 1
+                    )
                 }
             }
         }

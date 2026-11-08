@@ -1,8 +1,6 @@
 package dev.pvps.ui.screens
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -34,21 +32,17 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -61,32 +55,34 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.pvps.data.model.ConnectionState
 import dev.pvps.system.SystemRepository
 import dev.pvps.ui.AppViewModel
 import dev.pvps.ui.components.ConfirmDialog
 import dev.pvps.ui.components.EmptyState
 import dev.pvps.ui.components.ErrorBanner
+import dev.pvps.ui.components.MeterBar
 import dev.pvps.ui.components.MonospaceBox
+import dev.pvps.ui.components.PvpsCard
 import dev.pvps.ui.components.ScreenHeader
 import dev.pvps.ui.components.StatusDot
+import dev.pvps.ui.components.StatusPill
 import dev.pvps.ui.components.collectAsStateValue
 import dev.pvps.ui.components.formatBytes
 import dev.pvps.ui.theme.Accent
 import dev.pvps.ui.theme.Danger
-import dev.pvps.ui.theme.OnAccent
+import dev.pvps.ui.theme.PvpsType
+import dev.pvps.ui.theme.Radius
+import dev.pvps.ui.theme.Space
 import dev.pvps.ui.theme.Success
-import dev.pvps.ui.theme.OutlineDark
 import dev.pvps.ui.theme.SurfaceHigh
 import dev.pvps.ui.theme.SurfaceRaised
 import dev.pvps.ui.theme.TextFaint
@@ -94,6 +90,7 @@ import dev.pvps.ui.theme.TextPrimary
 import dev.pvps.ui.theme.TextSecondary
 import dev.pvps.ui.theme.Violet
 import dev.pvps.ui.theme.Warning
+import dev.pvps.ui.theme.pressable
 import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -129,88 +126,147 @@ fun DockerScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                 subtitle = host?.let { "${it.name} · ${containers.count { c -> c.running }}/${containers.size} running" } ?: "No host",
                 onBack = onBack,
                 actions = {
-                    IconButton(onClick = { refresh++ }, enabled = !loading) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Accent)
-                    }
+                    IconAction(
+                        icon = Icons.Default.Refresh,
+                        contentDescription = "Refresh",
+                        tint = TextSecondary,
+                        enabled = !loading,
+                        onClick = { refresh++ }
+                    )
                 }
             )
         }
     ) { padding ->
         if (host == null || !connected) {
-            EmptyState(
-                title = "SSH not connected",
-                message = "Connect to the host from the dashboard first.",
-                actionLabel = "Connect",
-                onAction = { host?.let { viewModel.connect(it.id) } }
-            )
+            Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+                EmptyState(
+                    title = "SSH not connected",
+                    message = "Connect to the host from the dashboard first.",
+                    actionLabel = "Connect",
+                    onAction = { host?.let { viewModel.connect(it.id) } }
+                )
+            }
             return@Scaffold
         }
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = Space.gutter),
+            verticalArrangement = Arrangement.spacedBy(Space.sm)
         ) {
-            item { Spacer(Modifier.height(4.dp)) }
+            item { Spacer(Modifier.height(Space.xs)) }
             if (error != null) item { ErrorBanner(error!!) { error = null } }
-            if (loading) item { CircularProgressIndicator(color = Accent, modifier = Modifier.padding(16.dp)) }
+            if (loading) {
+                item {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = Space.lg),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = Accent,
+                            strokeWidth = 2.dp
+                        )
+                    }
+                }
+            }
             if (!loading && containers.isEmpty()) {
                 item { EmptyState("No containers", "Docker returned an empty list.") }
             }
             items(containers, key = { it.id }) { container ->
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                    Column(modifier = Modifier.padding(14.dp)) {
+                val stateColor = if (container.running) Success else TextSecondary
+                PvpsCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(Radius.md)
+                ) {
+                    Column(modifier = Modifier.padding(Space.lg)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            StatusDot(if (container.running) Success else TextSecondary)
-                            Spacer(Modifier.width(8.dp))
+                            StatusDot(stateColor, 7)
+                            Spacer(Modifier.width(Space.sm))
                             Text(
                                 container.name,
                                 style = MaterialTheme.typography.titleMedium,
+                                color = TextPrimary,
                                 modifier = Modifier.weight(1f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            Text(container.state, style = MaterialTheme.typography.labelSmall, color = if (container.running) Success else TextSecondary)
+                            Spacer(Modifier.width(Space.sm))
+                            StatusPill(container.state, stateColor)
                         }
+                        Spacer(Modifier.height(Space.xs))
                         Text(
                             container.image,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = TextSecondary,
+                            style = PvpsType.monoBody,
+                            color = TextFaint,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         if (container.ports.isNotBlank()) {
-                            Text(container.ports, style = MaterialTheme.typography.labelSmall, color = TextSecondary, maxLines = 2)
+                            Spacer(Modifier.height(Space.xxs))
+                            Text(
+                                container.ports,
+                                style = PvpsType.monoBody,
+                                color = TextFaint,
+                                maxLines = 2
+                            )
                         }
-                        Text(container.status, style = MaterialTheme.typography.labelSmall, color = TextSecondary, maxLines = 2)
-                        Spacer(Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Spacer(Modifier.height(Space.xxs))
+                        Text(
+                            container.status,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary,
+                            maxLines = 2
+                        )
+                        Spacer(Modifier.height(Space.md))
+                        Row(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
                             if (container.running) {
-                                IconButton(onClick = {
-                                    confirmAction = Triple(container, "restart", "Restart ${container.name}?")
-                                }) { Icon(Icons.Default.RestartAlt, contentDescription = "Restart", tint = Warning) }
-                                IconButton(onClick = {
-                                    confirmAction = Triple(container, "stop", "Stop ${container.name}?")
-                                }) { Icon(Icons.Default.Stop, contentDescription = "Stop", tint = Danger) }
-                            } else {
-                                IconButton(onClick = {
-                                    scope.launch {
-                                        runCatching { viewModel.system.containerAction(host.id, container.name, "start") }
-                                            .onFailure { error = it.message }
-                                        refresh++
+                                IconAction(
+                                    icon = Icons.Default.RestartAlt,
+                                    contentDescription = "Restart",
+                                    tint = Warning,
+                                    size = 32.dp,
+                                    onClick = {
+                                        confirmAction = Triple(container, "restart", "Restart ${container.name}?")
                                     }
-                                }) { Icon(Icons.Default.PlayArrow, contentDescription = "Start", tint = Success) }
+                                )
+                                IconAction(
+                                    icon = Icons.Default.Stop,
+                                    contentDescription = "Stop",
+                                    tint = Danger,
+                                    size = 32.dp,
+                                    onClick = {
+                                        confirmAction = Triple(container, "stop", "Stop ${container.name}?")
+                                    }
+                                )
+                            } else {
+                                IconAction(
+                                    icon = Icons.Default.PlayArrow,
+                                    contentDescription = "Start",
+                                    tint = Success,
+                                    size = 32.dp,
+                                    onClick = {
+                                        scope.launch {
+                                            runCatching { viewModel.system.containerAction(host.id, container.name, "start") }
+                                                .onFailure { error = it.message }
+                                            refresh++
+                                        }
+                                    }
+                                )
                             }
-                            IconButton(onClick = { logsTarget = container }) {
-                                Icon(Icons.Default.Terminal, contentDescription = "Logs", tint = Accent)
-                            }
+                            IconAction(
+                                icon = Icons.Default.Terminal,
+                                contentDescription = "Logs",
+                                tint = TextSecondary,
+                                size = 32.dp,
+                                onClick = { logsTarget = container }
+                            )
                         }
                     }
                 }
             }
-            item { Spacer(Modifier.height(80.dp)) }
+            item { Spacer(Modifier.height(Space.dockClearance)) }
         }
     }
 
@@ -277,102 +333,181 @@ fun ServicesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                 subtitle = host?.let { "${it.name} · ${services.count { s -> s.isRunning }} running" } ?: "No host",
                 onBack = onBack,
                 actions = {
-                    IconButton(onClick = { refresh++ }, enabled = !loading) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Accent)
-                    }
+                    IconAction(
+                        icon = Icons.Default.Refresh,
+                        contentDescription = "Refresh",
+                        tint = TextSecondary,
+                        enabled = !loading,
+                        onClick = { refresh++ }
+                    )
                 }
             )
         }
     ) { padding ->
         if (host == null || !connected) {
-            EmptyState(
-                title = "SSH not connected",
-                message = "Connect to the host from the dashboard first.",
-                actionLabel = "Connect",
-                onAction = { host?.let { viewModel.connect(it.id) } }
-            )
+            Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+                EmptyState(
+                    title = "SSH not connected",
+                    message = "Connect to the host from the dashboard first.",
+                    actionLabel = "Connect",
+                    onAction = { host?.let { viewModel.connect(it.id) } }
+                )
+            }
             return@Scaffold
         }
+        val filterColors = FilterChipDefaults.filterChipColors(
+            containerColor = Color.White.copy(alpha = 0.05f),
+            labelColor = TextSecondary,
+            selectedContainerColor = Accent.copy(alpha = 0.14f),
+            selectedLabelColor = Accent
+        )
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             OutlinedTextField(
                 value = search,
                 onValueChange = { search = it },
-                label = { Text("Filter services") },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
+                label = { Text("Filter services", style = MaterialTheme.typography.labelSmall) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Space.gutter, vertical = Space.xs),
+                shape = RoundedCornerShape(Radius.md),
+                textStyle = MaterialTheme.typography.bodyMedium,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Accent.copy(alpha = 0.70f),
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.10f),
+                    focusedLabelColor = Accent,
+                    unfocusedLabelColor = TextFaint,
+                    cursorColor = Accent,
+                    focusedContainerColor = SurfaceRaised.copy(alpha = 0.55f),
+                    unfocusedContainerColor = Color.White.copy(alpha = 0.035f),
+                    focusedTextColor = TextPrimary,
+                    unfocusedTextColor = TextPrimary
+                )
             )
             Row(
-                modifier = Modifier.padding(horizontal = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Space.gutter, vertical = Space.xs),
+                horizontalArrangement = Arrangement.spacedBy(Space.xs)
             ) {
-                FilterChip(selected = filter == "all", onClick = { filter = "all" }, label = { Text("All") })
-                FilterChip(selected = filter == "running", onClick = { filter = "running" }, label = { Text("Running") })
-                FilterChip(selected = filter == "failed", onClick = { filter = "failed" }, label = { Text("Failed") })
+                FilterChip(
+                    selected = filter == "all",
+                    onClick = { filter = "all" },
+                    label = { Text("All") },
+                    shape = RoundedCornerShape(Radius.pill),
+                    colors = filterColors,
+                    border = null,
+                    elevation = null
+                )
+                FilterChip(
+                    selected = filter == "running",
+                    onClick = { filter = "running" },
+                    label = { Text("Running") },
+                    shape = RoundedCornerShape(Radius.pill),
+                    colors = filterColors,
+                    border = null,
+                    elevation = null
+                )
+                FilterChip(
+                    selected = filter == "failed",
+                    onClick = { filter = "failed" },
+                    label = { Text("Failed") },
+                    shape = RoundedCornerShape(Radius.pill),
+                    colors = filterColors,
+                    border = null,
+                    elevation = null
+                )
             }
-            if (error != null) ErrorBanner(error!!) { error = null }
+            if (error != null) {
+                Box(modifier = Modifier.padding(horizontal = Space.gutter, vertical = Space.xs)) {
+                    ErrorBanner(error!!) { error = null }
+                }
+            }
             LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier.fillMaxSize().padding(horizontal = Space.gutter),
+                verticalArrangement = Arrangement.spacedBy(Space.sm)
             ) {
-                item { Spacer(Modifier.height(4.dp)) }
+                item { Spacer(Modifier.height(Space.xs)) }
                 items(filtered, key = { it.unit }) { service ->
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                        Column(modifier = Modifier.padding(12.dp)) {
+                    val stateColor = when {
+                        service.isFailed -> Danger
+                        service.isRunning -> Success
+                        else -> TextSecondary
+                    }
+                    PvpsCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(Radius.md)
+                    ) {
+                        Column(modifier = Modifier.padding(Space.lg)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                StatusDot(
-                                    when {
-                                        service.isFailed -> Danger
-                                        service.isRunning -> Success
-                                        else -> TextSecondary
-                                    }
-                                )
-                                Spacer(Modifier.width(8.dp))
+                                StatusDot(stateColor, 7)
+                                Spacer(Modifier.width(Space.sm))
                                 Text(
                                     service.unit,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontFamily = FontFamily.Monospace,
+                                    style = PvpsType.monoStrong,
+                                    color = TextPrimary,
                                     modifier = Modifier.weight(1f),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                Text(
-                                    "${service.active}/${service.sub}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (service.isFailed) Danger else TextSecondary
-                                )
+                                Spacer(Modifier.width(Space.sm))
+                                StatusPill("${service.active}/${service.sub}", stateColor)
                             }
+                            Spacer(Modifier.height(Space.xs))
                             Text(
                                 service.description,
-                                style = MaterialTheme.typography.labelSmall,
+                                style = MaterialTheme.typography.bodySmall,
                                 color = TextSecondary,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            Spacer(Modifier.height(6.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Spacer(Modifier.height(Space.md))
+                            Row(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
                                 if (service.isRunning) {
-                                    IconButton(onClick = {
-                                        confirmAction = Triple(service, "restart", "Restart ${service.unit}?")
-                                    }) { Icon(Icons.Default.RestartAlt, contentDescription = "Restart", tint = Warning) }
-                                    IconButton(onClick = {
-                                        confirmAction = Triple(service, "stop", "Stop ${service.unit}?")
-                                    }) { Icon(Icons.Default.Stop, contentDescription = "Stop", tint = Danger) }
-                                } else {
-                                    IconButton(onClick = {
-                                        scope.launch {
-                                            runCatching { viewModel.system.serviceAction(host.id, service.unit, "start") }
-                                                .onFailure { error = it.message }
-                                            refresh++
+                                    IconAction(
+                                        icon = Icons.Default.RestartAlt,
+                                        contentDescription = "Restart",
+                                        tint = Warning,
+                                        size = 32.dp,
+                                        onClick = {
+                                            confirmAction = Triple(service, "restart", "Restart ${service.unit}?")
                                         }
-                                    }) { Icon(Icons.Default.PlayArrow, contentDescription = "Start", tint = Success) }
+                                    )
+                                    IconAction(
+                                        icon = Icons.Default.Stop,
+                                        contentDescription = "Stop",
+                                        tint = Danger,
+                                        size = 32.dp,
+                                        onClick = {
+                                            confirmAction = Triple(service, "stop", "Stop ${service.unit}?")
+                                        }
+                                    )
+                                } else {
+                                    IconAction(
+                                        icon = Icons.Default.PlayArrow,
+                                        contentDescription = "Start",
+                                        tint = Success,
+                                        size = 32.dp,
+                                        onClick = {
+                                            scope.launch {
+                                                runCatching { viewModel.system.serviceAction(host.id, service.unit, "start") }
+                                                    .onFailure { error = it.message }
+                                                refresh++
+                                            }
+                                        }
+                                    )
                                 }
-                                IconButton(onClick = { logsTarget = service }) {
-                                    Icon(Icons.Default.Terminal, contentDescription = "Logs", tint = Accent)
-                                }
+                                IconAction(
+                                    icon = Icons.Default.Terminal,
+                                    contentDescription = "Logs",
+                                    tint = TextSecondary,
+                                    size = 32.dp,
+                                    onClick = { logsTarget = service }
+                                )
                             }
                         }
                     }
                 }
-                item { Spacer(Modifier.height(80.dp)) }
+                item { Spacer(Modifier.height(Space.dockClearance)) }
             }
         }
     }
@@ -415,6 +550,34 @@ private val ProcessPidWidth = 50.dp
 private val ProcessCpuWidth = 48.dp
 private val ProcessRamWidth = 62.dp
 private val ProcessKillWidth = 40.dp
+
+/** 32–34dp chrome action: quiet fill, no ripple, tactile press. */
+@Composable
+private fun IconAction(
+    icon: ImageVector,
+    contentDescription: String,
+    tint: Color,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    size: Dp = 34.dp,
+    container: Color = Color.White.copy(alpha = 0.05f)
+) {
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(RoundedCornerShape(Radius.pill))
+            .background(if (enabled) container else Color.White.copy(alpha = 0.02f))
+            .pressable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = if (enabled) tint else TextFaint.copy(alpha = 0.55f),
+            modifier = Modifier.size(size * 0.5f)
+        )
+    }
+}
 
 @Composable
 fun ProcessesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
@@ -506,9 +669,13 @@ fun ProcessesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                 } ?: "No host",
                 onBack = onBack,
                 actions = {
-                    IconButton(onClick = { refresh++ }, enabled = !loading) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Accent)
-                    }
+                    IconAction(
+                        icon = Icons.Default.Refresh,
+                        contentDescription = "Refresh",
+                        tint = TextSecondary,
+                        enabled = !loading,
+                        onClick = { refresh++ }
+                    )
                 }
             )
         }
@@ -544,30 +711,30 @@ fun ProcessesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                 },
                 trailingIcon = if (search.isNotBlank()) {
                     {
-                        IconButton(onClick = { search = "" }) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = "Clear filter",
-                                tint = TextFaint,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
+                        IconAction(
+                            icon = Icons.Default.Close,
+                            contentDescription = "Clear filter",
+                            tint = TextFaint,
+                            size = 28.dp,
+                            container = Color.Transparent,
+                            onClick = { search = "" }
+                        )
                     }
                 } else {
                     null
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                    .padding(horizontal = Space.gutter, vertical = Space.xs),
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyMedium,
-                shape = RoundedCornerShape(13.dp),
+                shape = RoundedCornerShape(Radius.md),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Accent.copy(alpha = 0.72f),
-                    unfocusedBorderColor = OutlineDark,
+                    focusedBorderColor = Accent.copy(alpha = 0.70f),
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.10f),
                     cursorColor = Accent,
-                    focusedContainerColor = SurfaceRaised.copy(alpha = 0.38f),
-                    unfocusedContainerColor = SurfaceRaised.copy(alpha = 0.22f),
+                    focusedContainerColor = SurfaceRaised.copy(alpha = 0.55f),
+                    unfocusedContainerColor = Color.White.copy(alpha = 0.035f),
                     focusedTextColor = TextPrimary,
                     unfocusedTextColor = TextPrimary
                 )
@@ -575,17 +742,17 @@ fun ProcessesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 3.dp),
+                    .padding(horizontal = Space.gutter, vertical = Space.sm),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 ProcessSortControl(selected = sort, onSelect = { sort = it })
                 Spacer(Modifier.weight(1f))
                 Text(
                     "${sorted.size} shown",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = PvpsType.monoBody,
                     color = TextFaint
                 )
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(Space.sm))
                 AutoRefreshChip(
                     enabled = autoRefresh,
                     onClick = { autoRefresh = !autoRefresh }
@@ -593,16 +760,24 @@ fun ProcessesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             }
             if (loading) {
                 LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth().height(2.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Space.gutter)
+                        .height(2.dp)
+                        .clip(RoundedCornerShape(Radius.pill)),
                     color = Accent,
-                    trackColor = OutlineDark
+                    trackColor = Color.White.copy(alpha = 0.06f)
                 )
             }
-            if (error != null && processes.isNotEmpty()) ErrorBanner(error!!) { error = null }
+            if (error != null && processes.isNotEmpty()) {
+                Box(modifier = Modifier.padding(horizontal = Space.gutter, vertical = Space.xs)) {
+                    ErrorBanner(error!!) { error = null }
+                }
+            }
             ProcessTableHeader()
             LazyColumn(
                 modifier = Modifier.fillMaxWidth().weight(1f),
-                contentPadding = PaddingValues(bottom = 88.dp)
+                contentPadding = PaddingValues(bottom = Space.dockClearance)
             ) {
                 when {
                     loading && processes.isEmpty() -> item { ProcessLoadingState() }
@@ -652,7 +827,7 @@ fun ProcessesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
         AlertDialog(
             onDismissRequest = { killTarget = null },
             containerColor = SurfaceHigh,
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(Radius.xl),
             titleContentColor = TextPrimary,
             textContentColor = TextSecondary,
             title = { Text("Kill ${process.command}?", style = MaterialTheme.typography.headlineSmall) },
@@ -663,14 +838,13 @@ fun ProcessesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                         style = MaterialTheme.typography.bodyMedium,
                         color = TextSecondary
                     )
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(Space.xs))
                     Text(
                         "CPU ${formatPercent(process.cpu)} · ${formatMemory(process.rssKb)} · ${process.elapsed}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextFaint,
-                        fontFamily = FontFamily.Monospace
+                        style = PvpsType.monoBody,
+                        color = TextFaint
                     )
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(Space.md))
                     Text(
                         when {
                             protected -> "This process is system-critical and must not be killed."
@@ -681,22 +855,23 @@ fun ProcessesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                         color = if (protected) Danger else TextSecondary
                     )
                     if (!protected) {
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(Space.sm))
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable { forceKill = !forceKill }
-                                .padding(vertical = 2.dp),
+                                .clip(RoundedCornerShape(Radius.sm))
+                                .background(Color.White.copy(alpha = 0.04f))
+                                .pressable { forceKill = !forceKill }
+                                .padding(horizontal = Space.sm, vertical = Space.xs),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Checkbox(checked = forceKill, onCheckedChange = { forceKill = it })
-                            Spacer(Modifier.width(4.dp))
+                            Spacer(Modifier.width(Space.xs))
                             Column {
                                 Text("Force kill", style = MaterialTheme.typography.titleSmall, color = TextPrimary)
                                 Text(
                                     "SIGKILL · cannot be caught",
-                                    style = MaterialTheme.typography.labelSmall,
+                                    style = PvpsType.monoBody,
                                     color = TextFaint
                                 )
                             }
@@ -737,31 +912,30 @@ fun ProcessesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
 private fun ProcessSortControl(selected: ProcessSort, onSelect: (ProcessSort) -> Unit) {
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(OutlineDark.copy(alpha = 0.35f))
-            .padding(2.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
+            .clip(RoundedCornerShape(Radius.pill))
+            .background(Color.White.copy(alpha = 0.05f))
+            .padding(Space.xxs),
+        horizontalArrangement = Arrangement.spacedBy(Space.xxs),
         verticalAlignment = Alignment.CenterVertically
     ) {
         ProcessSort.values().forEach { option ->
             val active = option == selected
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (active) Accent else Color.Transparent)
+                    .clip(RoundedCornerShape(Radius.pill))
+                    .background(if (active) Accent.copy(alpha = 0.14f) else Color.Transparent)
                     .selectable(
                         selected = active,
                         onClick = { onSelect(option) },
                         role = Role.Tab
                     )
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                    .padding(horizontal = Space.sm, vertical = 6.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     option.label,
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (active) OnAccent else TextSecondary,
-                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal
+                    color = if (active) Accent else TextSecondary
                 )
             }
         }
@@ -771,30 +945,21 @@ private fun ProcessSortControl(selected: ProcessSort, onSelect: (ProcessSort) ->
 @Composable
 private fun AutoRefreshChip(enabled: Boolean, onClick: () -> Unit) {
     val tint = if (enabled) Accent else TextFaint
-    Surface(
+    Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(9.dp))
-            .clickable(onClick = onClick),
-        color = if (enabled) Accent.copy(alpha = 0.12f) else SurfaceRaised.copy(alpha = 0.26f),
-        shape = RoundedCornerShape(9.dp),
-        border = BorderStroke(
-            1.dp,
-            if (enabled) Accent.copy(alpha = 0.35f) else OutlineDark.copy(alpha = 0.72f)
-        )
+            .clip(RoundedCornerShape(Radius.pill))
+            .background(if (enabled) Accent.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.04f))
+            .pressable(onClick = onClick)
+            .padding(horizontal = Space.sm, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.xxs)
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
-        ) {
-            StatusDot(if (enabled) Success else TextFaint, 5)
-            Text(
-                "AUTO 5S",
-                style = MaterialTheme.typography.labelSmall,
-                color = tint,
-                fontWeight = if (enabled) FontWeight.SemiBold else FontWeight.Normal
-            )
-        }
+        StatusDot(if (enabled) Success else TextFaint, 5)
+        Text(
+            "AUTO 5S",
+            style = MaterialTheme.typography.labelSmall,
+            color = tint
+        )
     }
 }
 
@@ -803,34 +968,33 @@ private fun ProcessTableHeader() {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 12.dp, end = 4.dp, top = 5.dp, bottom = 3.dp),
+            .padding(start = Space.gutter, end = Space.gutter, top = Space.md, bottom = Space.xs),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             "PROCESS",
             modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.labelSmall,
-            color = TextFaint,
-            letterSpacing = 0.7.sp
+            style = PvpsType.eyebrow,
+            color = TextFaint
         )
         Text(
             "PID",
             modifier = Modifier.width(ProcessPidWidth),
-            style = MaterialTheme.typography.labelSmall,
+            style = PvpsType.eyebrow,
             color = TextFaint,
             textAlign = TextAlign.End
         )
         Text(
             "CPU",
             modifier = Modifier.width(ProcessCpuWidth),
-            style = MaterialTheme.typography.labelSmall,
+            style = PvpsType.eyebrow,
             color = TextFaint,
             textAlign = TextAlign.End
         )
         Text(
             "RAM",
             modifier = Modifier.width(ProcessRamWidth),
-            style = MaterialTheme.typography.labelSmall,
+            style = PvpsType.eyebrow,
             color = TextFaint,
             textAlign = TextAlign.End
         )
@@ -843,18 +1007,18 @@ private fun ProcessLoadingState() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 52.dp),
+            .padding(vertical = Space.xxl),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         CircularProgressIndicator(
-            modifier = Modifier.size(26.dp),
+            modifier = Modifier.size(22.dp),
             color = Accent,
             strokeWidth = 2.dp
         )
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(Space.sm))
         Text(
             "Reading process table…",
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.bodySmall,
             color = TextSecondary
         )
     }
@@ -872,64 +1036,57 @@ private fun ProcessMemoryCard(
         percent >= 75 -> Warning
         else -> Success
     }
-    Surface(
+    PvpsCard(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        color = SurfaceRaised.copy(alpha = 0.44f),
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.72f))
+            .padding(horizontal = Space.gutter, vertical = Space.sm),
+        shape = RoundedCornerShape(Radius.lg)
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.padding(Space.lg)) {
+            Text(
+                "MEMORY",
+                style = PvpsType.eyebrow,
+                color = TextFaint
+            )
+            Spacer(Modifier.height(Space.xs))
             Row(verticalAlignment = Alignment.Bottom) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "MEMORY",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextFaint,
-                        letterSpacing = 0.8.sp
+                        formatBytes(snapshot.memUsed),
+                        style = PvpsType.numericHero,
+                        color = TextPrimary,
+                        maxLines = 1
                     )
-                    Spacer(Modifier.height(2.dp))
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        Text(
-                            formatBytes(snapshot.memUsed),
-                            style = MaterialTheme.typography.titleLarge,
-                            color = TextPrimary
-                        )
-                        Text(
-                            " / ${formatBytes(snapshot.memTotal)}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = TextFaint,
-                            modifier = Modifier.padding(bottom = 2.dp)
-                        )
-                    }
+                    Text(
+                        " / ${formatBytes(snapshot.memTotal)}",
+                        style = PvpsType.monoBody,
+                        color = TextFaint,
+                        maxLines = 1
+                    )
                 }
+                Spacer(Modifier.width(Space.sm))
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
                         "$percent%",
-                        style = MaterialTheme.typography.displaySmall,
-                        color = color
+                        style = PvpsType.numericHero,
+                        color = color,
+                        maxLines = 1
                     )
                     Text(
                         "USED",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = PvpsType.eyebrow,
                         color = TextFaint
                     )
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            LinearProgressIndicator(
-                progress = { percent / 100f },
-                modifier = Modifier.fillMaxWidth().height(7.dp).clip(RoundedCornerShape(50)),
-                color = color,
-                trackColor = OutlineDark
-            )
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Spacer(Modifier.height(Space.md))
+            MeterBar(progress = percent / 100f, accent = color)
+            Spacer(Modifier.height(Space.lg))
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.md)) {
                 MemoryStat(
                     label = "AVAILABLE",
                     value = formatBytes(snapshot.memAvailable),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1.1f),
                     color = Success
                 )
                 val swapTotal = swap?.total ?: 0L
@@ -940,7 +1097,7 @@ private fun ProcessMemoryCard(
                         swap.total <= 0L -> "none"
                         else -> formatBytes(swap.used)
                     },
-                    modifier = Modifier.weight(1.2f),
+                    modifier = Modifier.weight(1.45f),
                     color = if (swap != null && swap.total > 0) TextSecondary else TextFaint
                 )
                 MemoryStat(
@@ -952,26 +1109,28 @@ private fun ProcessMemoryCard(
                         snapshot.load5,
                         snapshot.load15
                     ),
-                    modifier = Modifier.weight(1.8f),
+                    modifier = Modifier.weight(1.45f),
                     color = TextPrimary,
                     mono = true
                 )
             }
             if (top.isNotEmpty()) {
-                Spacer(Modifier.height(10.dp))
-                HorizontalDivider(color = OutlineDark.copy(alpha = 0.55f))
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(Space.lg))
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = Color.White.copy(alpha = 0.06f)
+                )
+                Spacer(Modifier.height(Space.sm))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         "TOP MEMORY",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextFaint,
-                        letterSpacing = 0.7.sp
+                        style = PvpsType.eyebrow,
+                        color = TextFaint
                     )
                     Spacer(Modifier.weight(1f))
                     Text(
                         "${snapshot.cpuCount} CORES · ${snapshot.cpuPercent}% LOAD",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = PvpsType.monoBody,
                         color = if (snapshot.cpuPercent >= 85) Danger else TextFaint
                     )
                 }
@@ -994,17 +1153,16 @@ private fun MemoryStat(
     Column(modifier = modifier) {
         Text(
             label,
-            style = MaterialTheme.typography.labelSmall,
+            style = PvpsType.eyebrow,
             color = TextFaint,
             maxLines = 1,
-            letterSpacing = 0.5.sp
+            overflow = TextOverflow.Ellipsis
         )
-        Spacer(Modifier.height(2.dp))
+        Spacer(Modifier.height(Space.xxs))
         Text(
             value,
-            style = MaterialTheme.typography.labelMedium,
+            style = if (mono) PvpsType.monoStrong else PvpsType.monoBody,
             color = color,
-            fontFamily = if (mono) FontFamily.Monospace else null,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -1014,36 +1172,34 @@ private fun MemoryStat(
 @Composable
 private fun TopRamRow(rank: Int, process: SystemRepository.Process) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = Space.sm),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             rank.toString(),
-            modifier = Modifier.width(16.dp),
-            style = MaterialTheme.typography.labelSmall,
-            color = if (rank == 1) Accent else TextFaint,
-            fontFamily = FontFamily.Monospace
+            modifier = Modifier.width(18.dp),
+            style = PvpsType.monoBody,
+            color = if (rank == 1) Accent else TextFaint
         )
         Text(
             process.command,
             modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.bodySmall,
             color = TextSecondary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+        Spacer(Modifier.width(Space.sm))
         Text(
             formatMemory(process.rssKb),
-            style = MaterialTheme.typography.labelSmall,
-            color = TextPrimary,
-            fontFamily = FontFamily.Monospace
+            style = PvpsType.monoBody,
+            color = TextPrimary
         )
         Text(
             formatPercent(process.mem),
             modifier = Modifier.width(48.dp),
-            style = MaterialTheme.typography.labelSmall,
+            style = PvpsType.monoBody,
             color = TextFaint,
-            fontFamily = FontFamily.Monospace,
             textAlign = TextAlign.End
         )
     }
@@ -1068,32 +1224,14 @@ private fun ProcessRow(
         process.mem >= 10 -> Warning
         else -> Violet
     }
-    val rowTint = when (rank) {
-        1 -> Accent.copy(alpha = 0.055f)
-        2 -> Accent.copy(alpha = 0.035f)
-        3 -> Accent.copy(alpha = 0.02f)
-        else -> Color.Transparent
-    }
-    val stripe = when (rank) {
-        1 -> Accent.copy(alpha = 0.70f)
-        2 -> Accent.copy(alpha = 0.46f)
-        3 -> Accent.copy(alpha = 0.28f)
-        else -> Color.Transparent
-    }
-    Column(modifier = Modifier.fillMaxWidth().background(rowTint)) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 44.dp)
-                .drawBehind {
-                    if (rank != null) {
-                        drawRect(color = stripe, size = Size(2.dp.toPx(), size.height))
-                    }
-                }
-                .padding(start = 12.dp, end = 4.dp),
+                .padding(start = Space.gutter, end = Space.gutter, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1f).padding(vertical = 4.dp)) {
+            Column(modifier = Modifier.weight(1f).padding(end = Space.sm)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         process.command,
@@ -1105,30 +1243,28 @@ private fun ProcessRow(
                         modifier = Modifier.weight(1f, fill = false)
                     )
                     if (rank != null) {
-                        Spacer(Modifier.width(5.dp))
+                        Spacer(Modifier.width(Space.xs))
                         Text(
                             "#$rank",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Accent,
-                            fontFamily = FontFamily.Monospace
+                            style = PvpsType.eyebrow,
+                            color = Accent
                         )
                     }
                 }
+                Spacer(Modifier.height(Space.xxs))
                 Text(
                     "${process.user} · ${process.args.ifBlank { process.command }}",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = PvpsType.monoBody,
                     color = TextFaint,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    fontFamily = FontFamily.Monospace
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             Text(
                 process.pid.toString(),
                 modifier = Modifier.width(ProcessPidWidth),
-                style = MaterialTheme.typography.labelSmall,
+                style = PvpsType.monoBody,
                 color = TextSecondary,
-                fontFamily = FontFamily.Monospace,
                 textAlign = TextAlign.End,
                 maxLines = 1
             )
@@ -1138,12 +1274,11 @@ private fun ProcessRow(
             ) {
                 Text(
                     formatPercent(process.cpu),
-                    style = MaterialTheme.typography.labelSmall,
+                    style = PvpsType.monoBody,
                     color = cpuColor,
-                    fontFamily = FontFamily.Monospace,
                     maxLines = 1
                 )
-                Spacer(Modifier.height(3.dp))
+                Spacer(Modifier.height(Space.xs))
                 MiniMeter(progress = (process.cpu / cpuPeak).toFloat(), color = cpuColor)
             }
             Column(
@@ -1152,30 +1287,31 @@ private fun ProcessRow(
             ) {
                 Text(
                     formatMemory(process.rssKb),
-                    style = MaterialTheme.typography.labelSmall,
+                    style = PvpsType.monoBody,
                     color = memColor,
-                    fontFamily = FontFamily.Monospace,
                     maxLines = 1
                 )
-                Spacer(Modifier.height(3.dp))
+                Spacer(Modifier.height(Space.xs))
                 MiniMeter(progress = (process.mem / memPeak).toFloat(), color = memColor)
             }
-            IconButton(
-                onClick = onKill,
-                enabled = !protected,
-                modifier = Modifier.size(ProcessKillWidth)
+            Box(
+                modifier = Modifier.width(ProcessKillWidth),
+                contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    Icons.Default.Delete,
+                IconAction(
+                    icon = Icons.Default.Delete,
                     contentDescription = if (protected) "Protected process" else "Kill PID ${process.pid}",
                     tint = if (protected) TextFaint.copy(alpha = 0.45f) else Danger,
-                    modifier = Modifier.size(17.dp)
+                    enabled = !protected,
+                    size = 32.dp,
+                    onClick = onKill
                 )
             }
         }
         HorizontalDivider(
+            modifier = Modifier.padding(horizontal = Space.gutter),
             thickness = 0.5.dp,
-            color = OutlineDark.copy(alpha = 0.45f)
+            color = Color.White.copy(alpha = 0.05f)
         )
     }
 }
@@ -1186,16 +1322,16 @@ private fun MiniMeter(progress: Float, color: Color) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(2.dp)
-            .clip(RoundedCornerShape(50))
-            .background(OutlineDark.copy(alpha = 0.55f))
+            .height(3.dp)
+            .clip(RoundedCornerShape(Radius.pill))
+            .background(Color.White.copy(alpha = 0.07f))
     ) {
         if (fraction > 0f) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth(fraction)
-                    .height(2.dp)
-                    .clip(RoundedCornerShape(50))
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(Radius.pill))
                     .background(color)
             )
         }
@@ -1237,18 +1373,46 @@ private fun LogsDialog(title: String, load: suspend () -> String, onDismiss: () 
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        containerColor = SurfaceHigh,
+        shape = RoundedCornerShape(Radius.xl),
+        titleContentColor = TextPrimary,
+        textContentColor = TextSecondary,
+        title = {
+            Text(
+                title,
+                style = MaterialTheme.typography.headlineSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
         text = {
             Column(modifier = Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
                 if (loading) {
-                    CircularProgressIndicator(color = Accent)
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = Space.lg),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            color = Accent,
+                            strokeWidth = 2.dp
+                        )
+                    }
                 } else if (error != null) {
-                    Text(error!!, color = Danger)
+                    Text(
+                        error!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Danger
+                    )
                 } else {
                     MonospaceBox(content.orEmpty())
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = Accent, style = MaterialTheme.typography.labelLarge)
+            }
+        }
     )
 }

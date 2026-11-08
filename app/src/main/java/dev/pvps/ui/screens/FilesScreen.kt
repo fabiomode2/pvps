@@ -12,11 +12,9 @@ import android.widget.MediaController
 import android.widget.VideoView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image as ComposeImage
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -44,7 +42,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.ChevronRight
@@ -77,9 +74,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -105,7 +100,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -123,24 +117,29 @@ import dev.pvps.ssh.SftpClient
 import dev.pvps.ui.AppViewModel
 import dev.pvps.ui.components.ConfirmDialog
 import dev.pvps.ui.components.ErrorBanner
+import dev.pvps.ui.components.GhostButton
+import dev.pvps.ui.components.MeterBar
+import dev.pvps.ui.components.PvpsCard
 import dev.pvps.ui.components.PvpsTextField
+import dev.pvps.ui.components.ScreenHeader
+import dev.pvps.ui.components.SignalButton
 import dev.pvps.ui.components.collectAsStateValue
 import dev.pvps.ui.components.formatBytes
 import dev.pvps.ui.theme.Accent
 import dev.pvps.ui.theme.Danger
 import dev.pvps.ui.theme.MonoFont
 import dev.pvps.ui.theme.OnAccent
-import dev.pvps.ui.theme.OutlineDark
-import dev.pvps.ui.theme.OutlineSoft
-import dev.pvps.ui.theme.Success
+import dev.pvps.ui.theme.PvpsType
+import dev.pvps.ui.theme.Radius
+import dev.pvps.ui.theme.Space
 import dev.pvps.ui.theme.SurfaceDark
 import dev.pvps.ui.theme.SurfaceHigh
-import dev.pvps.ui.theme.SurfaceRaised
 import dev.pvps.ui.theme.TextFaint
 import dev.pvps.ui.theme.TextPrimary
 import dev.pvps.ui.theme.TextSecondary
 import dev.pvps.ui.theme.Violet
 import dev.pvps.ui.theme.Warning
+import dev.pvps.ui.theme.pressable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -308,55 +307,50 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(36.dp)
-                    .padding(horizontal = 6.dp),
+                    .height(40.dp)
+                    .padding(horizontal = Space.gutter),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     "${visibleEntries.size} items",
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
+                    style = PvpsType.monoBody,
                     color = TextFaint,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(start = 8.dp)
+                    modifier = Modifier.weight(1f)
                 )
-                IconButton(
+                CompactIconButton(
+                    icon = if (settings.fileGridView) Icons.Default.ViewList else Icons.Default.GridView,
+                    contentDescription = "Toggle grid view",
+                    tint = TextSecondary,
                     onClick = {
                         viewModel.updateSettings { it.copy(fileGridView = !it.fileGridView) }
-                    },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        if (settings.fileGridView) Icons.Default.ViewList else Icons.Default.GridView,
-                        contentDescription = "Toggle grid view",
-                        tint = TextSecondary,
-                        modifier = Modifier.size(17.dp)
-                    )
-                }
-                IconButton(
+                    }
+                )
+                Spacer(Modifier.width(Space.xs))
+                CompactIconButton(
+                    icon = if (settings.showHiddenFiles) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                    contentDescription = "Toggle hidden files",
+                    tint = if (settings.showHiddenFiles) Accent else TextSecondary,
                     onClick = {
                         viewModel.updateSettings { it.copy(showHiddenFiles = !it.showHiddenFiles) }
-                    },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        if (settings.showHiddenFiles) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                        contentDescription = "Toggle hidden files",
-                        tint = if (settings.showHiddenFiles) Accent else TextSecondary,
-                        modifier = Modifier.size(17.dp)
-                    )
-                }
+                    }
+                )
             }
             if (loading) {
                 LinearProgressIndicator(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .padding(horizontal = Space.gutter)
+                        .clip(RoundedCornerShape(Radius.pill))
                         .height(2.dp),
                     color = Accent,
-                    trackColor = OutlineSoft
+                    trackColor = Color.White.copy(alpha = 0.07f)
                 )
             }
-            if (error != null) ErrorBanner(error!!) { error = null }
+            if (error != null) {
+                Box(modifier = Modifier.padding(horizontal = Space.gutter, vertical = Space.xs)) {
+                    ErrorBanner(error!!) { error = null }
+                }
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -379,11 +373,16 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                 }
                 if (settings.fileGridView) {
                     LazyVerticalGrid(
-                        columns = GridCells.Adaptive(100.dp),
+                        columns = GridCells.Adaptive(104.dp),
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 88.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        contentPadding = PaddingValues(
+                            start = Space.gutter,
+                            end = Space.gutter,
+                            top = Space.xs,
+                            bottom = 88.dp
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(Space.sm),
+                        verticalArrangement = Arrangement.spacedBy(Space.sm)
                     ) {
                         gridItems(visibleEntries, key = { it.path }) { file ->
                             FileTile(
@@ -396,7 +395,7 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                 } else {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = 88.dp)
+                        contentPadding = PaddingValues(top = Space.xs, bottom = 88.dp)
                     ) {
                         items(visibleEntries, key = { it.path }) { file ->
                             FileRow(
@@ -411,7 +410,7 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                     DirectoryEmpty(
                         modifier = Modifier
                             .align(Alignment.Center)
-                            .padding(horizontal = 28.dp)
+                            .padding(horizontal = Space.xxl)
                     )
                 }
             }
@@ -545,74 +544,33 @@ private fun FilesTopBar(
     onNewFolder: () -> Unit,
     onRefresh: () -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                .padding(start = 6.dp, end = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+    ScreenHeader(
+        title = "FILES",
+        onBack = onBack,
+        actions = {
             CompactIconButton(
-                icon = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
-                tint = TextPrimary,
-                onClick = onBack
+                icon = Icons.Default.CloudUpload,
+                contentDescription = "Upload",
+                enabled = connected,
+                tint = TextSecondary,
+                onClick = onUpload
             )
-            Spacer(Modifier.width(8.dp))
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(end = 8.dp)
-            ) {
-                Text(
-                    "FILES",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = 1.4.sp
-                    ),
-                    color = Accent,
-                    maxLines = 1
-                )
-                Text(
-                    currentPath.ifBlank { "/" },
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontSize = 11.5.sp,
-                        lineHeight = 16.sp,
-                        letterSpacing = 0.1.sp
-                    ),
-                    color = MaterialTheme.colorScheme.onBackground,
-                    fontFamily = MonoFont,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                CompactIconButton(
-                    icon = Icons.Default.CloudUpload,
-                    contentDescription = "Upload",
-                    enabled = connected,
-                    onClick = onUpload
-                )
-                CompactIconButton(
-                    icon = Icons.Default.CreateNewFolder,
-                    contentDescription = "New folder",
-                    enabled = connected,
-                    onClick = onNewFolder
-                )
-                CompactIconButton(
-                    icon = Icons.Default.Refresh,
-                    contentDescription = "Refresh",
-                    enabled = connected && !busy,
-                    onClick = onRefresh
-                )
-            }
+            CompactIconButton(
+                icon = Icons.Default.CreateNewFolder,
+                contentDescription = "New folder",
+                enabled = connected,
+                tint = TextSecondary,
+                onClick = onNewFolder
+            )
+            CompactIconButton(
+                icon = Icons.Default.Refresh,
+                contentDescription = "Refresh",
+                enabled = connected && !busy,
+                tint = TextSecondary,
+                onClick = onRefresh
+            )
         }
-        HorizontalDivider(
-            thickness = 0.5.dp,
-            color = OutlineDark.copy(alpha = 0.9f)
-        )
-    }
+    )
 }
 
 @Composable
@@ -626,10 +584,9 @@ private fun CompactIconButton(
     Box(
         modifier = Modifier
             .size(40.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (enabled) SurfaceRaised.copy(alpha = 0.55f) else Color.Transparent)
-            .border(0.5.dp, OutlineDark, RoundedCornerShape(10.dp))
-            .clickable(enabled = enabled, onClick = onClick),
+            .pressable(enabled = enabled, onClick = onClick)
+            .clip(RoundedCornerShape(Radius.sm))
+            .background(if (enabled) Color.White.copy(alpha = 0.05f) else Color.Transparent),
         contentAlignment = Alignment.Center
     ) {
         Icon(
@@ -654,104 +611,87 @@ private fun PathStrip(path: String, onNavigate: (String) -> Unit) {
             }
         }
     }
-    Surface(
-        color = SurfaceDark.copy(alpha = 0.72f),
-        contentColor = TextPrimary
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Space.gutter, vertical = Space.xs),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Column {
+        if (path != "/") {
+            Row(
+                modifier = Modifier
+                    .pressable { onNavigate(parentOf(path)) }
+                    .clip(RoundedCornerShape(Radius.pill))
+                    .background(Color.White.copy(alpha = 0.05f))
+                    .padding(horizontal = Space.md, vertical = Space.sm),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.ArrowUpward,
+                    contentDescription = "Parent folder",
+                    tint = TextSecondary,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(Modifier.width(Space.xs))
+                Text(
+                    "..",
+                    style = PvpsType.monoBody,
+                    color = TextSecondary,
+                    maxLines = 1
+                )
+            }
+            Spacer(Modifier.width(Space.sm))
+        }
+        Box(modifier = Modifier.weight(1f)) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(40.dp)
-                    .padding(horizontal = 4.dp),
+                    .pressable { showPathMenu = true }
+                    .clip(RoundedCornerShape(Radius.pill))
+                    .background(Color.White.copy(alpha = 0.05f))
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = Space.md, vertical = Space.sm),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (path != "/") {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onNavigate(parentOf(path)) }
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Default.ArrowUpward,
-                            contentDescription = "Parent folder",
-                            tint = TextSecondary,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(Modifier.width(5.dp))
-                        Text(
-                            "..",
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontSize = 11.sp,
-                                letterSpacing = 0.2.sp
-                            ),
-                            color = TextSecondary,
-                            fontFamily = MonoFont
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .padding(horizontal = 4.dp)
-                            .width(1.dp)
-                            .height(16.dp)
-                            .background(OutlineDark)
-                    )
-                }
                 Icon(
                     Icons.Outlined.Folder,
                     contentDescription = null,
-                    tint = Accent.copy(alpha = 0.85f),
-                    modifier = Modifier.size(14.dp)
+                    tint = TextFaint,
+                    modifier = Modifier.size(13.dp)
                 )
                 Spacer(Modifier.width(6.dp))
-                Box(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = path.ifBlank { "/" },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable { showPathMenu = true }
-                            .padding(vertical = 6.dp, horizontal = 2.dp),
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontSize = 11.5.sp,
-                            letterSpacing = 0.1.sp
-                        ),
-                        color = TextSecondary,
-                        fontFamily = MonoFont,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    DropdownMenu(
-                        expanded = showPathMenu,
-                        onDismissRequest = { showPathMenu = false }
-                    ) {
-                        ancestors.forEach { target ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = target,
-                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                                        color = if (target == path) Accent else TextPrimary,
-                                        fontFamily = MonoFont,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                },
-                                onClick = {
-                                    showPathMenu = false
-                                    onNavigate(target)
-                                }
+                Text(
+                    text = path.ifBlank { "/" },
+                    style = PvpsType.monoBody,
+                    color = TextSecondary,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+            DropdownMenu(
+                expanded = showPathMenu,
+                onDismissRequest = { showPathMenu = false },
+                shape = RoundedCornerShape(Radius.md),
+                containerColor = SurfaceHigh
+            ) {
+                ancestors.forEach { target ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = target,
+                                style = PvpsType.monoBody,
+                                color = if (target == path) Accent else TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
+                        },
+                        onClick = {
+                            showPathMenu = false
+                            onNavigate(target)
                         }
-                    }
+                    )
                 }
             }
-            HorizontalDivider(
-                thickness = 0.5.dp,
-                color = OutlineDark.copy(alpha = 0.8f)
-            )
         }
     }
 }
@@ -763,48 +703,41 @@ private fun FileTile(
     onAction: (FileAction) -> Unit
 ) {
     var menu by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(12.dp)
     Box(modifier = Modifier.fillMaxWidth()) {
-        Surface(
-            color = SurfaceRaised.copy(alpha = 0.44f),
-            shape = shape,
-            border = BorderStroke(
-                0.5.dp,
-                if (file.isDirectory) Warning.copy(alpha = 0.16f) else OutlineDark.copy(alpha = 0.62f)
-            ),
+        PvpsCard(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(shape)
-                .clickable(onClick = onOpen)
+                .pressable(onClick = onOpen),
+            shape = RoundedCornerShape(Radius.md)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 82.dp)
-                    .padding(start = 5.dp, end = 5.dp, top = 10.dp, bottom = 7.dp),
+                    .heightIn(min = 100.dp)
+                    .padding(
+                        start = Space.sm,
+                        end = Space.sm,
+                        top = Space.md,
+                        bottom = Space.md
+                    ),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                FileGlyph(file, size = 28.dp)
-                Spacer(Modifier.height(6.dp))
+                FileGlyph(file, size = 36.dp)
+                Spacer(Modifier.height(Space.sm))
                 Text(
                     file.name,
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontSize = 11.sp,
-                        lineHeight = 14.sp,
-                        fontWeight = FontWeight.Medium
-                    ),
+                    style = MaterialTheme.typography.bodySmall,
                     color = TextPrimary,
                     textAlign = TextAlign.Center,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
                 if (!file.isDirectory) {
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(Space.xxs))
                     Text(
                         formatBytes(file.size),
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.5.sp),
+                        style = PvpsType.monoBody,
                         color = TextFaint,
-                        fontFamily = MonoFont,
                         maxLines = 1
                     )
                 }
@@ -813,10 +746,11 @@ private fun FileTile(
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(2.dp)
-                .size(24.dp)
+                .padding(Space.xxs)
+                .size(26.dp)
+                .pressable { menu = true }
                 .clip(CircleShape)
-                .clickable { menu = true },
+                .background(Color.White.copy(alpha = 0.05f)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
@@ -837,7 +771,12 @@ private fun FileActionMenu(
     onDismiss: () -> Unit,
     onAction: (FileAction) -> Unit
 ) {
-    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(Radius.md),
+        containerColor = SurfaceHigh
+    ) {
         if (!file.isDirectory) {
             DropdownMenuItem(
                 text = { Text("Download", color = TextPrimary) },
@@ -882,31 +821,26 @@ private fun FileRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 46.dp)
-            .clickable(onClick = onOpen)
-            .padding(start = 12.dp, end = 2.dp),
+            .heightIn(min = 54.dp)
+            .pressable(onClick = onOpen)
+            .padding(start = Space.gutter, end = Space.sm),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        FileGlyph(file, size = 28.dp)
-        Spacer(Modifier.width(10.dp))
+        FileGlyph(file, size = 36.dp)
+        Spacer(Modifier.width(Space.md))
         Text(
             text = file.name,
-            style = MaterialTheme.typography.titleSmall.copy(
-                fontSize = 13.5.sp,
-                lineHeight = 18.sp,
-                fontWeight = FontWeight.Medium
-            ),
-            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextPrimary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(Space.sm))
         Text(
             text = fileSizeLabel(file),
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
+            style = PvpsType.monoBody,
             color = TextFaint,
-            fontFamily = MonoFont,
             maxLines = 1
         )
         if (file.isDirectory) {
@@ -914,14 +848,14 @@ private fun FileRow(
                 Icons.Default.ChevronRight,
                 contentDescription = null,
                 tint = TextFaint,
-                modifier = Modifier.size(13.dp)
+                modifier = Modifier.size(14.dp)
             )
         }
         Box(
             modifier = Modifier
-                .size(36.dp)
+                .size(32.dp)
                 .clip(CircleShape)
-                .clickable { menu = true },
+                .pressable { menu = true },
             contentAlignment = Alignment.Center
         ) {
             Icon(
@@ -933,25 +867,13 @@ private fun FileRow(
             FileActionMenu(file = file, expanded = menu, onDismiss = { menu = false }, onAction = onAction)
         }
     }
-    HorizontalDivider(
-        modifier = Modifier.padding(start = 50.dp, end = 12.dp),
-        thickness = 0.5.dp,
-        color = OutlineDark.copy(alpha = 0.35f)
-    )
 }
 
 @Composable
-private fun FileGlyph(file: RemoteFile, size: androidx.compose.ui.unit.Dp = 34.dp) {
+private fun FileGlyph(file: RemoteFile, size: androidx.compose.ui.unit.Dp = 36.dp) {
     val isDirectory = file.isDirectory
-    val tint = when {
-        isDirectory -> Warning
-        isImageFile(file.name) -> Success
-        isArchiveFile(file.name) -> Violet
-        isCodeFile(file.name) -> Accent
-        else -> TextSecondary
-    }
-    val container = if (isDirectory) Warning.copy(alpha = 0.10f) else tint.copy(alpha = 0.08f)
-    val border = if (isDirectory) Warning.copy(alpha = 0.20f) else tint.copy(alpha = 0.18f)
+    val tint = if (isDirectory) Warning else TextSecondary
+    val container = tint.copy(alpha = if (isDirectory) 0.10f else 0.08f)
     val icon = when {
         isDirectory -> Icons.Outlined.Folder
         isImageFile(file.name) -> Icons.Outlined.Image
@@ -965,16 +887,15 @@ private fun FileGlyph(file: RemoteFile, size: androidx.compose.ui.unit.Dp = 34.d
     Box(
         modifier = Modifier
             .size(size)
-            .clip(RoundedCornerShape(if (size > 32.dp) 10.dp else 9.dp))
-            .background(container)
-            .border(0.5.dp, border, RoundedCornerShape(if (size > 32.dp) 10.dp else 9.dp)),
+            .clip(RoundedCornerShape(Radius.xs))
+            .background(container),
         contentAlignment = Alignment.Center
     ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
             tint = tint,
-            modifier = Modifier.size(size * 0.5f)
+            modifier = Modifier.size(size * 0.48f)
         )
     }
 }
@@ -1194,10 +1115,6 @@ private fun FilePreviewDialog(
                     onDownload = onDownload,
                     onExtract = onExtract
                 )
-                HorizontalDivider(
-                    thickness = 0.5.dp,
-                    color = OutlineDark.copy(alpha = 0.9f)
-                )
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1259,8 +1176,8 @@ private fun PreviewTopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(52.dp)
-            .padding(start = 4.dp, end = 6.dp),
+            .height(56.dp)
+            .padding(start = Space.sm, end = Space.md),
         verticalAlignment = Alignment.CenterVertically
     ) {
         CompactIconButton(
@@ -1269,41 +1186,39 @@ private fun PreviewTopBar(
             tint = TextPrimary,
             onClick = onDismiss
         )
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(Space.md))
         Column(
             modifier = Modifier
                 .weight(1f)
-                .padding(end = 8.dp)
+                .padding(end = Space.sm)
         ) {
             Text(
                 text = file.name,
-                style = MaterialTheme.typography.titleSmall.copy(
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold
-                ),
+                style = MaterialTheme.typography.titleSmall,
                 color = TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = "${previewKindLabel(kind)} · ${fileSizeLabel(file)}",
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.5.sp),
+                style = PvpsType.monoBody,
                 color = TextFaint,
-                fontFamily = MonoFont,
                 maxLines = 1
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
             if (onExtract != null) {
                 CompactIconButton(
                     icon = Icons.Default.Unarchive,
                     contentDescription = "Extract archive",
+                    tint = TextSecondary,
                     onClick = onExtract
                 )
             }
             CompactIconButton(
                 icon = Icons.Default.Download,
                 contentDescription = "Download file",
+                tint = TextSecondary,
                 onClick = onDownload
             )
         }
@@ -1318,7 +1233,7 @@ private fun PreviewLoading() {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CircularProgressIndicator(color = Accent, strokeWidth = 2.dp)
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(Space.lg))
             Text(
                 "Preparing preview...",
                 style = MaterialTheme.typography.bodySmall,
@@ -1341,16 +1256,15 @@ private fun PreviewStateMessage(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 32.dp),
+            .padding(horizontal = Space.xxl),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Box(
             modifier = Modifier
-                .size(52.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(SurfaceRaised.copy(alpha = 0.55f))
-                .border(0.5.dp, OutlineDark, RoundedCornerShape(14.dp)),
+                .size(56.dp)
+                .clip(RoundedCornerShape(Radius.md))
+                .background(Color.White.copy(alpha = 0.05f)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
@@ -1360,14 +1274,14 @@ private fun PreviewStateMessage(
                 modifier = Modifier.size(24.dp)
             )
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(Space.lg))
         Text(
             text = title,
             style = MaterialTheme.typography.titleLarge,
             color = TextPrimary,
             textAlign = TextAlign.Center
         )
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(Space.xs))
         Text(
             text = message,
             style = MaterialTheme.typography.bodySmall,
@@ -1375,15 +1289,12 @@ private fun PreviewStateMessage(
             textAlign = TextAlign.Center
         )
         if (primaryLabel != null && onPrimary != null) {
-            Spacer(Modifier.height(16.dp))
-            TextButton(onClick = onPrimary) {
-                Text(primaryLabel, color = Accent, style = MaterialTheme.typography.labelLarge)
-            }
+            Spacer(Modifier.height(Space.lg))
+            GhostButton(text = primaryLabel, onClick = onPrimary, color = Accent)
         }
         if (secondaryLabel != null && onSecondary != null) {
-            TextButton(onClick = onSecondary) {
-                Text(secondaryLabel, color = TextSecondary, style = MaterialTheme.typography.labelLarge)
-            }
+            Spacer(Modifier.height(Space.sm))
+            GhostButton(text = secondaryLabel, onClick = onSecondary, color = TextSecondary)
         }
     }
 }
@@ -1663,9 +1574,8 @@ private fun AudioPreview(file: File) {
             Box(
                 modifier = Modifier
                     .size(72.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Violet.copy(alpha = 0.10f))
-                    .border(0.5.dp, Violet.copy(alpha = 0.24f), RoundedCornerShape(20.dp)),
+                    .clip(RoundedCornerShape(Radius.lg))
+                    .background(Violet.copy(alpha = 0.10f)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -1675,7 +1585,7 @@ private fun AudioPreview(file: File) {
                     modifier = Modifier.size(30.dp)
                 )
             }
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(Space.lg))
             Text(
                 text = file.name,
                 style = MaterialTheme.typography.titleMedium,
@@ -1684,40 +1594,26 @@ private fun AudioPreview(file: File) {
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(Space.xs))
             Text(
                 text = when {
                     playbackError != null -> playbackError!!
                     !prepared -> "Preparing audio..."
                     else -> "${formatDuration(positionMs)} / ${formatDuration(durationMs)}"
                 },
-                style = MaterialTheme.typography.labelSmall,
+                style = PvpsType.monoBody,
                 color = if (playbackError != null) Danger else TextFaint,
-                fontFamily = MonoFont,
                 textAlign = TextAlign.Center
             )
-            Spacer(Modifier.height(20.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(3.dp)
-                    .clip(CircleShape)
-                    .background(OutlineDark)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(progress)
-                        .height(3.dp)
-                        .background(Accent)
-                )
-            }
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(Space.xl))
+            MeterBar(progress = progress, accent = Accent)
+            Spacer(Modifier.height(Space.lg))
             Box(
                 modifier = Modifier
                     .size(52.dp)
                     .clip(CircleShape)
                     .background(if (prepared && playbackError == null) Accent else Accent.copy(alpha = 0.35f))
-                    .clickable(enabled = prepared && playbackError == null) {
+                    .pressable(enabled = prepared && playbackError == null) {
                         runCatching {
                             if (playing) {
                                 player.pause()
@@ -1751,22 +1647,20 @@ private fun AudioPreview(file: File) {
 private fun TextPreview(body: String, truncated: Boolean, fileSize: Long) {
     Column(modifier = Modifier.fillMaxSize()) {
         if (truncated) {
-            Surface(
-                color = Warning.copy(alpha = 0.10f),
-                modifier = Modifier.fillMaxWidth()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Space.gutter, vertical = Space.sm)
+                    .clip(RoundedCornerShape(Radius.pill))
+                    .background(Warning.copy(alpha = 0.09f))
+                    .padding(horizontal = Space.md, vertical = Space.sm)
             ) {
                 Text(
                     text = "Showing first ${formatBytes(MAX_TEXT_PREVIEW_BYTES.toLong())} of ${formatBytes(fileSize)}",
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                    color = Warning,
-                    fontFamily = MonoFont
+                    style = PvpsType.monoBody,
+                    color = Warning
                 )
             }
-            HorizontalDivider(
-                thickness = 0.5.dp,
-                color = OutlineDark.copy(alpha = 0.6f)
-            )
         }
         SelectionContainer(
             modifier = Modifier
@@ -1780,7 +1674,7 @@ private fun TextPreview(body: String, truncated: Boolean, fileSize: Long) {
             ) {
                 Text(
                     text = body.ifEmpty { "(empty file)" },
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    modifier = Modifier.padding(horizontal = Space.md, vertical = Space.md),
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontFamily = MonoFont,
                         fontSize = 12.sp,
@@ -1797,15 +1691,14 @@ private fun TextPreview(body: String, truncated: Boolean, fileSize: Long) {
 private fun ArchivePreview(entries: List<String>) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+        contentPadding = PaddingValues(horizontal = Space.gutter, vertical = Space.md)
     ) {
         item {
             Text(
                 text = if (entries.isEmpty()) "Empty archive" else "${entries.size} entries",
-                modifier = Modifier.padding(bottom = 6.dp),
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                color = TextFaint,
-                fontFamily = MonoFont
+                modifier = Modifier.padding(bottom = Space.sm),
+                style = PvpsType.eyebrow,
+                color = TextFaint
             )
         }
         items(entries) { entry ->
@@ -1813,16 +1706,17 @@ private fun ArchivePreview(entries: List<String>) {
                 text = entry,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 5.dp),
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
-                fontFamily = MonoFont,
+                    .padding(vertical = Space.sm),
+                style = PvpsType.monoBody,
                 color = TextSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            HorizontalDivider(
-                thickness = 0.5.dp,
-                color = OutlineSoft.copy(alpha = 0.6f)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(Color.White.copy(alpha = 0.05f))
             )
         }
     }
@@ -1838,35 +1732,34 @@ private fun formatDuration(milliseconds: Long): String {
 @Composable
 private fun DirectoryEmpty(modifier: Modifier = Modifier) {
     Column(
-        modifier = modifier,
+        modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
             modifier = Modifier
-                .size(44.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(SurfaceRaised.copy(alpha = 0.55f))
-                .border(0.5.dp, OutlineDark, RoundedCornerShape(12.dp)),
+                .size(54.dp)
+                .clip(RoundedCornerShape(Radius.md))
+                .background(Warning.copy(alpha = 0.10f)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 Icons.Outlined.Folder,
                 contentDescription = null,
-                tint = TextFaint,
-                modifier = Modifier.size(21.dp)
+                tint = Warning,
+                modifier = Modifier.size(24.dp)
             )
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(Space.lg))
         Text(
             "Empty directory",
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.titleLarge,
             color = TextPrimary,
             textAlign = TextAlign.Center
         )
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(Space.xs))
         Text(
             "Upload a file or create a folder to get started.",
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.bodyMedium,
             color = TextSecondary,
             textAlign = TextAlign.Center
         )
@@ -1876,61 +1769,40 @@ private fun DirectoryEmpty(modifier: Modifier = Modifier) {
 @Composable
 private fun DisconnectedState(modifier: Modifier = Modifier, onConnect: () -> Unit) {
     Column(
-        modifier = modifier.padding(horizontal = 32.dp),
+        modifier = modifier.padding(horizontal = Space.xxl),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Box(
             modifier = Modifier
-                .size(46.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(SurfaceRaised.copy(alpha = 0.55f))
-                .border(0.5.dp, OutlineDark, RoundedCornerShape(12.dp)),
+                .size(56.dp)
+                .clip(RoundedCornerShape(Radius.md))
+                .background(Color.White.copy(alpha = 0.05f)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 Icons.Outlined.CloudOff,
                 contentDescription = null,
                 tint = TextFaint,
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(26.dp)
             )
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(Space.lg))
         Text(
             "SSH not connected",
             style = MaterialTheme.typography.titleLarge,
             color = TextPrimary,
             textAlign = TextAlign.Center
         )
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(Space.xs))
         Text(
             "Connect to the host from the dashboard to browse its filesystem.",
             style = MaterialTheme.typography.bodyMedium,
             color = TextSecondary,
             textAlign = TextAlign.Center
         )
-        Spacer(Modifier.height(18.dp))
-        val shape = RoundedCornerShape(10.dp)
-        Surface(
-            modifier = Modifier
-                .clip(shape)
-                .heightIn(min = 48.dp)
-                .clickable(onClick = onConnect),
-            color = Accent.copy(alpha = 0.10f),
-            shape = shape,
-            border = BorderStroke(1.dp, Accent.copy(alpha = 0.34f))
-        ) {
-            Box(
-                modifier = Modifier.padding(horizontal = 18.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    "CONNECT",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = Accent
-                )
-            }
-        }
+        Spacer(Modifier.height(Space.xl))
+        SignalButton(text = "CONNECT", onClick = onConnect)
     }
 }
 
@@ -1952,10 +1824,10 @@ private fun NameDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = SurfaceHigh,
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(Radius.lg),
         titleContentColor = TextPrimary,
         textContentColor = TextSecondary,
-        title = { Text(title, color = TextPrimary) },
+        title = { Text(title, color = TextPrimary, style = MaterialTheme.typography.headlineSmall) },
         text = {
             PvpsTextField(
                 value = value,

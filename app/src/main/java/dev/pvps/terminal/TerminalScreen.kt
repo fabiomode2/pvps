@@ -5,7 +5,6 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.view.WindowManager
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
@@ -30,6 +29,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -39,7 +39,6 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -85,22 +84,25 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.pvps.ui.components.GlassIconButton
 import dev.pvps.ui.components.StatusDot
 import dev.pvps.ui.theme.Accent
 import dev.pvps.ui.theme.Danger
-import dev.pvps.ui.theme.OutlineSoft
+import dev.pvps.ui.theme.PvpsType
+import dev.pvps.ui.theme.Radius
+import dev.pvps.ui.theme.Space
 import dev.pvps.ui.theme.Success
 import dev.pvps.ui.theme.SurfaceDark
-import dev.pvps.ui.theme.SurfaceRaised
+import dev.pvps.ui.theme.SurfaceHigh
 import dev.pvps.ui.theme.TextPrimary
 import dev.pvps.ui.theme.TextSecondary
 import dev.pvps.ui.theme.Warning
+import dev.pvps.ui.theme.pressable
 import com.termux.terminal.TextStyle
 import com.termux.terminal.WcWidth
 import dev.pvps.data.model.AppSettings
@@ -264,55 +266,46 @@ fun TerminalScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(SurfaceDark)
-                .padding(start = 4.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
+                .padding(start = Space.md, end = Space.sm, top = Space.sm, bottom = Space.md),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(MaterialTheme.shapes.small)
-                    .clickable(onClick = onBack),
-                contentAlignment = Alignment.Center
-            ) {
+            GlassIconButton(onClick = onBack, size = 38.dp) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Back",
-                    tint = TextSecondary,
+                    tint = TextPrimary,
                     modifier = Modifier.size(18.dp)
                 )
             }
+            Spacer(Modifier.width(Space.md))
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(vertical = 3.dp)
+                    .padding(vertical = Space.xxs)
             ) {
                 Text(
                     text = host.name,
                     color = TextPrimary,
-                    style = MaterialTheme.typography.titleSmall,
+                    style = MaterialTheme.typography.titleLarge,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                Spacer(Modifier.height(Space.xxs))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    StatusDot(statusColor, 6)
-                    Spacer(Modifier.width(5.dp))
+                    StatusDot(statusColor, 5)
+                    Spacer(Modifier.width(6.dp))
                     Text(
                         text = statusText,
-                        color = TextSecondary,
-                        style = MaterialTheme.typography.labelSmall,
+                        color = statusColor,
+                        style = PvpsType.monoBody,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
             }
+            Spacer(Modifier.width(Space.sm))
             Box {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(MaterialTheme.shapes.small)
-                        .clickable { menuExpanded = true },
-                    contentAlignment = Alignment.Center
-                ) {
+                GlassIconButton(onClick = { menuExpanded = true }, size = 38.dp) {
                     Icon(
                         Icons.Default.MoreVert,
                         contentDescription = "Terminal menu",
@@ -320,7 +313,12 @@ fun TerminalScreen(
                         modifier = Modifier.size(18.dp)
                     )
                 }
-                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false },
+                    shape = RoundedCornerShape(Radius.xl),
+                    containerColor = SurfaceHigh
+                ) {
                     DropdownMenuItem(
                         text = { Text("A-  Smaller font") },
                         onClick = {
@@ -364,7 +362,6 @@ fun TerminalScreen(
                 }
             }
         }
-        HorizontalDivider(color = OutlineSoft, thickness = 1.dp)
 
         Box(
             modifier = Modifier
@@ -508,8 +505,8 @@ fun TerminalScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(SurfaceDark)
+                .padding(top = Space.sm)
         ) {
-            HorizontalDivider(color = OutlineSoft, thickness = 1.dp)
             if (symbolsExpanded) {
                 SymbolKeys(onSymbol = { sendWithModifiers(it) })
             }
@@ -517,8 +514,8 @@ fun TerminalScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    .padding(horizontal = Space.gutter, vertical = Space.xs),
+                horizontalArrangement = Arrangement.spacedBy(Space.sm),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 TerminalKey("SYM", active = symbolsExpanded) { symbolsExpanded = !symbolsExpanded }
@@ -550,9 +547,9 @@ private fun SymbolKeys(onSymbol: (String) -> Unit) {
     FlowRow(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+            .padding(horizontal = Space.gutter, vertical = Space.xs),
+        horizontalArrangement = Arrangement.spacedBy(Space.xs),
+        verticalArrangement = Arrangement.spacedBy(Space.xs)
     ) {
         terminalSymbols.forEach { symbol ->
             TerminalKey(symbol) { onSymbol(symbol) }
@@ -564,19 +561,18 @@ private fun SymbolKeys(onSymbol: (String) -> Unit) {
 private fun TerminalKey(label: String, active: Boolean = false, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .height(32.dp)
-            .defaultMinSize(minWidth = 32.dp)
-            .clip(MaterialTheme.shapes.small)
-            .background(if (active) Accent.copy(alpha = 0.22f) else SurfaceRaised)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp),
+            .height(34.dp)
+            .defaultMinSize(minWidth = 34.dp)
+            .pressable(onClick = onClick)
+            .clip(RoundedCornerShape(Radius.xs))
+            .background(if (active) Accent.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
+            .padding(horizontal = Space.md),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
             color = if (active) Accent else TextPrimary,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 11.sp,
+            style = PvpsType.monoStrong,
             maxLines = 1
         )
     }

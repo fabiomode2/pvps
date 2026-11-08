@@ -46,6 +46,17 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.style.TextAlign
+import dev.pvps.ui.components.PvpsBackdrop
+import dev.pvps.ui.components.SignalButton
+import dev.pvps.ui.theme.DisplayFont
+import dev.pvps.ui.theme.PvpsType
+import dev.pvps.ui.theme.TextFaint
+import dev.pvps.ui.theme.TextPrimary
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -57,6 +68,7 @@ import dev.pvps.ui.AppViewModelFactory
 import dev.pvps.ui.components.collectAsStateValue
 import dev.pvps.ui.theme.Accent
 import dev.pvps.ui.theme.PvpsTheme
+import dev.pvps.ui.theme.Danger
 import dev.pvps.ui.theme.DeepBackground
 import dev.pvps.ui.theme.TextSecondary
 
@@ -178,40 +190,69 @@ private fun AppShell(viewModel: AppViewModel) {
     }
 
     if (settings.biometricLock && !unlocked) {
-        Surface(color = DeepBackground, modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            PvpsBackdrop()
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .statusBarsPadding()
                     .navigationBarsPadding()
-                    .padding(32.dp),
+                    .padding(horizontal = 32.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                PvpsMark(64.dp)
-                Spacer(Modifier.height(16.dp))
+                Box(contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier = Modifier
+                            .size(180.dp)
+                            .background(
+                                Brush.radialGradient(
+                                    listOf(Accent.copy(alpha = 0.16f), Color.Transparent)
+                                ),
+                                CircleShape
+                            )
+                    )
+                    PvpsMark(82.dp)
+                }
+                Spacer(Modifier.height(26.dp))
                 Text(
                     "PVPS",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontFamily = FontFamily.Monospace
+                    style = MaterialTheme.typography.displayMedium,
+                    color = TextPrimary,
+                    fontFamily = DisplayFont
                 )
+                Spacer(Modifier.height(10.dp))
                 Text(
-                    "Locked",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary
+                    "LOCKED · DEVICE CREDENTIALS",
+                    style = PvpsType.eyebrow,
+                    color = TextFaint
                 )
-                Spacer(Modifier.height(24.dp))
-                Button(onClick = { requestUnlock() }) { Text("Unlock with device credentials") }
+                Spacer(Modifier.height(40.dp))
+                SignalButton(
+                    text = "Unlock",
+                    icon = Icons.Default.Lock,
+                    onClick = { requestUnlock() },
+                    modifier = Modifier.fillMaxWidth(0.8f)
+                )
                 if (keyguardUnavailable) {
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(18.dp))
                     Text(
-                        "No device PIN/pattern is configured. Set one in Android settings or disable Device lock in PVPS.",
+                        "No device PIN, pattern or biometrics configured. Set one in Android settings or disable Device lock in PVPS.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary
+                        color = Danger,
+                        textAlign = TextAlign.Center
                     )
                 }
             }
+            Text(
+                "SSH · OPENCODE V2 · TERMUX",
+                style = PvpsType.monoBody,
+                color = TextFaint,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 28.dp)
+            )
         }
     } else {
         AppRoot(viewModel)
