@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -74,9 +76,11 @@ import dev.pvps.ui.screens.ServicesScreen
 import dev.pvps.ui.screens.SettingsScreen
 import dev.pvps.terminal.TerminalScreen
 import dev.pvps.ui.theme.Accent
+import dev.pvps.ui.theme.DeepBackground
 import dev.pvps.ui.theme.OutlineDark
 import dev.pvps.ui.theme.SurfaceHigh
 import dev.pvps.ui.theme.TextFaint
+import dev.pvps.ui.theme.TextPrimary
 import dev.pvps.ui.theme.TextSecondary
 import dev.pvps.ui.theme.Warning
 
@@ -86,9 +90,10 @@ private val bottomItems = listOf(
     NavItem("home", "Home", Icons.Default.Home),
     NavItem("chat", "Chat", Icons.Default.Chat),
     NavItem("files", "Files", Icons.Default.Folder),
-    NavItem("terminal", "Shell", Icons.Default.Terminal),
     NavItem("more", "More", Icons.Default.MoreHoriz)
 )
+
+private val dockRoutes = bottomItems.mapTo(hashSetOf()) { it.route }
 
 @Composable
 fun AppRoot(viewModel: AppViewModel) {
@@ -98,10 +103,10 @@ fun AppRoot(viewModel: AppViewModel) {
     val hosts = viewModel.hosts.collectAsStateValue()
     val selectedHost = viewModel.selectedHost.collectAsStateValue()
     val states = viewModel.connectionStates.collectAsStateValue()
-    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-    val showBottomBar = hosts.isNotEmpty() &&
-        route in setOf("home", "chat", "files", "terminal", "more") &&
-        !imeVisible
+    // The IME inset is read inside PvpsDock, not here: reading it at the root
+    // recomposed the whole navigation graph on every frame of the keyboard
+    // animation. Shell keeps the full screen (its own footer needs the room).
+    val showBottomBar = hosts.isNotEmpty() && route in dockRoutes
     val settings = viewModel.settings.collectAsStateValue()
     val pendingOpenSession = viewModel.pendingOpenSession.collectAsStateValue()
     val updateState = viewModel.updateState.collectAsStateValue()
@@ -112,8 +117,13 @@ fun AppRoot(viewModel: AppViewModel) {
     val pendingHostKey = pendingHost?.let { states[it.id] }
 
     LaunchedEffect(Unit) {
-        // A debug APK cannot install a release-signed APK. Only auto-check in release.
-        if (!BuildConfig.DEBUG) viewModel.checkForUpdates()
+        // A debug APK cannot install a release-signed APK. Only auto-check in
+        // release, and never compete with the first frames: the check used to
+        // open a modal over onboarding while the app was still warming up.
+        if (!BuildConfig.DEBUG) {
+            kotlinx.coroutines.delay(4_000)
+            viewModel.checkForUpdates()
+        }
     }
 
     LaunchedEffect(pendingOpenSession) {
@@ -175,13 +185,13 @@ fun AppRoot(viewModel: AppViewModel) {
                 composable("chat") {
                     ChatScreen(
                         viewModel = viewModel,
-                        onBack = { navController.navigate("home") { launchSingleTop = true } }
+                        onBack = { navController.popBackStack("home", inclusive = false) }
                     )
                 }
                 composable("files") {
                     FilesScreen(
                         viewModel = viewModel,
-                        onBack = { navController.navigate("home") { launchSingleTop = true } }
+                        onBack = { navController.popBackStack("home", inclusive = false) }
                     )
                 }
                 composable("terminal") {
@@ -191,7 +201,8 @@ fun AppRoot(viewModel: AppViewModel) {
                             ssh = viewModel.container.ssh,
                             settings = settings,
                             onBack = { navController.popBackStack() },
-                            onFontSizeChange = { size -> viewModel.updateSettings { it.copy(terminalFontSize = size) } }
+                            onFontSizeChange = { size -> viewModel.updateSettings { it.copy(terminalFontSize = size) } },
+                            onConnect = { viewModel.connect(host.id) }
                         )
                     } ?: Column(modifier = Modifier.fillMaxSize()) {
                         TextButton(
@@ -314,57 +325,49 @@ fun AppRoot(viewModel: AppViewModel) {
 
 @Composable
 private fun PvpsDock(route: String, onSelect: (String) -> Unit) {
-    Box(
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    if (imeVisible) return
+    Column(
         modifier = Modifier
             .fillMaxWidth()
+            .background(DeepBackground.copy(alpha = 0.98f))
             .navigationBarsPadding()
-            .padding(horizontal = 14.dp, vertical = 7.dp)
     ) {
-        Surface(
-            color = SurfaceHigh.copy(alpha = 0.94f),
-            shape = RoundedCornerShape(24.dp),
-            border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.75f)),
-            modifier = Modifier.fillMaxWidth()
+        HorizontalDivider(thickness = 1.dp, color = OutlineDark)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(60.dp)
+                .padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().height(62.dp).padding(horizontal = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                bottomItems.forEach { item ->
-                    val selected = route == item.route
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(50.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(if (selected) Accent.copy(alpha = 0.11f) else Color.Transparent)
-                            .clickable { onSelect(item.route) }
-                    ) {
-                        Icon(
-                            imageVector = item.icon,
-                            contentDescription = item.label,
-                            tint = if (selected) Accent else TextSecondary,
-                            modifier = Modifier.size(21.dp)
-                        )
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            item.label.uppercase(),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (selected) Accent else TextFaint,
-                            maxLines = 1
-                        )
-                        Spacer(Modifier.height(3.dp))
-                        Box(
-                            modifier = Modifier
-                                .width(if (selected) 14.dp else 4.dp)
-                                .height(2.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(if (selected) Accent else Color.Transparent)
-                        )
-                    }
+            bottomItems.forEach { item ->
+                val selected = route == item.route
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable(role = androidx.compose.ui.semantics.Role.Tab) {
+                            onSelect(item.route)
+                        }
+                ) {
+                    Icon(
+                        imageVector = item.icon,
+                        contentDescription = item.label,
+                        tint = if (selected) Accent else TextFaint,
+                        modifier = Modifier.size(21.dp)
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        item.label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (selected) TextPrimary else TextFaint,
+                        maxLines = 1
+                    )
                 }
             }
         }

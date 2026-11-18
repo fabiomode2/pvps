@@ -51,8 +51,11 @@ class OpenCodeClient(
         .writeTimeout(30, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
+    // A dead half-open mobile socket used to leave this stream blocked
+    // forever (readTimeout 0), so the UI stayed "connected" while nothing
+    // arrived. Two minutes without an SSE line is not a healthy stream.
     private val sseClient = client.newBuilder()
-        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
         .build()
     // Console requests carry an OAuth bearer token to a server-named origin.
     // Never follow redirects away from the validated OpenCode Console origin.
@@ -67,11 +70,16 @@ class OpenCodeClient(
         }
     }
 
-    suspend fun listSessions(): List<SessionInfo> = withContext(Dispatchers.IO) {
+    suspend fun listSessions(rootsOnly: Boolean = false): List<SessionInfo> = withContext(Dispatchers.IO) {
         withTimeout(30_000) {
+            val query = buildList {
+                add("limit" to "500")
+                add("order" to "desc")
+                if (rootsOnly) add("parentID" to "null")
+            }
             json.decodeFromJsonElement(
                 SessionsResponse.serializer(),
-                get("/api/session", listOf("limit" to "200", "order" to "desc"))
+                get("/api/session", query)
             ).data
         }
     }
@@ -106,11 +114,19 @@ class OpenCodeClient(
         }
     }
 
-    suspend fun createSession(directory: String?): SessionInfo = withContext(Dispatchers.IO) {
+    suspend fun createSession(
+        directory: String?,
+        agent: String? = null,
+        model: ModelRef? = null
+    ): SessionInfo = withContext(Dispatchers.IO) {
         withTimeout(30_000) {
             val body = buildJsonObject {
                 if (!directory.isNullOrBlank()) {
                     put("location", buildJsonObject { put("directory", directory) })
+                }
+                if (!agent.isNullOrBlank()) put("agent", agent)
+                if (model != null && model.id.isNotBlank() && model.providerID.isNotBlank()) {
+                    put("model", json.encodeToJsonElement(ModelRef.serializer(), model))
                 }
             }
             json.decodeFromJsonElement(
@@ -434,8 +450,6 @@ class OpenCodeClient(
                 val line = try {
                     source.readUtf8LineStrict(MAX_SSE_LINE_BYTES)
                 } catch (_: EOFException) {
-                    break
-                } catch (_: IOException) {
                     break
                 }
                 if (!line.startsWith("data:")) continue

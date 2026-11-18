@@ -16,6 +16,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -59,6 +60,7 @@ import dev.pvps.ui.theme.Accent
 import dev.pvps.ui.theme.PvpsTheme
 import dev.pvps.ui.theme.DeepBackground
 import dev.pvps.ui.theme.TextSecondary
+import dev.pvps.ui.theme.primeTheme
 
 class MainActivity : ComponentActivity() {
 
@@ -70,6 +72,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         handleNavigationIntent(intent)
         enableEdgeToEdge()
+        // Resolve the persisted palette before the first composition. The
+        // theme still re-applies on change, but cold start no longer composes
+        // the whole tree twice with the default palette.
+        primeTheme(viewModel.settings.value.uiTheme)
         setContent {
             val appearance = viewModel.settings.collectAsStateValue()
             PvpsTheme(
@@ -118,6 +124,8 @@ private fun AppShell(viewModel: AppViewModel) {
     val activity = (view.context as? Activity) ?: (context as? Activity)
     val lifecycleOwner = LocalLifecycleOwner.current
     val settings = viewModel.settings.collectAsStateValue()
+    val hosts = viewModel.hosts.collectAsStateValue()
+    val bootReady = viewModel.bootReady.collectAsStateValue()
     var unlocked by remember { mutableStateOf(!settings.biometricLock) }
     var keyguardUnavailable by remember { mutableStateOf(false) }
 
@@ -155,8 +163,11 @@ private fun AppShell(viewModel: AppViewModel) {
             activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
     }
-    LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= 33 &&
+    // Ask for notifications only once the user actually owns a host. Firing
+    // this on the first frame put a system dialog over onboarding before the
+    // product had explained itself.
+    LaunchedEffect(hosts.isNotEmpty()) {
+        if (hosts.isNotEmpty() && Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
         ) {
@@ -213,7 +224,32 @@ private fun AppShell(viewModel: AppViewModel) {
                 }
             }
         }
+    } else if (!bootReady) {
+        BootSplash()
     } else {
         AppRoot(viewModel)
+    }
+}
+
+@Composable
+private fun BootSplash() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(DeepBackground)
+            .statusBarsPadding()
+            .navigationBarsPadding(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            PvpsMark(54.dp)
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "PVPS",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+                fontFamily = FontFamily.Monospace
+            )
+        }
     }
 }

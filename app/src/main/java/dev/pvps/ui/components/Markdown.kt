@@ -36,6 +36,7 @@ import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
+import android.util.LruCache
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
@@ -54,6 +55,7 @@ import dev.pvps.ui.theme.TextPrimary
 import dev.pvps.ui.theme.TextSecondary
 import dev.pvps.ui.theme.Violet
 import dev.pvps.ui.theme.Warning
+import dev.pvps.ui.theme.currentPaletteId
 
 /**
  * Small, dependency-free markdown renderer for chat messages.
@@ -268,7 +270,7 @@ private fun MarkdownTable(header: List<String>, rows: List<List<String>>) {
     val width = (header.size.coerceAtLeast(1)) * 132
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = SurfaceRaised.copy(alpha = 0.34f),
+        color = SurfaceRaised,
         shape = RoundedCornerShape(12.dp),
         border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.7f))
     ) {
@@ -352,13 +354,13 @@ private fun MarkdownCodeBlock(code: String, language: String) {
             Box(modifier = Modifier.horizontalScroll(rememberScrollState())) {
                 SelectionContainer {
                     Text(
-                        text = highlightCode(code.ifBlank { "(empty)" }, language),
+                        text = highlightCodeCached(code.ifBlank { "(empty)" }, language),
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontFamily = MonoFont,
                             lineHeight = 18.sp
                         ),
-                        color = Color(0xFFC3D1CC),
+                        color = TextPrimary,
                         softWrap = false
                     )
                 }
@@ -384,6 +386,22 @@ private val otherKeywords = setOf(
     "sudo", "git", "cd", "ls", "grep", "find", "cat", "curl", "ssh"
 )
 
+private val codeCache = LruCache<String, AnnotatedString>(32)
+private val inlineCache = LruCache<String, AnnotatedString>(192)
+
+/**
+ * Markdown used to be reparsed from scratch on every streaming token: O(n²)
+ * work in the composition thread. Cache the two expensive transforms keyed by
+ * palette so a theme switch cannot serve stale colors.
+ */
+private fun highlightCodeCached(code: String, language: String): AnnotatedString {
+    val key = "${currentPaletteId}|$language|$code"
+    synchronized(codeCache) { codeCache.get(key) }?.let { return it }
+    return highlightCode(code, language).also {
+        synchronized(codeCache) { codeCache.put(key, it) }
+    }
+}
+
 private fun highlightCode(code: String, language: String): AnnotatedString {
     val keywords = kotlinKeywords + otherKeywords
     val pattern = Regex(
@@ -398,7 +416,7 @@ private fun highlightCode(code: String, language: String): AnnotatedString {
             if (match.range.first > cursor) append(code.substring(cursor, match.range.first))
             val token = match.value
             val style = when {
-                match.groups[1] != null -> SpanStyle(color = Color(0xFFB8D98A))
+                match.groups[1] != null -> SpanStyle(color = Success)
                 match.groups[2] != null -> SpanStyle(color = TextFaint, fontStyle = FontStyle.Italic)
                 match.groups[3] != null -> SpanStyle(color = Warning)
                 token.lowercase() in keywords || token in keywords -> SpanStyle(
@@ -406,7 +424,7 @@ private fun highlightCode(code: String, language: String): AnnotatedString {
                     fontWeight = FontWeight.SemiBold
                 )
                 token.startsWith("$") -> SpanStyle(color = Accent)
-                else -> SpanStyle(color = Color(0xFFC3D1CC))
+                else -> SpanStyle(color = TextPrimary)
             }
             withStyle(style) { append(token) }
             cursor = match.range.last + 1
@@ -415,7 +433,15 @@ private fun highlightCode(code: String, language: String): AnnotatedString {
     }
 }
 
-private fun inlineMarkdown(text: String): AnnotatedString = buildAnnotatedString {
+private fun inlineMarkdown(text: String): AnnotatedString {
+    val key = "${currentPaletteId}|$text"
+    synchronized(inlineCache) { inlineCache.get(key) }?.let { return it }
+    return buildInlineMarkdown(text).also {
+        synchronized(inlineCache) { inlineCache.put(key, it) }
+    }
+}
+
+private fun buildInlineMarkdown(text: String): AnnotatedString = buildAnnotatedString {
     var i = 0
     while (i < text.length) {
         when {

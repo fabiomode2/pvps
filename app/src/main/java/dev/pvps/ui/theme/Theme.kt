@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
@@ -45,57 +46,60 @@ data class PvpsPalette(
 
 val Graphite = PvpsPalette(
     id = "graphite", label = "Graphite", isLight = false,
-    void = Color(0xFF09090A), surfaceDark = Color(0xFF101011),
-    surfaceRaised = Color(0xFF18181A), surfaceHigh = Color(0xFF212124),
-    outlineDark = Color(0xFF303035), outlineSoft = Color(0xFF1D1D20),
-    accent = Color(0xFFD8F36B), onAccent = Color(0xFF181F06),
-    accentDim = Color(0xFFA6BE4C), signalDeep = Color(0xFF2A3310),
-    violet = Color(0xFFBDB1FF), irisDeep = Color(0xFF26203F),
-    ember = Color(0xFFF5C77E), danger = Color(0xFFFF858F),
-    success = Color(0xFF7FE2B6), textPrimary = Color(0xFFF2EFE8),
-    textSecondary = Color(0xFFAAA69C), textFaint = Color(0xFF747169)
+    void = Color(0xFF08090A), surfaceDark = Color(0xFF0E1012),
+    surfaceRaised = Color(0xFF15181B), surfaceHigh = Color(0xFF1D2125),
+    outlineDark = Color(0xFF2A2F34), outlineSoft = Color(0xFF1A1E22),
+    accent = Color(0xFFFF6A3D), onAccent = Color(0xFF1A0A04),
+    accentDim = Color(0xFFC24E29), signalDeep = Color(0xFF3A1A10),
+    violet = Color(0xFF9FB4FF), irisDeep = Color(0xFF1A2033),
+    ember = Color(0xFFF2B35E), danger = Color(0xFFFF6B72),
+    success = Color(0xFF57D6A6), textPrimary = Color(0xFFF2F1EC),
+    textSecondary = Color(0xFFA8A8A2), textFaint = Color(0xFF8E908A)
 )
 
 val Midnight = PvpsPalette(
     id = "midnight", label = "Midnight", isLight = false,
-    void = Color(0xFF060A12), surfaceDark = Color(0xFF0B111C),
-    surfaceRaised = Color(0xFF111A29), surfaceHigh = Color(0xFF18243A),
-    outlineDark = Color(0xFF27364F), outlineSoft = Color(0xFF192337),
-    accent = Color(0xFF8FD8FF), onAccent = Color(0xFF03202E),
-    accentDim = Color(0xFF4EA8D8), signalDeep = Color(0xFF0E2C3D),
-    violet = Color(0xFFC3B5FF), irisDeep = Color(0xFF211C3D),
-    ember = Color(0xFFFFCE8A), danger = Color(0xFFFF8D9B),
-    success = Color(0xFF84E9C5), textPrimary = Color(0xFFEAF2FF),
-    textSecondary = Color(0xFF9AAAC4), textFaint = Color(0xFF66768F)
+    void = Color(0xFF06080D), surfaceDark = Color(0xFF0C1017),
+    surfaceRaised = Color(0xFF10151E), surfaceHigh = Color(0xFF181F2B),
+    outlineDark = Color(0xFF26303D), outlineSoft = Color(0xFF171E29),
+    accent = Color(0xFF7DD3FC), onAccent = Color(0xFF04202B),
+    accentDim = Color(0xFF4BA6CC), signalDeep = Color(0xFF0D2A38),
+    violet = Color(0xFFC4B5FD), irisDeep = Color(0xFF211D38),
+    ember = Color(0xFFF6C177), danger = Color(0xFFFF7B85),
+    success = Color(0xFF63D6B0), textPrimary = Color(0xFFEAF0F8),
+    textSecondary = Color(0xFFA0AAB8), textFaint = Color(0xFF8994A3)
 )
 
 val EmberTheme = PvpsPalette(
     id = "ember", label = "Ember", isLight = false,
-    void = Color(0xFF0D0907), surfaceDark = Color(0xFF15100C),
-    surfaceRaised = Color(0xFF1E1711), surfaceHigh = Color(0xFF2A2018),
-    outlineDark = Color(0xFF3D3025), outlineSoft = Color(0xFF291F18),
-    accent = Color(0xFFFFB878), onAccent = Color(0xFF2C1604),
-    accentDim = Color(0xFFD68A4D), signalDeep = Color(0xFF3A2310),
-    violet = Color(0xFFD9B8FF), irisDeep = Color(0xFF2E1F3D),
-    ember = Color(0xFFFFD29A), danger = Color(0xFFFF8A8A),
-    success = Color(0xFFAED8A0), textPrimary = Color(0xFFFFF1E7),
-    textSecondary = Color(0xFFC0A997), textFaint = Color(0xFF8C7665)
+    void = Color(0xFF0C0806), surfaceDark = Color(0xFF120E0B),
+    surfaceRaised = Color(0xFF17110D), surfaceHigh = Color(0xFF211913),
+    outlineDark = Color(0xFF382B21), outlineSoft = Color(0xFF241A14),
+    accent = Color(0xFFFF9E5E), onAccent = Color(0xFF2A1205),
+    accentDim = Color(0xFFC46F3A), signalDeep = Color(0xFF3B1D0C),
+    violet = Color(0xFFD7B8FF), irisDeep = Color(0xFF2A1F38),
+    ember = Color(0xFFE8B36B), danger = Color(0xFFFF8585),
+    success = Color(0xFF9ED9A4), textPrimary = Color(0xFFF5EEE7),
+    textSecondary = Color(0xFFB8A99B), textFaint = Color(0xFF9A8B7D)
 )
 
 val Paper = PvpsPalette(
     id = "paper", label = "Paper", isLight = true,
-    void = Color(0xFFF4F2EA), surfaceDark = Color(0xFFFBF9F2),
-    surfaceRaised = Color(0xFFFFFFFF), surfaceHigh = Color(0xFFEDE9DC),
-    outlineDark = Color(0xFFD3CCBC), outlineSoft = Color(0xFFE5DFD2),
-    accent = Color(0xFF3B4A20), onAccent = Color(0xFFF8FFE8),
-    accentDim = Color(0xFF64783C), signalDeep = Color(0xFFE2EACB),
-    violet = Color(0xFF6B5CA5), irisDeep = Color(0xFFEAE3FF),
-    ember = Color(0xFF9A641C), danger = Color(0xFFB33145),
-    success = Color(0xFF276B50), textPrimary = Color(0xFF1B1D17),
-    textSecondary = Color(0xFF5E6155), textFaint = Color(0xFF8A8D80)
+    void = Color(0xFFF2F0E9), surfaceDark = Color(0xFFF8F6F0),
+    surfaceRaised = Color(0xFFFFFFFF), surfaceHigh = Color(0xFFE9E5DA),
+    outlineDark = Color(0xFFCFC9BC), outlineSoft = Color(0xFFE2DCD0),
+    accent = Color(0xFFB43E0F), onAccent = Color(0xFFFFF8F3),
+    accentDim = Color(0xFF7C2B0A), signalDeep = Color(0xFFF3D8C8),
+    violet = Color(0xFF5B4A8F), irisDeep = Color(0xFFE7E0F5),
+    ember = Color(0xFF8A5A16), danger = Color(0xFFA4262C),
+    success = Color(0xFF176B4D), textPrimary = Color(0xFF1C1E1B),
+    textSecondary = Color(0xFF575B54), textFaint = Color(0xFF5F635B)
 )
 
 val Themes = listOf(Graphite, Midnight, EmberTheme, Paper)
+
+/** Palette id used to invalidate color-dependent text caches. */
+val currentPaletteId: String get() = activePalette.id
 
 // Snapshot-backed so every composable that reads one of the palette color
 // getters is invalidated immediately when the user changes theme at runtime.
@@ -105,6 +109,11 @@ private var activePalette: PvpsPalette
     set(value) { activePaletteState.value = value }
 
 fun paletteFor(id: String): PvpsPalette = Themes.firstOrNull { it.id == id } ?: Graphite
+
+/** Apply the persisted palette before the first composition, avoiding a second full pass. */
+fun primeTheme(id: String) {
+    activePalette = paletteFor(id)
+}
 
 // Existing composables import these names directly. They are getters so a
 // theme switch re-colors the whole app without touching hundreds of call sites.
@@ -132,7 +141,7 @@ val TextFaint: Color get() = activePalette.textFaint
 private val PvpsShapes = Shapes(
     extraSmall = RoundedCornerShape(8.dp),
     small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(18.dp),
+    medium = RoundedCornerShape(16.dp),
     large = RoundedCornerShape(24.dp),
     extraLarge = RoundedCornerShape(32.dp)
 )
@@ -146,7 +155,7 @@ fun PvpsTheme(
 ) {
     val palette = paletteFor(themeId)
     SideEffect { activePalette = palette }
-    val scheme = if (palette.isLight) {
+    val scheme = remember(palette) { if (palette.isLight) {
         lightColorScheme(
             primary = palette.accent,
             onPrimary = palette.onAccent,
@@ -208,7 +217,8 @@ fun PvpsTheme(
             surfaceContainerHigh = palette.surfaceRaised,
             surfaceContainerHighest = palette.surfaceHigh
         )
-    }
+    } }
+    val shapes = remember { PvpsShapes }
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
@@ -236,7 +246,7 @@ fun PvpsTheme(
         MaterialTheme(
             colorScheme = scheme,
             typography = PvpsTypography,
-            shapes = PvpsShapes,
+            shapes = shapes,
             content = content
         )
     }

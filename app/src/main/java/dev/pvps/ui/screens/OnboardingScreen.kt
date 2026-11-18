@@ -31,9 +31,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,6 +61,7 @@ import dev.pvps.ui.theme.SurfaceHigh
 import dev.pvps.ui.theme.TextFaint
 import dev.pvps.ui.theme.TextPrimary
 import dev.pvps.ui.theme.TextSecondary
+import kotlinx.coroutines.launch
 import dev.pvps.ui.theme.Violet
 
 private const val INSTALL_COMMAND =
@@ -76,8 +79,17 @@ fun OnboardingScreen(
     onHostCreated: () -> Unit
 ) {
     val clipboard = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
     var showSetup by remember { mutableStateOf(false) }
+    var setupValue by remember { mutableStateOf("") }
     var setupError by remember { mutableStateOf<String?>(null) }
+    var importing by remember { mutableStateOf(false) }
+    var clipboardSetup by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        val candidate = runCatching { clipboard.getText()?.text?.trim() }.getOrNull()
+        if (candidate?.startsWith("pvps-setup:") == true) clipboardSetup = candidate
+    }
 
     Column(
         modifier = Modifier
@@ -109,6 +121,56 @@ fun OnboardingScreen(
             style = MaterialTheme.typography.bodyLarge,
             color = TextSecondary
         )
+        Spacer(Modifier.height(22.dp))
+        SignalButton(
+            text = "Paste setup code",
+            icon = Icons.Default.ContentPaste,
+            onClick = { setupValue = ""; setupError = null; showSetup = true },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(9.dp))
+        clipboardSetup?.let { detected ->
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Accent.copy(alpha = 0.06f),
+                shape = RoundedCornerShape(16.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Accent.copy(alpha = 0.25f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 9.dp, bottom = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Setup code in clipboard", style = MaterialTheme.typography.titleSmall, color = TextPrimary)
+                        Text(
+                            "Import the host printed by install.sh",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+                    TextButton(onClick = {
+                        setupValue = detected
+                        setupError = null
+                        showSetup = true
+                    }) { Text("Import", color = Accent) }
+                }
+            }
+            Spacer(Modifier.height(9.dp))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GhostButton(
+                text = "Copy command",
+                onClick = { clipboard.setText(AnnotatedString(INSTALL_COMMAND)) },
+                icon = Icons.Default.ContentCopy,
+                modifier = Modifier.weight(1f)
+            )
+            GhostButton(
+                text = "Add manually",
+                onClick = onAddHost,
+                icon = Icons.Default.Add,
+                modifier = Modifier.weight(1f)
+            )
+        }
         Spacer(Modifier.height(24.dp))
         TerminalWindow(
             title = "pvps / setup",
@@ -121,20 +183,7 @@ fun OnboardingScreen(
                 "# done. paste the pvps-setup code into the app."
             )
         )
-        Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            GhostButton(
-                text = "Copy command",
-                onClick = { clipboard.setText(AnnotatedString(INSTALL_COMMAND)) },
-                icon = Icons.Default.ContentCopy
-            )
-            GhostButton(
-                text = "Add manually",
-                onClick = onAddHost,
-                icon = Icons.Default.Add
-            )
-        }
-        Spacer(Modifier.height(34.dp))
+        Spacer(Modifier.height(30.dp))
         SectionLabel("Three steps")
         Spacer(Modifier.height(8.dp))
         StepRow(
@@ -168,7 +217,7 @@ fun OnboardingScreen(
         Surface(
             modifier = Modifier.fillMaxWidth(),
             color = Accent.copy(alpha = 0.05f),
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(16.dp),
             border = androidx.compose.foundation.BorderStroke(1.dp, Accent.copy(alpha = 0.16f))
         ) {
             Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
@@ -196,7 +245,6 @@ fun OnboardingScreen(
     }
 
     if (showSetup) {
-        var value by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { showSetup = false },
             containerColor = SurfaceHigh,
@@ -213,8 +261,8 @@ fun OnboardingScreen(
                     )
                     Spacer(Modifier.height(12.dp))
                     PvpsTextField(
-                        value = value,
-                        onValueChange = { value = it; setupError = null },
+                        value = setupValue,
+                        onValueChange = { setupValue = it; setupError = null },
                         label = "pvps-setup:…",
                         singleLine = false,
                         minLines = 3,
@@ -222,7 +270,7 @@ fun OnboardingScreen(
                     )
                     Spacer(Modifier.height(8.dp))
                     TextButton(onClick = {
-                        clipboard.getText()?.text?.let { value = it; setupError = null }
+                        clipboard.getText()?.text?.let { setupValue = it; setupError = null }
                     }) {
                         Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
@@ -240,20 +288,30 @@ fun OnboardingScreen(
             },
             confirmButton = {
                 SignalButton(
-                    text = "Add host",
+                    text = if (importing) "Adding host…" else "Add host",
+                    enabled = !importing,
                     onClick = {
-                        val parsed = SetupCode.parse(value)
+                        val parsed = SetupCode.parse(setupValue)
                         parsed.onSuccess { payload ->
-                            val firstKey = viewModel.keys.value.firstOrNull()
-                            if (firstKey == null) {
-                                setupError = "Create an SSH key first, then import the setup code."
-                                return@onSuccess
+                            importing = true
+                            scope.launch {
+                                runCatching {
+                                    // First run has no key yet. Creating it inline
+                                    // removes the old dead end: "create a key first".
+                                    val key = viewModel.keys.value.firstOrNull()
+                                        ?: viewModel.generateKey("PVPS phone", "")
+                                    val host = SetupCode.toHost(payload).copy(keyId = key.id)
+                                    viewModel.saveHost(host)
+                                    viewModel.selectHost(host.id)
+                                }.onSuccess {
+                                    importing = false
+                                    showSetup = false
+                                    onHostCreated()
+                                }.onFailure {
+                                    importing = false
+                                    setupError = it.message ?: "Could not add the host"
+                                }
                             }
-                            val host = SetupCode.toHost(payload).copy(keyId = firstKey.id)
-                            viewModel.saveHost(host)
-                            viewModel.selectHost(host.id)
-                            showSetup = false
-                            onHostCreated()
                         }.onFailure { setupError = it.message ?: "Invalid setup code" }
                     }
                 )

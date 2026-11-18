@@ -305,26 +305,32 @@ jobs:
             ```
 
             **What's new in ${{ steps.meta.outputs.version }}:**
-            - Always-on SSH: 15s keepalives, TCP keepalive on the socket, and a
-              foreground wake lock so the tunnel survives screen-off and Doze.
-            - Fast self-healing: the watchdog probes every 5s, redials with
-              backoff after a Wi-Fi/LTE handoff, and retries until the host is
-              back instead of leaving the app disconnected.
-            - The SSH forward now closes as soon as its transport dies. That
-              ends the minute-long burst of `Connection reset` errors against a
-              dead loopback listener.
-            - OpenCode rebinds automatically when the tunnel is rebuilt, even
-              when the Chat tab is not open, and keeps the transcript, queue and
-              scroll position. New "Reconnecting…" status instead of a hard
-              error screen.
-            - Idle SSE streams are no longer killed after 120s, and restarted
-              streams reset their backoff after a healthy connection.
-            - Concurrent OpenCode connects are serialised, removing duplicate
-              SSE streams and REST bursts on startup.
-            - Settings → Connection: "Always-on tunnel" and a one-tap battery
-              optimization exemption.
-            - Installer: server-side `ClientAliveInterval 15`, `TCPKeepAlive`
-              and `MaxSessions 64` for long-lived mobile tunnels.
+            - SSH now tears down the old socket as soon as the default network
+              changes, then redials immediately instead of waiting through two
+              failed keepalives. Screen-on and process-restart recovery are
+              automatic; a healthy session can no longer get stuck on
+              "Reconnecting".
+            - Tunnels are rebuilt under a per-host lock, keep the previous local
+              port when possible, and fall back to an ephemeral port after
+              repeated bind failures. No more permanent "tunnel failed" state.
+            - OpenCode projects: sessions are grouped by project id with
+              canonical/worktree/sandbox resolution, empty projects stay
+              visible, and New creates the session in the project you are
+              looking at. Models, agents and commands follow the active project.
+            - New visual system: flat instrument-panel surfaces, one signal
+              orange accent, consistent 16dp cards and 48dp touch targets, a
+              readable light theme, and a quieter bottom bar. No gradients.
+            - Faster cold start: the encrypted vault and audit log load off the
+              main thread behind a small splash, update clients are lazy, and
+              the notification permission asks only after a host exists.
+            - Chat feels smoother: memoized markdown highlighting, throttled
+              streaming scroll, cleaner composer and session picker, and no
+              fake "READY" row competing with the model/agent chips.
+            - Files: system back goes up a directory, view toggles are
+              per-visit, toolbar targets meet the 48dp minimum.
+            - Settings: reconnect-on-launch switch, a separate Files section,
+              slider changes apply on release, and destructive disconnect moved
+              to a confirmed danger zone.
           files: |
             dist/pvps-${{ steps.meta.outputs.version }}.apk
             dist/SHA256SUMS

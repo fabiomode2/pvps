@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -45,6 +46,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -65,6 +68,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -83,6 +87,7 @@ import dev.pvps.ui.theme.Danger
 import dev.pvps.ui.theme.DeepBackground
 import dev.pvps.ui.theme.DisplayFont
 import dev.pvps.ui.theme.MonoFont
+import dev.pvps.ui.theme.OnAccent
 import dev.pvps.ui.theme.OutlineDark
 import dev.pvps.ui.theme.OutlineSoft
 import dev.pvps.ui.theme.Success
@@ -101,36 +106,10 @@ import java.util.concurrent.TimeUnit
 
 @Composable
 fun PvpsBackdrop(modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier.fillMaxSize()) {
-        drawRect(color = DeepBackground)
-        // Soft signal glow instead of a hard engineering grid: the backdrop
-        // should recede and let content carry the hierarchy.
-        // One quiet light source. No dot grid: the old texture made every screen
-        // feel like a dashboard and competed with the type.
-        drawRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(
-                    Color.White.copy(alpha = 0.018f),
-                    Color.Transparent,
-                    Color.Black.copy(alpha = 0.12f)
-                )
-            )
-        )
-        drawRect(
-            brush = Brush.radialGradient(
-                colors = listOf(Accent.copy(alpha = 0.055f), Color.Transparent),
-                center = Offset(size.width * 0.9f, -size.height * 0.05f),
-                radius = size.width * 0.85f
-            )
-        )
-        drawRect(
-            brush = Brush.radialGradient(
-                colors = listOf(Violet.copy(alpha = 0.035f), Color.Transparent),
-                center = Offset(size.width * 0.05f, size.height * 0.95f),
-                radius = size.width * 0.9f
-            )
-        )
-    }
+    // A flat canvas is intentional: the old full-screen gradients competed
+    // with content, cost fill-rate on low-end phones and made every surface
+    // translucent. Depth now comes from hairlines and type, not glow.
+    Box(modifier = modifier.fillMaxSize().background(DeepBackground))
 }
 
 @Composable
@@ -138,17 +117,16 @@ fun PvpsMark(size: Dp = 36.dp) {
     Box(
         modifier = Modifier
             .size(size)
-            .shadow(10.dp, RoundedCornerShape(size * 0.3f), ambientColor = Accent.copy(alpha = 0.18f))
-            .clip(RoundedCornerShape(size * 0.3f))
-            .background(Brush.linearGradient(listOf(SurfaceHigh, SurfaceDark)))
-            .border(BorderStroke(1.dp, Accent.copy(alpha = 0.28f)), RoundedCornerShape(size * 0.3f)),
+            .clip(RoundedCornerShape(size * 0.26f))
+            .background(SurfaceRaised)
+            .border(BorderStroke(1.dp, OutlineDark), RoundedCornerShape(size * 0.26f)),
         contentAlignment = Alignment.Center
     ) {
         Icon(
             painter = painterResource(R.drawable.ic_pvps_mark),
             contentDescription = null,
             tint = Color.Unspecified,
-            modifier = Modifier.size(size * 0.84f)
+            modifier = Modifier.size(size * 0.82f)
         )
     }
 }
@@ -214,15 +192,15 @@ fun ScreenHeader(
 fun GlassIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    size: Dp = 40.dp,
+    size: Dp = 44.dp,
     content: @Composable () -> Unit
 ) {
     Surface(
         modifier = modifier
             .size(size)
             .clip(CircleShape)
-            .clickable(onClick = onClick),
-        color = SurfaceRaised.copy(alpha = 0.72f),
+            .clickable(role = Role.Button, onClick = onClick),
+        color = SurfaceRaised,
         shape = CircleShape,
         border = BorderStroke(1.dp, OutlineDark)
     ) {
@@ -251,8 +229,8 @@ fun HostSwitcher(
     }
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = SurfaceRaised.copy(alpha = 0.66f),
-        shape = RoundedCornerShape(22.dp),
+        color = SurfaceRaised,
+        shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, OutlineDark)
     ) {
         Row(
@@ -372,8 +350,8 @@ fun StatusPill(text: String, color: Color) {
             StatusDot(color, 6)
             Spacer(Modifier.width(5.dp))
             Text(
-                text = text.uppercase(),
-                style = MaterialTheme.typography.labelSmall,
+                text = text,
+                style = MaterialTheme.typography.labelMedium,
                 color = color
             )
         }
@@ -391,8 +369,8 @@ fun StatCard(
 ) {
     Surface(
         modifier = modifier,
-        color = SurfaceRaised.copy(alpha = 0.48f),
-        shape = RoundedCornerShape(20.dp),
+        color = SurfaceRaised,
+        shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.72f))
     ) {
         Column(modifier = Modifier.padding(15.dp)) {
@@ -460,8 +438,8 @@ fun MetricRing(
     )
     Surface(
         modifier = modifier,
-        color = SurfaceRaised.copy(alpha = 0.62f),
-        shape = RoundedCornerShape(22.dp),
+        color = SurfaceRaised,
+        shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, OutlineDark)
     ) {
         Row(
@@ -512,16 +490,16 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier) {
     ) {
         Box(
             modifier = Modifier
-                .width(14.dp)
-                .height(1.dp)
-                .background(Accent.copy(alpha = 0.55f))
+                .size(5.dp)
+                .clip(RoundedCornerShape(1.dp))
+                .background(Accent)
         )
-        Spacer(Modifier.width(7.dp))
+        Spacer(Modifier.width(8.dp))
         Text(
             text.uppercase(),
             style = MaterialTheme.typography.labelMedium,
             color = TextSecondary,
-            letterSpacing = 1.2.sp
+            letterSpacing = 1.1.sp
         )
     }
 }
@@ -535,23 +513,15 @@ fun SectionCard(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = SurfaceRaised.copy(alpha = 0.44f),
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.72f))
+        color = SurfaceRaised,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, OutlineDark)
     ) {
         Column(modifier = Modifier.padding(15.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .width(2.dp)
-                        .height(13.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(Accent)
-                )
-                Spacer(Modifier.width(8.dp))
                 Text(
                     title.uppercase(),
-                    style = MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.labelMedium,
                     color = TextSecondary,
                     letterSpacing = 1.1.sp,
                     modifier = Modifier.weight(1f)
@@ -572,24 +542,13 @@ fun SignalButton(
     enabled: Boolean = true,
     icon: ImageVector? = null
 ) {
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(14.dp)
     Box(
         modifier = modifier
-            .shadow(
-                14.dp,
-                shape,
-                ambientColor = Accent.copy(alpha = 0.18f),
-                spotColor = Accent.copy(alpha = 0.18f)
-            )
+            .heightIn(min = 48.dp)
             .clip(shape)
-            .background(
-                if (enabled) {
-                    Brush.linearGradient(listOf(Accent, AccentDim))
-                } else {
-                    Brush.linearGradient(listOf(OutlineDark, OutlineDark))
-                }
-            )
-            .clickable(enabled = enabled, onClick = onClick)
+            .background(if (enabled) Accent else OutlineDark)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 13.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -598,17 +557,18 @@ fun SignalButton(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = if (enabled) Color(0xFF03100B) else TextFaint,
-                    modifier = Modifier.size(17.dp)
+                    tint = if (enabled) OnAccent else TextFaint,
+                    modifier = Modifier.size(18.dp)
                 )
-                Spacer(Modifier.width(7.dp))
+                Spacer(Modifier.width(8.dp))
             }
             Text(
-                text = text.uppercase(),
+                text = text,
                 style = MaterialTheme.typography.labelLarge,
-                color = if (enabled) Color(0xFF03100B) else TextFaint,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.4.sp
+                color = if (enabled) OnAccent else TextFaint,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -624,10 +584,11 @@ fun GhostButton(
 ) {
     Surface(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick),
-        color = SurfaceRaised.copy(alpha = 0.5f),
-        shape = RoundedCornerShape(16.dp),
+            .heightIn(min = 44.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(role = Role.Button, onClick = onClick),
+        color = Color.Transparent,
+        shape = RoundedCornerShape(14.dp),
         border = BorderStroke(1.dp, OutlineDark)
     ) {
         Row(
@@ -635,10 +596,16 @@ fun GhostButton(
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (icon != null) {
-                Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(7.dp))
+                Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(17.dp))
+                Spacer(Modifier.width(8.dp))
             }
-            Text(text.uppercase(), style = MaterialTheme.typography.labelLarge, color = color)
+            Text(
+                text,
+                style = MaterialTheme.typography.labelLarge,
+                color = color,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -653,30 +620,18 @@ fun EmptyState(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 30.dp, vertical = 48.dp),
+            .padding(horizontal = 28.dp, vertical = 44.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(
-            modifier = Modifier
-                .size(112.dp)
-                .background(
-                    Brush.radialGradient(
-                        listOf(Accent.copy(alpha = 0.16f), Color.Transparent)
-                    ),
-                    CircleShape
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            PvpsMark(58.dp)
-        }
-        Spacer(Modifier.height(20.dp))
+        PvpsMark(52.dp)
+        Spacer(Modifier.height(18.dp))
         Text(
             title,
             style = MaterialTheme.typography.headlineSmall,
             color = TextPrimary,
             textAlign = TextAlign.Center
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(7.dp))
         Text(
             message,
             style = MaterialTheme.typography.bodyMedium,
@@ -684,7 +639,7 @@ fun EmptyState(
             textAlign = TextAlign.Center
         )
         if (actionLabel != null && onAction != null) {
-            Spacer(Modifier.height(22.dp))
+            Spacer(Modifier.height(20.dp))
             SignalButton(actionLabel, onAction)
         }
     }
@@ -796,7 +751,7 @@ fun MonospaceBox(text: String, modifier: Modifier = Modifier) {
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = MonoFont,
-                color = Color(0xFFC3D1CC)
+                color = TextPrimary
             )
         }
     }
@@ -833,14 +788,14 @@ fun TinyAction(label: String, modifier: Modifier = Modifier, onClick: () -> Unit
         modifier = modifier
             .clip(RoundedCornerShape(50))
             .clickable(onClick = onClick),
-        color = SurfaceRaised.copy(alpha = 0.7f),
+        color = SurfaceRaised,
         shape = RoundedCornerShape(50),
         border = BorderStroke(1.dp, OutlineDark)
     ) {
         Text(
-            label.uppercase(),
-            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
-            style = MaterialTheme.typography.labelSmall,
+            label,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            style = MaterialTheme.typography.labelMedium,
             color = TextPrimary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -856,15 +811,15 @@ fun TerminalWindow(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = Color(0xFF040705),
-        shape = RoundedCornerShape(20.dp),
+        color = SurfaceDark,
+        shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, OutlineDark)
     ) {
         Column {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(SurfaceRaised.copy(alpha = 0.45f))
+                    .background(SurfaceRaised)
                     .padding(horizontal = 13.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -885,7 +840,7 @@ fun TerminalWindow(
                         color = when {
                             line.startsWith("$") -> Accent
                             line.startsWith("#") -> TextFaint
-                            else -> Color(0xFFB8C9BE)
+                            else -> TextPrimary
                         },
                         modifier = Modifier.padding(vertical = 2.dp)
                     )
@@ -898,18 +853,13 @@ fun TerminalWindow(
 
 @Composable
 private fun BlinkingCursor() {
-    val transition = rememberInfiniteTransition(label = "cursor")
-    val alpha by transition.animateFloat(
-        initialValue = 0.15f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(650), RepeatMode.Reverse),
-        label = "cursorAlpha"
-    )
+    // Decorative, not a real session. A permanent blinking element pulled the
+    // eye on every onboarding frame for no information gain.
     Box(
         modifier = Modifier
             .padding(top = 2.dp)
-            .size(width = 8.dp, height = 15.dp)
-            .background(Accent.copy(alpha = alpha), RoundedCornerShape(2.dp))
+            .size(width = 7.dp, height = 15.dp)
+            .background(Accent, RoundedCornerShape(2.dp))
     )
 }
 
@@ -919,31 +869,21 @@ fun PvpsSwitch(
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val knobOffset by animateDpAsState(
-        targetValue = if (checked) 21.dp else 3.dp,
-        animationSpec = tween(180),
-        label = "switchKnob"
-    )
-    Box(
-        modifier = modifier
-            .size(width = 46.dp, height = 26.dp)
-            .clip(RoundedCornerShape(50))
-            .background(if (checked) Accent.copy(alpha = 0.22f) else SurfaceHigh)
-            .border(
-                1.dp,
-                if (checked) Accent.copy(alpha = 0.75f) else OutlineDark,
-                RoundedCornerShape(50)
-            )
-            .clickable { onCheckedChange(!checked) }
-    ) {
-        Box(
-            modifier = Modifier
-                .offset(x = knobOffset, y = 3.dp)
-                .size(18.dp)
-                .clip(CircleShape)
-                .background(if (checked) Accent else TextSecondary)
+    // Material's switch carries Role.Switch and the checked state for TalkBack;
+    // the old custom Box announced nothing.
+    Switch(
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        modifier = modifier,
+        colors = SwitchDefaults.colors(
+            checkedThumbColor = OnAccent,
+            checkedTrackColor = Accent,
+            checkedBorderColor = Accent,
+            uncheckedThumbColor = TextSecondary,
+            uncheckedTrackColor = SurfaceHigh,
+            uncheckedBorderColor = OutlineDark
         )
-    }
+    )
 }
 
 @Composable
@@ -969,7 +909,7 @@ fun PvpsTextField(
         singleLine = singleLine,
         minLines = minLines,
         maxLines = maxLines,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         textStyle = MaterialTheme.typography.bodyLarge,
         keyboardOptions = keyboardOptions,
         visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
@@ -980,8 +920,8 @@ fun PvpsTextField(
             focusedLabelColor = Accent,
             unfocusedLabelColor = TextSecondary,
             cursorColor = Accent,
-            focusedContainerColor = SurfaceRaised.copy(alpha = 0.45f),
-            unfocusedContainerColor = SurfaceRaised.copy(alpha = 0.25f),
+            focusedContainerColor = SurfaceDark,
+            unfocusedContainerColor = SurfaceDark,
             focusedTextColor = TextPrimary,
             unfocusedTextColor = TextPrimary
         )

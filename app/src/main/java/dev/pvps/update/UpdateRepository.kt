@@ -35,12 +35,13 @@ import java.util.concurrent.TimeUnit
  * the same state. The suspend functions run on [Dispatchers.IO]; callers only need to
  * launch them from a lifecycle-aware scope.
  */
-class UpdateRepository(
-    context: Context,
-    private val checker: UpdateChecker = UpdateChecker(context),
-    private val client: OkHttpClient = defaultDownloadClient()
-) {
+class UpdateRepository(context: Context) {
     private val appContext: Context = context.applicationContext
+    // Both GitHub clients are only needed when an update check runs. Building
+    // them (and creating their thread pools) before the first frame made cold
+    // start pay for a feature most launches never use.
+    private val checker by lazy { UpdateChecker(appContext) }
+    private val client by lazy { defaultDownloadClient() }
 
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val state: StateFlow<UpdateState> = _state.asStateFlow()
@@ -49,7 +50,9 @@ class UpdateRepository(
      * True when Android will reject the install intent until the user grants
      * "install unknown apps" to PVPS. Always false below API 26.
      */
-    private val _needsUnknownSources = MutableStateFlow(requiresUnknownSources())
+    // Filled by refreshUnknownSources() off the main thread; a synchronous
+    // PackageManager binder call in the constructor blocked cold start.
+    private val _needsUnknownSources = MutableStateFlow(false)
     val needsUnknownSources: StateFlow<Boolean> = _needsUnknownSources.asStateFlow()
 
     private val operationMutex = Mutex()

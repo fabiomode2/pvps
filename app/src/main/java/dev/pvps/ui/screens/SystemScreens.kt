@@ -561,13 +561,13 @@ fun ProcessesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                     .padding(horizontal = 12.dp, vertical = 4.dp),
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyMedium,
-                shape = RoundedCornerShape(13.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Accent.copy(alpha = 0.72f),
                     unfocusedBorderColor = OutlineDark,
                     cursorColor = Accent,
-                    focusedContainerColor = SurfaceRaised.copy(alpha = 0.38f),
-                    unfocusedContainerColor = SurfaceRaised.copy(alpha = 0.22f),
+                    focusedContainerColor = SurfaceRaised,
+                    unfocusedContainerColor = SurfaceRaised,
                     focusedTextColor = TextPrimary,
                     unfocusedTextColor = TextPrimary
                 )
@@ -773,10 +773,10 @@ private fun AutoRefreshChip(enabled: Boolean, onClick: () -> Unit) {
     val tint = if (enabled) Accent else TextFaint
     Surface(
         modifier = Modifier
-            .clip(RoundedCornerShape(9.dp))
+            .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick),
-        color = if (enabled) Accent.copy(alpha = 0.12f) else SurfaceRaised.copy(alpha = 0.26f),
-        shape = RoundedCornerShape(9.dp),
+        color = if (enabled) Accent.copy(alpha = 0.12f) else SurfaceRaised,
+        shape = RoundedCornerShape(8.dp),
         border = BorderStroke(
             1.dp,
             if (enabled) Accent.copy(alpha = 0.35f) else OutlineDark.copy(alpha = 0.72f)
@@ -876,8 +876,8 @@ private fun ProcessMemoryCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp),
-        color = SurfaceRaised.copy(alpha = 0.44f),
-        shape = RoundedCornerShape(20.dp),
+        color = SurfaceRaised,
+        shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.72f))
     ) {
         Column(modifier = Modifier.padding(14.dp)) {

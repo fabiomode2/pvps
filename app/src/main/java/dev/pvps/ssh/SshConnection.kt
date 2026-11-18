@@ -25,6 +25,7 @@ import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketTimeoutException
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 sealed interface ConnectOutcome {
@@ -52,10 +53,12 @@ class SshConnection(
         const val DEFAULT_MAX_ERROR_BYTES: Long = 1L * 1024 * 1024
 
         // Mobile NATs forget idle flows after ~30-60s. Send our own keepalive
-        // every 15s and give up after two missed replies (30s) instead of the
-        // old 30s x 3 = 90s, which is long enough for the UI to look dead.
-        const val KEEPALIVE_INTERVAL_MS = 15_000
-        const val KEEPALIVE_COUNT_MAX = 2
+        // every 20s and allow three missed replies (60s). The old 2-strike
+        // window was aggressive enough to drop a healthy but briefly stalled
+        // LTE link; SshManager's cheap exec probe still detects a dead socket
+        // in ~30s, so we do not lose responsiveness.
+        const val KEEPALIVE_INTERVAL_MS = 20_000
+        const val KEEPALIVE_COUNT_MAX = 3
         private const val CONNECT_TIMEOUT_MS = 15_000
     }
 
@@ -136,12 +139,15 @@ class SshConnection(
             val stdout = ByteArrayOutputStream()
             val stderr = BoundedByteArrayOutputStream(maxErrorBytes, "stderr")
             val started = System.currentTimeMillis()
+            val timedOut = AtomicBoolean(false)
             coroutineScope {
                 // The read loop below is blocking and ignores coroutine
                 // cancellation. A watchdog closes the channel so a hung remote
-                // command cannot hold the UI forever.
+                // command cannot hold the UI forever. The flag distinguishes a
+                // real timeout from a command that finished on the same tick.
                 val watchdog = launch {
                     delay(timeoutMs)
+                    timedOut.set(true)
                     runCatching { channel.disconnect() }
                 }
                 try {
@@ -176,7 +182,7 @@ class SshConnection(
                     if (stderr.overflowed) {
                         throw IOException("SSH stderr exceeded ${maxErrorBytes} bytes")
                     }
-                    if (!watchdog.isActive) {
+                    if (timedOut.get()) {
                         throw SocketTimeoutException("Command timed out after ${timeoutMs}ms")
                     }
                     CommandResult(
@@ -191,7 +197,7 @@ class SshConnection(
                     if (stderr.overflowed) {
                         throw IOException("SSH stderr exceeded ${maxErrorBytes} bytes")
                     }
-                    if (!watchdog.isActive) {
+                    if (timedOut.get()) {
                         throw SocketTimeoutException("Command timed out after ${timeoutMs}ms")
                     }
                     throw e

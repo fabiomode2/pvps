@@ -6,7 +6,9 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
@@ -20,10 +22,13 @@ import dev.pvps.MainActivity
 import dev.pvps.PvpsApp
 import dev.pvps.R
 import dev.pvps.data.model.ConnectionState
+import dev.pvps.diagnostics.Diagnostics
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -40,6 +45,11 @@ class ConnectionService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var wakeLock: PowerManager.WakeLock? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var screenReceiver: BroadcastReceiver? = null
+    private var networkDebounce: Job? = null
+    private var idleStop: Job? = null
+    private var seenNetwork = false
+    private var lastNetworkHandle: Long = -1L
 
     override fun onCreate() {
         super.onCreate()
@@ -64,9 +74,13 @@ class ConnectionService : Service() {
             }
         }
         scope.launch {
-            container.ssh.states.collectLatest { publishStatus(it) }
+            container.ssh.states.collectLatest {
+                publishStatus(it)
+                updateWakeLock()
+            }
         }
         registerNetworkCallback()
+        registerScreenReceiver()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -86,15 +100,21 @@ class ConnectionService : Service() {
         )
         updateWakeLock()
         publishStatus(container.ssh.states.value)
-        // If Android kills the process, the SSH sessions are gone too. Restarting
-        // the service without them would only show a misleading notification.
-        return START_NOT_STICKY
+        // Process death tears down every socket. Saved sessions are restored
+        // explicitly after the vault finishes decrypting; START_STICKY lets
+        // Android bring the supervisor back instead of silently dropping the
+        // always-on tunnel.
+        container.ssh.ensureRestored()
+        return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        unregisterScreenReceiver()
         unregisterNetworkCallback()
+        networkDebounce?.cancel()
+        idleStop?.cancel()
         releaseWakeLock()
         scope.cancel()
         super.onDestroy()
@@ -114,11 +134,25 @@ class ConnectionService : Service() {
             else -> "$connected SSH links active"
         }
         update(this, text)
+        if (container.ssh.hasActiveSessions) {
+            idleStop?.cancel()
+            idleStop = null
+        } else if (idleStop == null) {
+            // A failed initial connect must not leave a foreground notification
+            // and a wake lock running forever.
+            idleStop = scope.launch {
+                delay(30_000)
+                if (!container.ssh.hasActiveSessions) {
+                    ConnectionService.stop(this@ConnectionService)
+                }
+            }
+        }
     }
 
     @SuppressLint("WakelockTimeout")
     private fun updateWakeLock() {
-        val wanted = container.settings.settings.value.keepConnectionAlive
+        val wanted = container.settings.settings.value.keepConnectionAlive &&
+            container.ssh.hasActiveSessions
         if (wanted) {
             if (wakeLock == null) {
                 val power = getSystemService(PowerManager::class.java) ?: return
@@ -144,20 +178,75 @@ class ConnectionService : Service() {
         wakeLock = null
     }
 
+    /**
+     * Screen-on is the cheapest moment to prove the link still works: Doze can
+     * suspend the network long enough for the carrier NAT to forget the flow.
+     * Probe off the main thread; only a dead transport triggers a redial.
+     */
+    private fun registerScreenReceiver() {
+        if (screenReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context?, intent: Intent?) {
+                if (intent?.action != Intent.ACTION_SCREEN_ON) return
+                scope.launch {
+                    container.ssh.verifyConnections(force = true)
+                    container.openCode.onResume()
+                }
+            }
+        }
+        screenReceiver = receiver
+        ContextCompat.registerReceiver(
+            this,
+            receiver,
+            IntentFilter(Intent.ACTION_SCREEN_ON),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+    }
+
+    private fun unregisterScreenReceiver() {
+        screenReceiver?.let { runCatching { unregisterReceiver(it) } }
+        screenReceiver = null
+    }
+
     private fun registerNetworkCallback() {
         runCatching {
             val connectivity = getSystemService(ConnectivityManager::class.java)
             val callback = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
-                    // The default network changed (Wi-Fi -> LTE, VPN up, ...).
-                    // Probe/redial immediately instead of waiting for the
-                    // watchdog or a 45s backoff.
-                    container.ssh.onNetworkAvailable()
-                    container.openCode.onResume()
+                    val handle = network.networkHandle
+                    if (!seenNetwork) {
+                        // Registering the callback immediately reports the
+                        // current default network. That is not a handoff; a
+                        // redial here would loop right after connect.
+                        seenNetwork = true
+                        lastNetworkHandle = handle
+                        return
+                    }
+                    lastNetworkHandle = handle
+                    scheduleNetworkChange("available")
+                }
+
+                override fun onLost(network: Network) {
+                    if (network.networkHandle == lastNetworkHandle) {
+                        scheduleNetworkChange("lost")
+                    }
                 }
             }
             connectivity.registerDefaultNetworkCallback(callback)
             networkCallback = callback
+        }
+    }
+
+    private fun scheduleNetworkChange(reason: String) {
+        // A handoff produces onLost + onAvailable within a few hundred ms.
+        // Coalesce them and redial once from a service coroutine, never from
+        // the ConnectivityThread.
+        networkDebounce?.cancel()
+        Diagnostics.event("ssh", "default network $reason; debouncing redial")
+        networkDebounce = scope.launch {
+            delay(700)
+            container.ssh.onNetworkAvailable()
+            container.openCode.onResume()
         }
     }
 
@@ -182,7 +271,7 @@ class ConnectionService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_pvps)
-            .setColor(0xFF8BFFD1.toInt())
+            .setColor(0xFFFF6A3D.toInt())
             .setContentTitle("PVPS")
             .setContentText(text)
             .setContentIntent(pending)
@@ -215,7 +304,7 @@ class ConnectionService : Service() {
             )
             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_pvps)
-                .setColor(0xFFD1FA76.toInt())
+                .setColor(0xFFFF6A3D.toInt())
                 .setContentTitle("PVPS")
                 .setContentText(text)
                 .setContentIntent(pending)

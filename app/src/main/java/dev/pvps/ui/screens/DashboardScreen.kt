@@ -83,6 +83,7 @@ import dev.pvps.ui.theme.TextFaint
 import dev.pvps.ui.theme.TextPrimary
 import dev.pvps.ui.theme.TextSecondary
 import dev.pvps.ui.theme.Warning
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -115,18 +116,26 @@ fun DashboardScreen(
         if (state?.status != ConnectionState.Status.CONNECTED) return@LaunchedEffect
         loading = true
         error = null
-        runCatching {
-            withContext(Dispatchers.IO) {
+        try {
+            val (snap, cs) = withContext(Dispatchers.IO) {
                 val snap = viewModel.system.snapshot(h.id)
-                val cs = viewModel.system.containers(h.id)
+                // snapshot already counts containers; the extra docker ps is
+                // only needed for hosts where that probe returned zero.
+                val cs = if (snap.containersTotal > 0) emptyList() else {
+                    viewModel.system.containers(h.id)
+                }
                 snap to cs
             }
-        }.onSuccess { (snap, cs) ->
             snapshot = snap
             containers = cs
             lastRefresh = System.currentTimeMillis()
-        }.onFailure { error = it.message }
-        loading = false
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            error = e.message
+        } finally {
+            loading = false
+        }
     }
 
     Scaffold(
@@ -171,12 +180,14 @@ fun DashboardScreen(
         ) {
             item {
                 Spacer(Modifier.height(2.dp))
+                val openCodeBound = openCode.hostId == host.id
                 ConnectionPanel(
                     state = state,
-                    openCodeConnected = openCode.connected,
-                    openCodeConnecting = openCode.connecting,
+                    hostName = host.name,
+                    openCodeConnected = openCode.connected && openCodeBound,
+                    openCodeConnecting = openCode.connecting && openCodeBound,
                     openCodeVersion = openCode.serverVersion,
-                    openCodeSessions = openCode.sessions.size,
+                    openCodeSessions = openCode.rootSessions.size,
                     onConnect = { viewModel.connect(host.id) },
                     onDisconnect = { viewModel.disconnect(host.id) },
                     onChat = onOpenChat,
@@ -260,7 +271,7 @@ private fun DashboardHeader(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (onBack != null) {
-                    GlassIconButton(onClick = onBack, size = 38.dp) {
+                    GlassIconButton(onClick = onBack, size = 44.dp) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
@@ -353,7 +364,7 @@ private fun DashboardHeader(
                     }
                 }
                 Spacer(Modifier.width(6.dp))
-                GlassIconButton(onClick = onRefresh, size = 38.dp) {
+                GlassIconButton(onClick = onRefresh, size = 44.dp) {
                     Icon(
                         Icons.Default.Refresh,
                         contentDescription = "Refresh",
@@ -362,7 +373,7 @@ private fun DashboardHeader(
                     )
                 }
                 Spacer(Modifier.width(6.dp))
-                GlassIconButton(onClick = onManageHosts, size = 38.dp) {
+                GlassIconButton(onClick = onManageHosts, size = 44.dp) {
                     Icon(
                         Icons.Default.MoreHoriz,
                         contentDescription = "Manage hosts",
@@ -373,7 +384,7 @@ private fun DashboardHeader(
             }
             HorizontalDivider(
                 thickness = 1.dp,
-                color = OutlineDark.copy(alpha = 0.65f)
+                color = OutlineDark
             )
         }
     }
@@ -382,6 +393,7 @@ private fun DashboardHeader(
 @Composable
 private fun ConnectionPanel(
     state: ConnectionState?,
+    hostName: String,
     openCodeConnected: Boolean,
     openCodeConnecting: Boolean,
     openCodeVersion: String,
@@ -424,8 +436,8 @@ private fun ConnectionPanel(
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = SurfaceRaised.copy(alpha = 0.44f),
-        shape = RoundedCornerShape(22.dp),
+        color = SurfaceRaised,
+        shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.72f))
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -454,25 +466,34 @@ private fun ConnectionPanel(
                         color = TextSecondary,
                         onClick = onDisconnect
                     )
-                    status == ConnectionState.Status.CONNECTING -> CircularProgressIndicator(
-                        modifier = Modifier.size(15.dp),
+                    status == ConnectionState.Status.CONNECTING ||
+                        status == ConnectionState.Status.RECONNECTING -> CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
                         color = Warning,
                         strokeWidth = 2.dp
                     )
                     status == ConnectionState.Status.NEEDS_HOST_KEY -> Unit
-                    else -> ConnectionAction(
-                        text = "Connect",
-                        icon = Icons.Default.Power,
-                        color = Accent,
-                        onClick = onConnect
-                    )
                 }
             }
             Spacer(Modifier.height(12.dp))
-            PrimaryConversationAction(
-                meta = openCodeMeta,
-                onClick = onChat
-            )
+            if (connected) {
+                PrimaryConversationAction(meta = openCodeMeta, onClick = onChat)
+            } else if (status != ConnectionState.Status.NEEDS_HOST_KEY) {
+                // Offline: connecting is the only action that matters. The old
+                // layout made "Conversation" the loudest button while dead.
+                SignalButton(
+                    text = when (status) {
+                        ConnectionState.Status.CONNECTING,
+                        ConnectionState.Status.RECONNECTING -> "Connecting to $hostName…"
+                        else -> "Connect to $hostName"
+                    },
+                    icon = Icons.Default.Power,
+                    onClick = onConnect,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = status != ConnectionState.Status.CONNECTING &&
+                        status != ConnectionState.Status.RECONNECTING
+                )
+            }
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SecondaryAction(
@@ -554,7 +575,7 @@ private fun SecondaryAction(
         modifier = modifier
             .clip(shape)
             .clickable(onClick = onClick),
-        color = SurfaceRaised.copy(alpha = 0.42f),
+        color = SurfaceRaised,
         shape = shape,
         border = BorderStroke(1.dp, OutlineDark)
     ) {
@@ -586,7 +607,7 @@ private fun ConnectionAction(
     color: Color,
     onClick: () -> Unit
 ) {
-    val shape = RoundedCornerShape(9.dp)
+    val shape = RoundedCornerShape(8.dp)
     Surface(
         modifier = Modifier
             .clip(shape)
@@ -644,8 +665,8 @@ private fun TelemetryHeader(loading: Boolean, lastRefresh: Long) {
 private fun TelemetryGrid(snapshot: SystemRepository.Snapshot) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = SurfaceRaised.copy(alpha = 0.42f),
-        shape = RoundedCornerShape(20.dp),
+        color = SurfaceRaised,
+        shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.72f))
     ) {
         Column {
@@ -665,7 +686,7 @@ private fun TelemetryGrid(snapshot: SystemRepository.Snapshot) {
                 VerticalDivider(
                     modifier = Modifier.fillMaxHeight(),
                     thickness = 1.dp,
-                    color = OutlineDark.copy(alpha = 0.7f)
+                    color = OutlineDark
                 )
                 MetricCell(
                     label = "RAM",
@@ -678,7 +699,7 @@ private fun TelemetryGrid(snapshot: SystemRepository.Snapshot) {
             }
             HorizontalDivider(
                 thickness = 1.dp,
-                color = OutlineDark.copy(alpha = 0.7f)
+                color = OutlineDark
             )
             Row(
                 modifier = Modifier
@@ -696,7 +717,7 @@ private fun TelemetryGrid(snapshot: SystemRepository.Snapshot) {
                 VerticalDivider(
                     modifier = Modifier.fillMaxHeight(),
                     thickness = 1.dp,
-                    color = OutlineDark.copy(alpha = 0.7f)
+                    color = OutlineDark
                 )
                 MetricCell(
                     label = "Docker",
@@ -780,8 +801,8 @@ private fun QuickAccess(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = SurfaceRaised.copy(alpha = 0.42f),
-        shape = RoundedCornerShape(20.dp),
+        color = SurfaceRaised,
+        shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.72f))
     ) {
         Column {
@@ -794,7 +815,7 @@ private fun QuickAccess(
             )
             HorizontalDivider(
                 thickness = 1.dp,
-                color = OutlineDark.copy(alpha = 0.7f)
+                color = OutlineDark
             )
             QuickRow(
                 label = "Services",
@@ -805,7 +826,7 @@ private fun QuickAccess(
             )
             HorizontalDivider(
                 thickness = 1.dp,
-                color = OutlineDark.copy(alpha = 0.7f)
+                color = OutlineDark
             )
             QuickRow(
                 label = "Processes",
@@ -913,7 +934,7 @@ private fun HostFootprint(snapshot: SystemRepository.Snapshot) {
 private fun LoadingTelemetry() {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = SurfaceRaised.copy(alpha = 0.40f),
+        color = SurfaceRaised,
         shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, OutlineDark)
     ) {

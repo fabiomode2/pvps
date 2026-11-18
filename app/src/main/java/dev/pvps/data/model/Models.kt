@@ -71,10 +71,16 @@ data class AppSettings(
     // it the CPU can sleep through the keepalive timers, the carrier NAT drops
     // the idle socket, and the tunnel only notices minutes later.
     val keepConnectionAlive: Boolean = true,
+    /** Host ids that were connected when the app last ran; restored after process death. */
+    val autoConnectHostIds: List<String> = emptyList(),
+    /** Re-open the last tunnel when the app starts. Explicit disconnect opts out. */
+    val autoReconnect: Boolean = true,
     val lastModelProvider: String = "",
     val lastModelId: String = "",
     val lastModelVariant: String = "",
-    val lastAgentId: String = ""
+    val lastAgentId: String = "",
+    /** Last session opened, used to land on the same project after launch. */
+    val lastSessionId: String = ""
 )
 
 @Serializable

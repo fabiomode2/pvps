@@ -47,7 +47,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -107,6 +106,7 @@ import dev.pvps.data.model.AppSettings
 import dev.pvps.data.model.ConnectionState
 import dev.pvps.data.model.Host
 import dev.pvps.ssh.SshManager
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -119,7 +119,8 @@ fun TerminalScreen(
     ssh: SshManager,
     settings: AppSettings,
     onBack: () -> Unit,
-    onFontSizeChange: (Float) -> Unit
+    onFontSizeChange: (Float) -> Unit,
+    onConnect: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
@@ -128,7 +129,7 @@ fun TerminalScreen(
     val haptic = LocalHapticFeedback.current
     val keyboard = LocalSoftwareKeyboardController.current
     val scope = rememberCoroutineScope()
-    val states by ssh.states.collectAsState()
+    val states by ssh.states.collectAsStateWithLifecycle()
     val connection = states[host.id] ?: ConnectionState(host.id, ConnectionState.Status.DISCONNECTED)
     val palette = remember(settings.terminalTheme) { TerminalPalettes.byId(settings.terminalTheme) }
     var controller by remember(host.id) { mutableStateOf<TerminalController?>(null) }
@@ -386,11 +387,11 @@ fun TerminalScreen(
                         Spacer(Modifier.height(8.dp))
                         TextButton(onClick = {
                             retry++
-                            scope.launch { ssh.connect(host.id) }
+                            onConnect()
                         }) { Text("Reconnect") }
                     } else {
                         Text("Terminal is not connected", color = TextSecondary)
-                        TextButton(onClick = { scope.launch { ssh.connect(host.id) } }) {
+                        TextButton(onClick = onConnect) {
                             Text("Connect")
                         }
                     }

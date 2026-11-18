@@ -3,25 +3,49 @@ package dev.pvps.data.store
 import dev.pvps.data.model.Host
 import dev.pvps.data.model.SecureData
 import dev.pvps.data.model.SshKey
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 class VaultRepository(private val store: SecureStore) {
 
-    private val initial = store.load()
-    private val _hosts = MutableStateFlow(initial.hosts)
-    private val _keys = MutableStateFlow(initial.keys)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val writes = Channel<Unit>(Channel.CONFLATED)
+
+    private val _hosts = MutableStateFlow<List<Host>>(emptyList())
+    private val _keys = MutableStateFlow<List<SshKey>>(emptyList())
+    private val _ready = MutableStateFlow(false)
 
     val hosts: StateFlow<List<Host>> = _hosts.asStateFlow()
     val keys: StateFlow<List<SshKey>> = _keys.asStateFlow()
+    val ready: StateFlow<Boolean> = _ready.asStateFlow()
+
+    init {
+        // Keystore decrypt + JSON parse used to run inside Application.onCreate
+        // on the main thread. The UI gates on `ready` for the few frames it takes.
+        scope.launch {
+            val initial = store.load()
+            _hosts.value = initial.hosts
+            _keys.value = initial.keys
+            _ready.value = true
+        }
+        scope.launch {
+            for (ignored in writes) {
+                runCatching { store.save(SecureData(hosts = _hosts.value, keys = _keys.value)) }
+            }
+        }
+    }
 
     fun host(id: String?): Host? = _hosts.value.firstOrNull { it.id == id }
     fun key(id: String?): SshKey? = _keys.value.firstOrNull { it.id == id }
 
     fun upsertHost(host: Host) {
-        val next = _hosts.value.filterNot { it.id == host.id } + host
-        _hosts.value = next
+        _hosts.value = _hosts.value.filterNot { it.id == host.id } + host
         persist()
     }
 
@@ -52,6 +76,6 @@ class VaultRepository(private val store: SecureStore) {
     }
 
     private fun persist() {
-        store.save(SecureData(hosts = _hosts.value, keys = _keys.value))
+        writes.trySend(Unit)
     }
 }

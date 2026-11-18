@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -80,6 +81,7 @@ import androidx.compose.material3.Surface
 import dev.pvps.ui.components.GhostButton
 import dev.pvps.ui.components.SignalButton
 import dev.pvps.ui.components.StatusPill
+import dev.pvps.ui.theme.OnAccent
 import dev.pvps.ui.theme.OutlineDark
 import dev.pvps.ui.theme.SurfaceRaised
 import dev.pvps.ui.theme.TextFaint
@@ -121,8 +123,12 @@ fun HostsScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onAddHost, containerColor = Accent) {
-                Icon(Icons.Default.Add, contentDescription = "Add host", tint = Color(0xFF00201D))
+            FloatingActionButton(
+                onClick = onAddHost,
+                containerColor = Accent,
+                modifier = Modifier.navigationBarsPadding()
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Add host", tint = OnAccent)
             }
         }
     ) { padding ->
@@ -188,16 +194,16 @@ private fun HostCard(
     }
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = if (selected) Accent.copy(alpha = 0.055f) else SurfaceRaised.copy(alpha = 0.58f),
-        shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.dp, if (selected) Accent.copy(alpha = 0.26f) else OutlineDark)
+        color = if (selected) Accent.copy(alpha = 0.055f) else SurfaceRaised,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, if (selected) Accent.copy(alpha = 0.35f) else OutlineDark)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
                         .size(38.dp)
-                        .clip(RoundedCornerShape(13.dp))
+                        .clip(RoundedCornerShape(12.dp))
                         .background(statusColor.copy(alpha = 0.10f)),
                     contentAlignment = Alignment.Center
                 ) {
@@ -215,7 +221,7 @@ private fun HostCard(
                         )
                         if (selected) {
                             Spacer(Modifier.width(8.dp))
-                            Text("ACTIVE", style = MaterialTheme.typography.labelSmall, color = Accent)
+                            Text("Active", style = MaterialTheme.typography.labelMedium, color = Accent)
                         }
                     }
                     Text(
@@ -227,12 +233,12 @@ private fun HostCard(
                 }
                 StatusPill(
                     text = when (state?.status) {
-                        ConnectionState.Status.CONNECTED -> "LIVE"
-                        ConnectionState.Status.CONNECTING -> "LINKING"
-                        ConnectionState.Status.RECONNECTING -> "RETRY"
-                        ConnectionState.Status.NEEDS_HOST_KEY -> "VERIFY"
-                        ConnectionState.Status.ERROR -> "ERROR"
-                        else -> "IDLE"
+                        ConnectionState.Status.CONNECTED -> "Live"
+                        ConnectionState.Status.CONNECTING -> "Connecting"
+                        ConnectionState.Status.RECONNECTING -> "Retrying"
+                        ConnectionState.Status.NEEDS_HOST_KEY -> "Verify"
+                        ConnectionState.Status.ERROR -> "Error"
+                        else -> "Offline"
                     },
                     color = statusColor
                 )
@@ -248,10 +254,10 @@ private fun HostCard(
                     color = TextFaint,
                     modifier = Modifier.weight(1f)
                 )
-                IconButton(onClick = onEdit, modifier = Modifier.size(34.dp)) {
+                IconButton(onClick = onEdit, modifier = Modifier.size(40.dp)) {
                     Icon(Icons.Default.Edit, contentDescription = "Edit", tint = TextSecondary, modifier = Modifier.size(17.dp))
                 }
-                IconButton(onClick = onDelete, modifier = Modifier.size(34.dp)) {
+                IconButton(onClick = onDelete, modifier = Modifier.size(40.dp)) {
                     Icon(Icons.Default.Delete, contentDescription = "Delete", tint = TextSecondary, modifier = Modifier.size(17.dp))
                 }
             }
@@ -581,8 +587,12 @@ fun KeysScreen(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = { ScreenHeader(title = "SSH keys", subtitle = "${keys.size} keys", onBack = onBack) },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showGenerate = true }, containerColor = Accent) {
-                Icon(Icons.Default.Add, contentDescription = "Generate key", tint = Color(0xFF00201D))
+            FloatingActionButton(
+                onClick = { showGenerate = true },
+                containerColor = Accent,
+                modifier = Modifier.navigationBarsPadding()
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Generate key", tint = OnAccent)
             }
         }
     ) { padding ->
@@ -595,7 +605,11 @@ fun KeysScreen(
         ) {
             item { Spacer(Modifier.height(4.dp)) }
             items(keys, key = { it.id }) { key ->
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Surface(
+                    color = SurfaceRaised,
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, OutlineDark)
+                ) {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Key, contentDescription = null, tint = Accent)

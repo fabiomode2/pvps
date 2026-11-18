@@ -86,6 +86,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -160,6 +161,10 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     val settings = viewModel.settings.collectAsStateValue()
     val connected = host != null && states[host.id]?.status == ConnectionState.Status.CONNECTED
     var currentPath by remember(host?.id) { mutableStateOf("/home/${host?.sshUser ?: "ubuntu"}") }
+    // View preferences are per browsing session: toggling "hidden" or grid in
+    // Files must not silently rewrite the app-wide defaults.
+    var showHidden by remember(host?.id) { mutableStateOf(settings.showHiddenFiles) }
+    var gridView by remember(host?.id) { mutableStateOf(settings.fileGridView) }
     var entries by remember { mutableStateOf<List<RemoteFile>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -196,8 +201,12 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
         withContext(Dispatchers.IO) { cleanupStalePreviewFiles(context.cacheDir) }
     }
 
-    val visibleEntries = remember(entries, settings.showHiddenFiles) {
-        if (settings.showHiddenFiles) entries else entries.filterNot { it.name.startsWith(".") }
+    val visibleEntries = remember(entries, showHidden) {
+        if (showHidden) entries else entries.filterNot { it.name.startsWith(".") }
+    }
+
+    BackHandler(enabled = currentPath != "/") {
+        currentPath = parentOf(currentPath)
     }
 
     val uploadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -308,7 +317,7 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(36.dp)
+                    .height(42.dp)
                     .padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -321,29 +330,25 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                         .padding(start = 8.dp)
                 )
                 IconButton(
-                    onClick = {
-                        viewModel.updateSettings { it.copy(fileGridView = !it.fileGridView) }
-                    },
-                    modifier = Modifier.size(32.dp)
+                    onClick = { gridView = !gridView },
+                    modifier = Modifier.size(42.dp)
                 ) {
                     Icon(
-                        if (settings.fileGridView) Icons.Default.ViewList else Icons.Default.GridView,
+                        if (gridView) Icons.Default.ViewList else Icons.Default.GridView,
                         contentDescription = "Toggle grid view",
                         tint = TextSecondary,
-                        modifier = Modifier.size(17.dp)
+                        modifier = Modifier.size(19.dp)
                     )
                 }
                 IconButton(
-                    onClick = {
-                        viewModel.updateSettings { it.copy(showHiddenFiles = !it.showHiddenFiles) }
-                    },
-                    modifier = Modifier.size(32.dp)
+                    onClick = { showHidden = !showHidden },
+                    modifier = Modifier.size(42.dp)
                 ) {
                     Icon(
-                        if (settings.showHiddenFiles) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                        if (showHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                         contentDescription = "Toggle hidden files",
-                        tint = if (settings.showHiddenFiles) Accent else TextSecondary,
-                        modifier = Modifier.size(17.dp)
+                        tint = if (showHidden) Accent else TextSecondary,
+                        modifier = Modifier.size(19.dp)
                     )
                 }
             }
@@ -377,7 +382,7 @@ fun FilesScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                         FileAction.EXTRACT -> extractTarget = file
                     }
                 }
-                if (settings.fileGridView) {
+                if (gridView) {
                     LazyVerticalGrid(
                         columns = GridCells.Adaptive(100.dp),
                         modifier = Modifier.fillMaxSize(),
@@ -627,7 +632,7 @@ private fun CompactIconButton(
         modifier = Modifier
             .size(40.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(if (enabled) SurfaceRaised.copy(alpha = 0.55f) else Color.Transparent)
+            .background(if (enabled) SurfaceRaised else Color.Transparent)
             .border(0.5.dp, OutlineDark, RoundedCornerShape(10.dp))
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
@@ -655,7 +660,7 @@ private fun PathStrip(path: String, onNavigate: (String) -> Unit) {
         }
     }
     Surface(
-        color = SurfaceDark.copy(alpha = 0.72f),
+        color = SurfaceDark,
         contentColor = TextPrimary
     ) {
         Column {
@@ -766,7 +771,7 @@ private fun FileTile(
     val shape = RoundedCornerShape(12.dp)
     Box(modifier = Modifier.fillMaxWidth()) {
         Surface(
-            color = SurfaceRaised.copy(alpha = 0.44f),
+            color = SurfaceRaised,
             shape = shape,
             border = BorderStroke(
                 0.5.dp,
@@ -1349,7 +1354,7 @@ private fun PreviewStateMessage(
             modifier = Modifier
                 .size(52.dp)
                 .clip(RoundedCornerShape(14.dp))
-                .background(SurfaceRaised.copy(alpha = 0.55f))
+                .background(SurfaceRaised)
                 .border(0.5.dp, OutlineDark, RoundedCornerShape(14.dp)),
             contentAlignment = Alignment.Center
         ) {
@@ -1440,7 +1445,7 @@ private fun PdfPreview(file: File, pageCount: Int) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0A0A0B)),
+            .background(SurfaceDark),
         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -1508,7 +1513,7 @@ private fun PdfPageImage(file: File, pageIndex: Int, targetWidthPx: Int) {
                 Text(
                     text = state.message,
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF8A8D80),
+                    color = TextFaint,
                     textAlign = TextAlign.Center
                 )
             }
@@ -1663,9 +1668,9 @@ private fun AudioPreview(file: File) {
             Box(
                 modifier = Modifier
                     .size(72.dp)
-                    .clip(RoundedCornerShape(20.dp))
+                    .clip(RoundedCornerShape(16.dp))
                     .background(Violet.copy(alpha = 0.10f))
-                    .border(0.5.dp, Violet.copy(alpha = 0.24f), RoundedCornerShape(20.dp)),
+                    .border(0.5.dp, Violet.copy(alpha = 0.24f), RoundedCornerShape(16.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -1845,7 +1850,7 @@ private fun DirectoryEmpty(modifier: Modifier = Modifier) {
             modifier = Modifier
                 .size(44.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .background(SurfaceRaised.copy(alpha = 0.55f))
+                .background(SurfaceRaised)
                 .border(0.5.dp, OutlineDark, RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center
         ) {
@@ -1884,7 +1889,7 @@ private fun DisconnectedState(modifier: Modifier = Modifier, onConnect: () -> Un
             modifier = Modifier
                 .size(46.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .background(SurfaceRaised.copy(alpha = 0.55f))
+                .background(SurfaceRaised)
                 .border(0.5.dp, OutlineDark, RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center
         ) {
@@ -1952,7 +1957,7 @@ private fun NameDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = SurfaceHigh,
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(16.dp),
         titleContentColor = TextPrimary,
         textContentColor = TextSecondary,
         title = { Text(title, color = TextPrimary) },

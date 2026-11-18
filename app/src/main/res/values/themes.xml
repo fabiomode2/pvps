@@ -2,12 +2,12 @@
 <resources>
     <style name="Theme.PVPS" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:windowBackground">#0B0F14</item>
+        <item name="android:windowBackground">#08090A</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
         <item name="android:windowActionModeOverlay">true</item>
-        <item name="android:colorAccent">#4FD1C5</item>
+        <item name="android:colorAccent">#FF6A3D</item>
     </style>
 </resources>

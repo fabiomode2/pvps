@@ -26,6 +26,9 @@ class SecureStore(private val context: Context) {
     }
     private val file = File(context.filesDir, "vault.bin")
 
+    @Volatile
+    private var cachedKey: SecretKey? = null
+
     @Synchronized
     fun load(): SecureData {
         if (!file.exists()) return SecureData()
@@ -78,20 +81,29 @@ class SecureStore(private val context: Context) {
     }
 
     private fun getOrCreateKey(): SecretKey {
-        val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-        (keyStore.getEntry(ALIAS, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }
-        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
-        generator.init(
-            KeyGenParameterSpec.Builder(
-                ALIAS,
-                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-            )
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(256)
-                .build()
-        )
-        return generator.generateKey()
+        // Keystore binder lookups are surprisingly expensive and happen on
+        // every vault save (connect, host edit, host-key pin). Keep the key.
+        cachedKey?.let { return it }
+        synchronized(this) {
+            cachedKey?.let { return it }
+            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+            val key = (keyStore.getEntry(ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey
+                ?: KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE).run {
+                    init(
+                        KeyGenParameterSpec.Builder(
+                            ALIAS,
+                            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                        )
+                            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                            .setKeySize(256)
+                            .build()
+                    )
+                    generateKey()
+                }
+            cachedKey = key
+            return key
+        }
     }
 
     companion object {

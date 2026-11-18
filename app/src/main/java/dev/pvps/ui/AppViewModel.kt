@@ -15,17 +15,25 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 class AppViewModel(val container: AppContainer) : ViewModel() {
+
+    private companion object {
+        @Volatile
+        private var restoreRequested = false
+    }
 
     val hosts = container.vault.hosts
     val keys = container.vault.keys
     val settings = container.settings.settings
     val audit = container.audit.entries
     val connectionStates = container.ssh.states
+    val bootReady = container.vault.ready
     val openCodeState = container.openCode.state
     val system = container.system
     val updateState = container.updates.state
@@ -50,6 +58,29 @@ class AppViewModel(val container: AppContainer) : ViewModel() {
                     _selectedHostId.value = list.firstOrNull()?.id
                 }
             }
+        }
+        maybeRestoreTunnel()
+    }
+
+    /**
+     * The process is new, so every socket from the previous run is gone. If the
+     * user had a live tunnel and left auto-reconnect on, bring the foreground
+     * service back and let SshManager restore it off the main thread.
+     */
+    private fun maybeRestoreTunnel() {
+        if (restoreRequested) return
+        restoreRequested = true
+        viewModelScope.launch {
+            val ready = withTimeoutOrNull(6_000) { container.vault.ready.first { it } }
+            if (ready != true) {
+                restoreRequested = false
+                return@launch
+            }
+            val saved = container.settings.settings.value
+            if (!saved.autoReconnect) return@launch
+            if (saved.autoConnectHostIds.none { container.vault.host(it) != null }) return@launch
+            ConnectionService.start(container.appContext)
+            container.ssh.ensureRestored()
         }
     }
 
@@ -116,8 +147,18 @@ class AppViewModel(val container: AppContainer) : ViewModel() {
     }
 
     fun saveHost(host: Host) {
+        val previous = container.vault.host(host.id)
         container.vault.upsertHost(host)
         _selectedHostId.value = host.id
+        // Directory, credentials and port are part of the OpenCode binding.
+        // Without this, editing "working directory" kept the old Host object
+        // alive inside the repository and new sessions landed in the wrong
+        // project until the process restarted.
+        val bindingChanged = previous != null && previous.copy(lastConnectedAt = 0) !=
+            host.copy(lastConnectedAt = 0)
+        if (bindingChanged && container.openCode.isBoundTo(host.id)) {
+            viewModelScope.launch { container.openCode.connect(host, force = true) }
+        }
     }
 
     fun deleteHost(hostId: String) {
@@ -184,8 +225,11 @@ class AppViewModel(val container: AppContainer) : ViewModel() {
 
     fun onResume() {
         // Reconnect any session that died while the app was backgrounded, and
-        // force an immediate probe after a network handoff.
-        container.ssh.verifyConnections(force = true)
+        // force an immediate probe after a network handoff. Probes can bind a
+        // loopback listener, so keep them off the main thread.
+        viewModelScope.launch(Dispatchers.IO) {
+            container.ssh.verifyConnections(force = true)
+        }
         // App-scoped supervisor: rebinds OpenCode as soon as the tunnel is back,
         // even when the Chat tab is not composed.
         container.openCode.onResume()

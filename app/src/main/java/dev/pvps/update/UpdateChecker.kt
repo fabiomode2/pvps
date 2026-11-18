@@ -25,8 +25,10 @@ class UpdateException(message: String, cause: Throwable? = null) : Exception(mes
  */
 class UpdateChecker(
     context: Context,
-    private val client: OkHttpClient = defaultHttpClient()
+    client: OkHttpClient? = null
 ) {
+    private val injectedClient = client
+    private val client: OkHttpClient by lazy { injectedClient ?: defaultHttpClient() }
     private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val json = Json {
         ignoreUnknownKeys = true

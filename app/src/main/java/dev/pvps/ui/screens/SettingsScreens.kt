@@ -9,6 +9,8 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,6 +53,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -187,10 +190,10 @@ private fun MoreTile(
 ) {
     Surface(
         modifier = modifier
-            .clip(RoundedCornerShape(22.dp))
+            .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick),
-        color = SurfaceRaised.copy(alpha = 0.42f),
-        shape = RoundedCornerShape(20.dp),
+        color = SurfaceRaised,
+        shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.72f))
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -198,7 +201,7 @@ private fun MoreTile(
                 Box(
                     modifier = Modifier
                         .size(34.dp)
-                        .clip(RoundedCornerShape(11.dp))
+                        .clip(RoundedCornerShape(12.dp))
                         .background(tint.copy(alpha = 0.10f)),
                     contentAlignment = Alignment.Center
                 ) {
@@ -259,6 +262,10 @@ fun SettingsScreen(
     val settings = viewModel.settings.collectAsStateValue()
     val context = LocalContext.current
     var showClearAudit by remember { mutableStateOf(false) }
+    var showDisconnectAll by remember { mutableStateOf(false) }
+    var fontDraft by remember(settings.fontScale) { mutableFloatStateOf(settings.fontScale) }
+    var uiDraft by remember(settings.uiScale) { mutableFloatStateOf(settings.uiScale) }
+    var terminalDraft by remember(settings.terminalFontSize) { mutableFloatStateOf(settings.terminalFontSize) }
     var showClearDiagnostics by remember { mutableStateOf(false) }
     var showThemeMenu by remember { mutableStateOf(false) }
     var showDiagnostics by remember { mutableStateOf(false) }
@@ -304,13 +311,18 @@ fun SettingsScreen(
                         TextButton(onClick = onKeys) { Text("SSH keys") }
                         TextButton(onClick = onAudit) { Text("Audit") }
                     }
-                    TextButton(onClick = { viewModel.disconnectAll() }) {
-                        Text("Disconnect all and stop the SSH service", color = Danger)
-                    }
                 }
             }
             item {
                 SectionCard(title = "Connection") {
+                    SettingSwitch(
+                        title = "Reconnect on launch",
+                        subtitle = "Restore the last tunnel after Android kills the process",
+                        checked = settings.autoReconnect,
+                        onChecked = { value ->
+                            viewModel.updateSettings { it.copy(autoReconnect = value) }
+                        }
+                    )
                     SettingSwitch(
                         title = "Always-on tunnel",
                         subtitle = "Hold a wake lock while SSH is active so keepalives run with the screen off. Uses more battery.",
@@ -326,39 +338,56 @@ fun SettingsScreen(
                 SectionCard(title = "Appearance") {
                     Text("Theme", style = MaterialTheme.typography.bodyLarge)
                     Spacer(Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.horizontalScroll(rememberScrollState())
+                    ) {
                         dev.pvps.ui.theme.Themes.forEach { palette ->
                             FilterChip(
                                 selected = settings.uiTheme == palette.id,
                                 onClick = { viewModel.updateSettings { it.copy(uiTheme = palette.id) } },
+                                leadingIcon = {
+                                    Box(
+                                        Modifier
+                                            .size(11.dp)
+                                            .clip(RoundedCornerShape(50))
+                                            .background(palette.accent)
+                                    )
+                                },
                                 label = { Text(palette.label, style = MaterialTheme.typography.labelSmall) }
                             )
                         }
                     }
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        "App font size: ${(settings.fontScale * 100).toInt()}%",
+                        "App font size: ${(fontDraft * 100).toInt()}%",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Slider(
-                        value = settings.fontScale,
-                        onValueChange = { value -> viewModel.updateSettings { it.copy(fontScale = value) } },
+                        value = fontDraft,
+                        onValueChange = { fontDraft = it },
+                        onValueChangeFinished = {
+                            viewModel.updateSettings { it.copy(fontScale = fontDraft) }
+                        },
                         valueRange = 0.8f..1.35f,
                         steps = 10
                     )
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        "Interface zoom: ${(settings.uiScale * 100).toInt()}%",
+                        "Interface zoom: ${(uiDraft * 100).toInt()}%",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Text(
-                        "Scales spacing and controls, not just text. Useful for tuning density without rebuilding.",
+                        "Scales spacing and controls, not just text. Applied when you release the slider.",
                         style = MaterialTheme.typography.labelSmall,
                         color = TextSecondary
                     )
                     Slider(
-                        value = settings.uiScale,
-                        onValueChange = { value -> viewModel.updateSettings { it.copy(uiScale = value) } },
+                        value = uiDraft,
+                        onValueChange = { uiDraft = it },
+                        onValueChangeFinished = {
+                            viewModel.updateSettings { it.copy(uiScale = uiDraft) }
+                        },
                         valueRange = 0.85f..1.2f,
                         steps = 6
                     )
@@ -394,10 +423,13 @@ fun SettingsScreen(
                         }
                     }
                     Spacer(Modifier.height(10.dp))
-                    Text("Font size: ${settings.terminalFontSize.toInt()} sp", style = MaterialTheme.typography.bodyMedium)
+                    Text("Font size: ${terminalDraft.toInt()} sp", style = MaterialTheme.typography.bodyMedium)
                     Slider(
-                        value = settings.terminalFontSize,
-                        onValueChange = { value -> viewModel.updateSettings { it.copy(terminalFontSize = value) } },
+                        value = terminalDraft,
+                        onValueChange = { terminalDraft = it },
+                        onValueChangeFinished = {
+                            viewModel.updateSettings { it.copy(terminalFontSize = terminalDraft) }
+                        },
                         valueRange = 9f..22f,
                         steps = 12
                     )
@@ -429,15 +461,19 @@ fun SettingsScreen(
                         checked = settings.notifyResponses,
                         onChecked = { value -> viewModel.updateSettings { it.copy(notifyResponses = value) } }
                     )
+                }
+            }
+            item {
+                SectionCard(title = "Files") {
                     SettingSwitch(
-                        title = "Show hidden files",
-                        subtitle = "Dotfiles in the SFTP browser",
+                        title = "Start with hidden files",
+                        subtitle = "Dotfiles in the SFTP browser. The in-browser toggle stays per-visit.",
                         checked = settings.showHiddenFiles,
                         onChecked = { value -> viewModel.updateSettings { it.copy(showHiddenFiles = value) } }
                     )
                     SettingSwitch(
-                        title = "File grid view",
-                        subtitle = "Adaptive two-column SFTP layout",
+                        title = "Start in grid view",
+                        subtitle = "Adaptive tile layout instead of the compact list",
                         checked = settings.fileGridView,
                         onChecked = { value -> viewModel.updateSettings { it.copy(fileGridView = value) } }
                     )
@@ -519,10 +555,33 @@ fun SettingsScreen(
                     )
                 }
             }
-            item { Spacer(Modifier.height(80.dp)) }
+            item {
+                SectionCard(title = "Danger zone") {
+                    Text(
+                        "Stop every SSH session, close the foreground service and drop the OpenCode binding. Saved hosts and keys are kept.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = { showDisconnectAll = true }) {
+                        Text("Disconnect everything", color = Danger)
+                    }
+                }
+            }
+            item { Spacer(Modifier.height(24.dp)) }
         }
     }
 
+    if (showDisconnectAll) {
+        ConfirmDialog(
+            title = "Disconnect everything?",
+            message = "All SSH sessions and the OpenCode tunnel will be closed. Saved hosts and keys are kept.",
+            confirmLabel = "Disconnect",
+            destructive = true,
+            onConfirm = { viewModel.disconnectAll() },
+            onDismiss = { showDisconnectAll = false }
+        )
+    }
     if (showClearAudit) {
         ConfirmDialog(
             title = "Clear audit log?",

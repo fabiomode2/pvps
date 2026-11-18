@@ -75,6 +75,7 @@ class LocalForward(
         get() = !closed.get() && session.isConnected && serverSocket?.isClosed == false
 
     fun start(preferredPort: Int = 0) {
+        if (!session.isConnected) throw IOException("SSH session is already down")
         val address = InetAddress.getByName("127.0.0.1")
         val bindPort = if (preferredPort > 0) preferredPort else 0
         val server = ServerSocket()
@@ -172,10 +173,11 @@ class LocalForward(
                 runCatching { client.close() }
             }
             t1.join()
-            // Give the opposite direction a bounded drain window, then tear
-            // down both sides so a stalled peer cannot pin this client slot
-            // indefinitely.
-            t2.join(CLIENT_IDLE_TIMEOUT_MS)
+            // Bounded drain, then disconnect the channel. The old 30-minute
+            // join held the SSH channel and a client slot long after the
+            // streams were closed, which could exhaust sshd MaxSessions and
+            // make keepalive probes fail against a perfectly healthy link.
+            t2.join(5_000)
         } catch (e: Exception) {
             noteChannelFailure(e)
         } finally {

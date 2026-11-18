@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,6 +22,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -58,6 +61,11 @@ class SshManager(
     private val lastTunnelAttemptAt = ConcurrentHashMap<String, Long>()
     private val wakeups = ConcurrentHashMap<String, Channel<Unit>>()
     private val tunnelPorts = ConcurrentHashMap<String, Int>()
+    private val tunnelFailures = ConcurrentHashMap<String, Int>()
+    private val tunnelLocks = ConcurrentHashMap<String, Any>()
+    private val connectEpochs = ConcurrentHashMap<String, AtomicLong>()
+    private val connectStartedAt = ConcurrentHashMap<String, Long>()
+    private val restoreGuard = java.util.concurrent.atomic.AtomicBoolean(false)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     companion object {
@@ -67,6 +75,8 @@ class SshManager(
         private const val PROBE_TIMEOUT_MS = 4_000L
         private const val PROBE_INTERVAL_MS = 15_000L
         private const val MAX_PROBE_FAILURES = 2
+        private const val CONNECT_TIMEOUT_MS = 45_000L
+        private const val TUNNEL_PORT_RESET_AFTER = 3
 
         private const val RECONNECT_BASE_MS = 2_000L
         private const val RECONNECT_MAX_MS = 45_000L
@@ -87,7 +97,10 @@ class SshManager(
         scope.launch {
             while (isActive) {
                 delay(WATCHDOG_INTERVAL_MS)
-                verifyConnections()
+                // A single unexpected throw must never kill the only supervisor
+                // that can notice a dead mobile socket.
+                runCatching { verifyConnections() }
+                    .onFailure { Diagnostics.event("ssh", "watchdog tick failed", it) }
             }
         }
     }
@@ -100,7 +113,28 @@ class SshManager(
         val now = System.currentTimeMillis()
         desired.forEach { hostId ->
             val state = stateFor(hostId)
-            if (state.status == ConnectionState.Status.CONNECTING) return@forEach
+            if (state.status == ConnectionState.Status.CONNECTING) {
+                val started = connectStartedAt[hostId] ?: 0L
+                if (started > 0L && now - started > 60_000L) {
+                    // A dial that never returned (DNS stall, wedged socket)
+                    // used to leave the host on "Connecting" forever because
+                    // the watchdog deliberately skipped this state.
+                    Diagnostics.event("ssh", "connect attempt stalled host=$hostId; resetting")
+                    connectEpochs.computeIfAbsent(hostId) { AtomicLong() }.incrementAndGet()
+                    activeAttempts.remove(hostId)
+                    connectStartedAt.remove(hostId)
+                    inFlight.remove(hostId)
+                    setState(
+                        ConnectionState(
+                            hostId,
+                            ConnectionState.Status.RECONNECTING,
+                            "Connection attempt stalled. Retrying…"
+                        )
+                    )
+                    if (desired.contains(hostId)) wakeAndReconnect(hostId, "stalled connect")
+                }
+                return@forEach
+            }
             if (state.status == ConnectionState.Status.RECONNECTING) {
                 // Normally the retry loop owns this host. If it exited without
                 // a terminal state (unexpected error), restart it instead of
@@ -143,17 +177,40 @@ class SshManager(
                     val alive = runCatching {
                         connection.exec("true", PROBE_TIMEOUT_MS).isSuccess
                     }.getOrDefault(false)
+                    // A newer session may have replaced this one while the
+                    // probe was in flight. Its result says nothing about the
+                    // current transport and must not trigger a redial.
+                    if (connections[hostId] !== connection || !desired.contains(hostId)) {
+                        return@launch
+                    }
                     if (alive) {
                         probeFailures.remove(hostId)
                         reconnectAttempts.remove(hostId)
                         val currentHost = vault.host(hostId) ?: return@launch
-                        if (currentHost.openCodeMode == OpenCodeMode.SSH_TUNNEL &&
+                        val currentState = stateFor(hostId)
+                        if (currentState.status == ConnectionState.Status.RECONNECTING ||
+                            currentState.status == ConnectionState.Status.CONNECTING
+                        ) {
+                            // False alarm: the session is healthy but the retry
+                            // loop had already published RECONNECTING. Restore
+                            // CONNECTED and let the loop exit on its next check.
+                            Diagnostics.event("ssh", "probe recovered host=$hostId")
+                            setState(
+                                ConnectionState(
+                                    hostId = hostId,
+                                    status = ConnectionState.Status.CONNECTED,
+                                    message = startTunnelIfNeeded(currentHost, connection),
+                                    hostKeySha256 = currentState.hostKeySha256
+                                )
+                            )
+                            wakeups[hostId]?.trySend(Unit)
+                        } else if (currentHost.openCodeMode == OpenCodeMode.SSH_TUNNEL &&
                             forwards[hostId]?.isOpen != true &&
                             now - (lastTunnelAttemptAt[hostId] ?: 0L) >= TUNNEL_REBUILD_COOLDOWN_MS
                         ) {
                             lastTunnelAttemptAt[hostId] = now
                             setState(
-                                stateFor(hostId).copy(
+                                currentState.copy(
                                     message = startTunnelIfNeeded(currentHost, connection)
                                 )
                             )
@@ -230,19 +287,81 @@ class SshManager(
         }
     }
 
-    /** A new default network appeared; retry immediately instead of waiting out the backoff. */
+    /**
+     * The default network changed (Wi-Fi -> LTE, VPN up, ...). An established
+     * TCP socket cannot migrate to the new interface, so probing it wastes
+     * 20-40s before two failed keepalives. Tear the old transport down, keep
+     * the user's intent in [desired] and redial immediately.
+     */
     fun onNetworkAvailable() {
-        Diagnostics.event("ssh", "network available")
+        Diagnostics.event("ssh", "network changed; redialing desired hosts")
         probeFailures.clear()
         lastProbeAt.clear()
+        lastRecoveryAt.clear()
         if (desired.isEmpty()) return
-        desired.forEach { hostId ->
-            if (stateFor(hostId).status == ConnectionState.Status.CONNECTED) {
-                verifyConnections(force = true)
+        desired.toList().forEach { hostId ->
+            if (vault.host(hostId) == null) {
+                desired.remove(hostId)
+                return@forEach
+            }
+            // Invalidate an in-flight dial bound to the old network.
+            connectEpochs.computeIfAbsent(hostId) { AtomicLong() }.incrementAndGet()
+            activeAttempts.remove(hostId)
+            reconnectAttempts.remove(hostId)
+            forwards.remove(hostId)?.close()
+            connections.remove(hostId)?.disconnect()
+            setState(
+                ConnectionState(
+                    hostId,
+                    ConnectionState.Status.RECONNECTING,
+                    "Network changed. Reconnecting…"
+                )
+            )
+            if (loopActive.contains(hostId)) {
+                wakeups[hostId]?.trySend(Unit)
             } else {
-                wakeAndReconnect(hostId, "network available")
+                startReconnectLoop(hostId, "network changed")
             }
         }
+    }
+
+    /**
+     * Restore tunnels that were active when the process died. Guarded so the
+     * service and activity cannot start two restore passes.
+     */
+    fun ensureRestored() {
+        if (!restoreGuard.compareAndSet(false, true)) return
+        scope.launch {
+            val ready = withTimeoutOrNull(6_000) {
+                vault.ready.first { it }
+            } ?: false
+            if (!ready) {
+                restoreGuard.set(false)
+                return@launch
+            }
+            val current = settings.settings.value
+            if (!current.autoReconnect) return@launch
+            val restorable = current.autoConnectHostIds.filter { vault.host(it) != null }
+            if (restorable.isEmpty()) return@launch
+            Diagnostics.event("ssh", "restoring ${restorable.size} session(s) after process start")
+            restorable.forEach { hostId ->
+                desired += hostId
+                setState(
+                    ConnectionState(
+                        hostId,
+                        ConnectionState.Status.RECONNECTING,
+                        "Restoring session…"
+                    )
+                )
+                startReconnectLoop(hostId, "process restore")
+            }
+        }
+    }
+
+    /** True when a saved session can be restored on launch. */
+    fun hasRestorableSessions(): Boolean {
+        val ids = settings.settings.value.autoConnectHostIds
+        return settings.settings.value.autoReconnect && ids.any { vault.host(it) != null }
     }
 
     fun stateFor(hostId: String): ConnectionState =
@@ -264,17 +383,40 @@ class SshManager(
 
     private suspend fun connectInternal(hostId: String, autoTrust: Boolean): ConnectionState {
         val before = stateFor(hostId)
-        if (before.status == ConnectionState.Status.CONNECTING) return before
         val host = vault.host(hostId)
             ?: return fail(hostId, "Host not found")
         val existing = connections[hostId]
         if (existing?.isAlive == true) {
-            // Already connected: make sure the tunnel exists and report the
-            // current state instead of dialing a second session.
-            if (host.openCodeMode == OpenCodeMode.SSH_TUNNEL && forwards[hostId]?.isOpen != true) {
-                setState(before.copy(message = startTunnelIfNeeded(host, existing)))
+            if (before.status == ConnectionState.Status.CONNECTED) {
+                // Already connected: make sure the tunnel exists and report the
+                // current state instead of dialing a second session.
+                if (host.openCodeMode == OpenCodeMode.SSH_TUNNEL && forwards[hostId]?.isOpen != true) {
+                    setState(before.copy(message = startTunnelIfNeeded(host, existing)))
+                }
+                return stateFor(hostId)
             }
-            return stateFor(hostId)
+            // A false probe used to leave a healthy session stuck on
+            // RECONNECTING forever: the loop saw isAlive and returned without
+            // ever restoring CONNECTED. Prove the transport once, then either
+            // publish CONNECTED or evict it and dial for real.
+            val alive = runCatching {
+                existing.exec("true", PROBE_TIMEOUT_MS).isSuccess
+            }.getOrDefault(false)
+            if (alive && before.status != ConnectionState.Status.ERROR) {
+                probeFailures.remove(hostId)
+                reconnectAttempts.remove(hostId)
+                val state = ConnectionState(
+                    hostId = hostId,
+                    status = ConnectionState.Status.CONNECTED,
+                    message = startTunnelIfNeeded(host, existing),
+                    hostKeySha256 = before.hostKeySha256
+                )
+                setState(state)
+                return state
+            }
+            forwards.remove(hostId)?.close()
+            connections.remove(hostId, existing)
+            existing.disconnect()
         }
         val key = vault.key(host.keyId)
         if (host.authType == dev.pvps.data.model.AuthType.KEY && key == null) {
@@ -291,9 +433,11 @@ class SshManager(
             )
         )
         val started = System.nanoTime()
+        connectStartedAt[hostId] = System.currentTimeMillis()
         Diagnostics.event("ssh", "connect host=${host.name} ${host.sshHost}:${host.sshPort}")
         val attempt = attemptSeq.incrementAndGet()
         activeAttempts[hostId] = attempt
+        val epoch = connectEpochs.computeIfAbsent(hostId) { AtomicLong() }.get()
         val connection = SshConnection(
             host = host,
             key = key,
@@ -301,9 +445,15 @@ class SshManager(
             autoTrustHostKey = autoTrust || !settings.settings.value.strictHostKeys
         )
         val outcome = try {
-            connection.connect()
+            withTimeout(CONNECT_TIMEOUT_MS) { connection.connect() }
+        } catch (e: TimeoutCancellationException) {
+            connection.disconnect()
+            connectStartedAt.remove(hostId)
+            Diagnostics.event("ssh", "connect timed out host=${host.name}")
+            ConnectOutcome.Failed("Connection attempt timed out. Check the host and network.")
         } catch (e: CancellationException) {
             connection.disconnect()
+            connectStartedAt.remove(hostId)
             if (activeAttempts[hostId] == attempt) {
                 activeAttempts.remove(hostId)
                 if (!wasDesired) {
@@ -312,16 +462,26 @@ class SshManager(
             }
             throw e
         }
-        // A disconnect or a newer connect may have happened while this attempt was
-        // suspended. Never install a stale session in that case.
-        if (activeAttempts[hostId] != attempt) {
+        // A disconnect, a network handoff or a newer connect may have happened
+        // while this attempt was suspended. Never install a stale session.
+        if (activeAttempts[hostId] != attempt ||
+            connectEpochs.computeIfAbsent(hostId) { AtomicLong() }.get() != epoch
+        ) {
             connection.disconnect()
+            connectStartedAt.remove(hostId)
             return stateFor(hostId)
         }
+        connectStartedAt.remove(hostId)
         return when (outcome) {
             is ConnectOutcome.Connected -> {
                 connections[hostId] = connection
                 desired += hostId
+                settings.update { current ->
+                    if (hostId in current.autoConnectHostIds) current
+                    else current.copy(
+                        autoConnectHostIds = (current.autoConnectHostIds + hostId).takeLast(5)
+                    )
+                }
                 probeFailures.remove(hostId)
                 reconnectAttempts.remove(hostId)
                 lastProbeAt.remove(hostId)
@@ -477,8 +637,15 @@ class SshManager(
     }
 
     fun disconnect(hostId: String) {
-        // Invalidate any connect attempt that is still suspended.
+        // Invalidate any connect attempt that is still suspended before the
+        // map/state teardown below, so a late dial cannot resurrect the host.
+        connectEpochs.computeIfAbsent(hostId) { AtomicLong() }.incrementAndGet()
+        activeAttempts.remove(hostId)
         desired.remove(hostId)
+        settings.update { current ->
+            if (hostId !in current.autoConnectHostIds) current
+            else current.copy(autoConnectHostIds = current.autoConnectHostIds - hostId)
+        }
         probeFailures.remove(hostId)
         reconnectAttempts.remove(hostId)
         activeAttempts.remove(hostId)
@@ -502,7 +669,10 @@ class SshManager(
     }
 
     fun disconnectAll() {
+        connectEpochs.values.forEach { it.incrementAndGet() }
+        activeAttempts.clear()
         desired.clear()
+        settings.update { it.copy(autoConnectHostIds = emptyList()) }
         probeFailures.clear()
         reconnectAttempts.clear()
         activeAttempts.clear()
@@ -548,40 +718,72 @@ class SshManager(
 
     private fun startTunnelIfNeeded(host: Host, connection: SshConnection): String {
         if (host.openCodeMode != OpenCodeMode.SSH_TUNNEL) return "SSH connected"
-        val existing = forwards[host.id]
-        if (existing?.isOpen == true) {
-            return "SSH connected · OpenCode tunnel :${existing.port}"
-        }
-        return runCatching {
-            forwards.remove(host.id)?.close()
-            // Reuse the previous local port after a tunnel rebuild. The
-            // OpenCode client (and its SSE stream) can then survive a network
-            // handoff without the repository wiping its transcript.
-            //
-            // Trust boundary: if that exact port is unavailable, LocalForward
-            // fails instead of silently choosing a new port. A silent move
-            // would leave the configured OpenCode client (with its Basic
-            // credential) pointed at the old, now attacker-claimable loopback
-            // port. The repository rebinds when the tunnel state changes.
-            lastTunnelAttemptAt[host.id] = System.currentTimeMillis()
-        val preferred = tunnelPorts[host.id] ?: 0
-            var created: LocalForward? = null
-            val forward = connection.openForward("127.0.0.1", host.openCodePort, preferred) { reason ->
-                if (forwards[host.id] === created) forwards.remove(host.id)
-                requestRecovery(host.id, reason)
+        val lock = tunnelLocks.computeIfAbsent(host.id) { Any() }
+        return synchronized(lock) {
+            if (connections[host.id] !== connection || !connection.isAlive) {
+                return "SSH connected"
             }
-            created = forward
-            tunnelPorts[host.id] = forward.port
-            forwards[host.id] = forward
-            lastProbeAt.remove(host.id)
-            Diagnostics.event(
-                "ssh",
-                "tunnel host=${host.name} local=${forward.port} remote=${host.openCodePort}"
-            )
-            "SSH connected · OpenCode tunnel :${forward.port}"
-        }.getOrElse { error ->
-            Diagnostics.event("ssh", "tunnel failed host=${host.name}", error)
-            "SSH connected · OpenCode tunnel failed: ${error.message}"
+            val existing = forwards[host.id]
+            if (existing?.isOpen == true) {
+                return "SSH connected · OpenCode tunnel :${existing.port}"
+            }
+            if (existing != null && forwards[host.id] === existing) {
+                forwards.remove(host.id)
+                existing.close()
+            }
+
+            var preferred = tunnelPorts[host.id] ?: 0
+            var lastError: Throwable? = null
+            // First pass honours the previous port so an existing OpenCode
+            // client can survive a transport rebuild. After repeated failures
+            // that preference is poisoned (EADDRINUSE from a leaked listener),
+            // so the second pass binds an ephemeral port and the repository
+            // rebinds to the new base URL.
+            for (pass in 0..1) {
+                try {
+                    val created = java.util.concurrent.atomic.AtomicReference<LocalForward?>()
+                    val forward = connection.openForward(
+                        "127.0.0.1",
+                        host.openCodePort,
+                        preferred
+                    ) { reason ->
+                        created.get()?.let { forwards.remove(host.id, it) }
+                        requestRecovery(host.id, reason)
+                    }
+                    created.set(forward)
+                    if (!forward.isOpen || connections[host.id] !== connection) {
+                        forward.close()
+                        error("Tunnel listener closed during setup")
+                    }
+                    forwards[host.id] = forward
+                    tunnelPorts[host.id] = forward.port
+                    tunnelFailures.remove(host.id)
+                    lastTunnelAttemptAt[host.id] = System.currentTimeMillis()
+                    lastProbeAt.remove(host.id)
+                    Diagnostics.event(
+                        "ssh",
+                        "tunnel host=${host.name} local=${forward.port} remote=${host.openCodePort}"
+                    )
+                    return "SSH connected · OpenCode tunnel :${forward.port}"
+                } catch (error: Throwable) {
+                    lastError = error
+                    val failures = (tunnelFailures[host.id] ?: 0) + 1
+                    tunnelFailures[host.id] = failures
+                    Diagnostics.event(
+                        "ssh",
+                        "tunnel attempt failed host=${host.name} port=$preferred ($failures)"
+                    )
+                    if (preferred > 0 && failures >= TUNNEL_PORT_RESET_AFTER) {
+                        tunnelPorts.remove(host.id)
+                        tunnelFailures.remove(host.id)
+                        preferred = 0
+                    } else {
+                        break
+                    }
+                }
+            }
+            Diagnostics.event("ssh", "tunnel failed host=${host.name}", lastError)
+            "SSH connected · OpenCode tunnel failed: ${lastError?.message ?: "unknown error"}"
         }
     }
 

@@ -11,6 +11,8 @@ import dev.pvps.diagnostics.Diagnostics
 import dev.pvps.service.AppNotifications
 import dev.pvps.ssh.SshManager
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -70,6 +72,8 @@ private const val SSE_RECOVERY_FAILURE_THRESHOLD = 3
 private const val SSE_RECOVERY_COOLDOWN_MS = 45_000L
 private const val SSE_LINK_DOWN_RETRY_MS = 5_000L
 
+private data class Quad<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
+
 class OpenCodeRepository(
     private val ssh: SshManager,
     private val audit: AuditStore,
@@ -87,6 +91,7 @@ class OpenCodeRepository(
         val connecting: Boolean = false,
         val connected: Boolean = false,
         val hostName: String = "",
+        val hostId: String = "",
         val serverVersion: String = "",
         val sessions: List<SessionInfo> = emptyList(),
         val projects: List<ProjectInfo> = emptyList(),
@@ -220,6 +225,9 @@ class OpenCodeRepository(
         val current = host ?: return
         if (ssh.stateFor(current.id).status == ConnectionState.Status.CONNECTED) {
             onSshLinkUp(current)
+            if (_state.value.connected) {
+                scope.launch { runCatching { refreshProjects() } }
+            }
         }
     }
 
@@ -254,10 +262,28 @@ class OpenCodeRepository(
         fromRetryLoop: Boolean = false
     ) {
         val desiredBase = runCatching { ssh.openCodeBaseUrl(host) }.getOrNull()
-        val sameHost = this.host?.id == host.id
-        if (!force && sameHost && _state.value.connected &&
+        val previous = this.host
+        val sameHost = previous?.id == host.id
+        val sameBinding = previous != null && bindingKey(previous) == bindingKey(host)
+        if (!force && sameHost && sameBinding && _state.value.connected &&
             client != null && desiredBase != null && connectedBaseUrl == desiredBase
         ) return
+        val directoryOnlyChange = previous != null && sameHost &&
+            previous.copy(openCodeDirectory = host.openCodeDirectory, lastConnectedAt = 0) ==
+            host.copy(lastConnectedAt = 0)
+        if (sameHost && !sameBinding && directoryOnlyChange) {
+            // Only the working directory changed while bound. The tunnel and
+            // credentials are still valid, so keep the transcript and reload
+            // the project-scoped data instead of forcing a full reconnect.
+            this.host = host
+            _state.update { it.copy(hostName = host.name, hostId = host.id) }
+            scope.launch {
+                runCatching { refreshProjects() }
+                runCatching { refreshModelsAndAgents() }
+                runCatching { refreshContextUsage() }
+            }
+            return
+        }
 
         // A tunnel can come back on a different local port. Keep the transcript,
         // queue and scroll position in that case and only replace the client.
@@ -267,6 +293,7 @@ class OpenCodeRepository(
             it.copy(
                 connecting = true,
                 hostName = host.name,
+                hostId = host.id,
                 error = null
             )
         }
@@ -285,6 +312,10 @@ class OpenCodeRepository(
             val baseUrl = desiredBase ?: ssh.openCodeBaseUrl(host)
             val newClient = OpenCodeClient(baseUrl, host.openCodeUsername, host.openCodePassword)
             val info = newClient.info()
+            if (this.host?.id != host.id) {
+                newClient.close()
+                return
+            }
             if (!info.version.startsWith("2.")) {
                 newClient.close()
                 _state.update {
@@ -301,20 +332,50 @@ class OpenCodeRepository(
             client = newClient
             connectedBaseUrl = baseUrl
             val sessions = newClient.listSessions().take(MAX_SESSIONS)
+            if (this.host?.id != host.id) {
+                newClient.close()
+                return
+            }
             val oldActive = _state.value.activeSessionId
-            val models = _state.value.models.ifEmpty {
-                runCatching { newClient.models(host.openCodeDirectory) }.getOrDefault(emptyList())
-            }
-            val agents = _state.value.agents.ifEmpty {
-                runCatching { newClient.agents(host.openCodeDirectory) }.getOrDefault(emptyList())
-            }
-            val commands = _state.value.commands.ifEmpty {
-                runCatching { newClient.commands(host.openCodeDirectory) }.getOrDefault(emptyList())
-            }
-            val usage = runCatching { newClient.usageLimits(host.openCodeDirectory) }.getOrNull()
+                ?: settings.settings.value.lastSessionId.takeIf { id ->
+                    id.isNotBlank() && sessions.any { it.id == id }
+                }
             val activeId = oldActive?.takeIf { id -> sessions.any { it.id == id } }
                 ?: sessions.firstOrNull { it.parentID == null }?.id
                 ?: sessions.firstOrNull()?.id
+            // Models, agents, commands and usage are location-scoped. Use the
+            // active session's project directory, not always the host default.
+            val runtimeDirectory = sessions.firstOrNull { it.id == activeId }
+                ?.location?.directory?.takeIf { it.isNotBlank() }
+                ?: host.openCodeDirectory
+            // These four are independent; serialising them made the first
+            // chat open pay four tunnel round trips after the session list.
+            val (models, agents, commands, usage) = coroutineScope {
+                val modelsD = async {
+                    _state.value.models.ifEmpty {
+                        runCatching { newClient.models(runtimeDirectory) }.getOrDefault(emptyList())
+                    }
+                }
+                val agentsD = async {
+                    _state.value.agents.ifEmpty {
+                        runCatching { newClient.agents(runtimeDirectory) }.getOrDefault(emptyList())
+                    }
+                }
+                val commandsD = async {
+                    _state.value.commands.ifEmpty {
+                        runCatching { newClient.commands(runtimeDirectory) }.getOrDefault(emptyList())
+                    }
+                }
+                val usageD = async {
+                    runCatching { newClient.usageLimits(runtimeDirectory) }.getOrNull()
+                }
+                Quad(
+                    modelsD.await(),
+                    agentsD.await(),
+                    commandsD.await(),
+                    usageD.await()
+                )
+            }
             _state.update {
                 it.copy(
                     connecting = false,
@@ -361,6 +422,8 @@ class OpenCodeRepository(
                     success = true
                 )
             )
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Diagnostics.event("opencode", "connect failed", e)
             _state.update {
@@ -394,6 +457,15 @@ class OpenCodeRepository(
             }
         }
     }
+
+    private fun bindingKey(h: Host): String = listOf(
+        h.openCodeMode.name,
+        h.openCodeHost,
+        h.openCodePort.toString(),
+        h.openCodeUsername,
+        h.openCodePassword,
+        h.openCodeDirectory
+    ).joinToString("|")
 
     fun disconnect() {
         stopRuntime(resetState = true)
@@ -455,7 +527,9 @@ class OpenCodeRepository(
                 val sessions = c.listSessions().take(MAX_SESSIONS)
                 val active = _state.value.activeSessionId
                 val hasActive = sessions.any { it.id == active }
-                val fallback = sessions.firstOrNull { it.parentID == null }?.id
+                val preferred = settings.settings.value.lastSessionId
+                val fallback = sessions.firstOrNull { it.id == preferred && it.parentID == null }?.id
+                    ?: sessions.firstOrNull { it.parentID == null }?.id
                     ?: sessions.firstOrNull()?.id
                 val liveActive = synchronized(liveLock) { liveMessages.isNotEmpty() }
                 _state.update {
@@ -484,6 +558,7 @@ class OpenCodeRepository(
             selectingSession = true
         }
         try {
+            settings.update { it.copy(lastSessionId = sessionId) }
             synchronized(optimisticLock) { optimisticIds.clear() }
             synchronized(liveLock) { liveMessages.clear() }
             _state.update {
@@ -503,6 +578,8 @@ class OpenCodeRepository(
             refreshPermissions()
             refreshForms()
             refreshContextUsage()
+            refreshModelsAndAgents()
+            refreshUsage()
             scope.launch { refreshRealCost(sessionId) }
             // A queue left behind by a previous app process must not stay parked
             // when the session is already idle.
@@ -512,27 +589,41 @@ class OpenCodeRepository(
         }
     }
 
-    suspend fun newSession() {
+    suspend fun newSession(directory: String? = null) {
         val c = client ?: return
         val h = host ?: return
+        // A new session belongs to the project the user is looking at, not
+        // blindly to the host's working directory. This was the "projects are
+        // weird" bug: from project B, New landed in project A.
+        val targetDirectory = directory?.takeIf { it.isNotBlank() }
+            ?: _state.value.activeSession?.location?.directory?.takeIf { it.isNotBlank() }
+            ?: h.openCodeDirectory.takeIf { it.isNotBlank() }
+        val saved = settings.settings.value
+        val model = if (saved.lastModelId.isNotBlank() && saved.lastModelProvider.isNotBlank()) {
+            ModelRef(
+                id = saved.lastModelId,
+                providerID = saved.lastModelProvider,
+                variant = saved.lastModelVariant.takeIf { it.isNotBlank() }
+            )
+        } else null
+        val agent = saved.lastAgentId.takeIf { it.isNotBlank() }
         runCatching {
-            val session = c.createSession(h.openCodeDirectory.takeIf { it.isNotBlank() })
-            val saved = settings.settings.value
-            if (saved.lastModelId.isNotBlank() && saved.lastModelProvider.isNotBlank()) {
-                runCatching {
-                    c.switchModel(
-                        session.id,
-                        ModelRef(
-                            id = saved.lastModelId,
-                            providerID = saved.lastModelProvider,
-                            variant = saved.lastModelVariant.takeIf { it.isNotBlank() }
-                        )
-                    )
-                    if (saved.lastAgentId.isNotBlank()) c.switchAgent(session.id, saved.lastAgentId)
-                }
-            }
+            // Prefer sending the model/agent atomically. If the server rejects
+            // a stale saved model, retry without it so the user still gets a
+            // session instead of a dead New button.
+            val session = runCatching { c.createSession(targetDirectory, agent, model) }
+                .getOrElse { c.createSession(targetDirectory) }
+            refreshProjects()
             refreshSessions()
             selectSession(session.id)
+            if (settings.settings.value.lastModelId.isNotBlank() &&
+                (model == null || session.model == null)
+            ) {
+                runCatching {
+                    if (model != null) c.switchModel(session.id, model)
+                    if (agent != null) c.switchAgent(session.id, agent)
+                }
+            }
         }.onFailure {
             _state.update { state -> state.copy(error = it.message ?: "Could not create session") }
         }
@@ -638,10 +729,14 @@ class OpenCodeRepository(
         }
     }
 
+    private fun activeDirectory(): String? =
+        _state.value.activeSession?.location?.directory?.takeIf { it.isNotBlank() }
+            ?: host?.openCodeDirectory?.takeIf { it.isNotBlank() }
+
     suspend fun refreshUsage() {
         val c = client ?: return
         runCatching {
-            val usage = c.usageLimits(host?.openCodeDirectory)
+            val usage = c.usageLimits(activeDirectory())
             _state.update { it.copy(usage = usage) }
         }.onFailure {
             // Usage is a nice-to-have; never surface it as a chat error.
@@ -702,7 +797,7 @@ class OpenCodeRepository(
 
     suspend fun refreshModelsAndAgents() {
         val c = client ?: return
-        val directory = host?.openCodeDirectory
+        val directory = activeDirectory()
         runCatching {
             val models = c.models(directory)
             val agents = c.agents(directory)
@@ -1057,11 +1152,24 @@ class OpenCodeRepository(
                         normalBackoff = INITIAL_SSE_RECONNECT_MS
                         errorBackoff = INITIAL_SSE_ERROR_BACKOFF_MS
                         consecutiveFailures = 0
+                    } else {
+                        // An abnormal EOF is as much a failure as a thrown
+                        // IOException: the old code treated it as a clean end
+                        // and never asked SSH/OpenCode to recover.
+                        consecutiveFailures++
+                        if (sshLinkUp) {
+                            requestRefreshAll()
+                            if (consecutiveFailures >= SSE_RECOVERY_FAILURE_THRESHOLD) {
+                                requestSshRecovery()
+                            }
+                        }
                     }
                     val wait = jitteredDelay(normalBackoff)
                     Diagnostics.event("sse", "stream ended; retry in ${wait}ms")
                     delay(wait)
                     normalBackoff = (normalBackoff * 2).coerceAtMost(MAX_SSE_RECONNECT_MS)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     if (!isActive || generation != eventGeneration) break
                     val linked = sshLinkUp
@@ -1155,10 +1263,18 @@ class OpenCodeRepository(
                 requestRefreshAll()
                 return
             }
+            "project.updated", "worktree.updated", "worktree.resolved" -> {
+                refreshProjects()
+                refreshSessions()
+                return
+            }
             "session.created", "session.deleted", "session.renamed", "session.moved",
             "session.archived", "session.unarchived", "session.model.selected",
             "session.agent.selected" -> {
                 refreshSessions()
+                if (event.type == "session.created" || event.type == "session.moved") {
+                    refreshProjects()
+                }
                 return
             }
             "session.usage.updated" -> {

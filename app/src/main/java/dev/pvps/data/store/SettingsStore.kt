@@ -14,7 +14,11 @@ class SettingsStore(context: Context) {
     private val _settings = MutableStateFlow(read())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
+    @Synchronized
     fun update(transform: (AppSettings) -> AppSettings) {
+        // SSH state changes, saveHost and the Settings UI can update different
+        // fields concurrently. Serialise the read-modify-write so toggling
+        // "always-on" cannot silently revert the last model or host id.
         val next = transform(_settings.value)
         _settings.value = next
         prefs.edit().putString(KEY, json.encodeToString(AppSettings.serializer(), next)).apply()

@@ -89,6 +89,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -159,7 +160,9 @@ import dev.pvps.ui.theme.AccentDim
 import dev.pvps.ui.theme.Danger
 import dev.pvps.ui.theme.DeepBackground
 import dev.pvps.ui.theme.MonoFont
+import dev.pvps.ui.theme.OnAccent
 import dev.pvps.ui.theme.OutlineDark
+import dev.pvps.ui.theme.SurfaceDark
 import dev.pvps.ui.theme.SurfaceHigh
 import dev.pvps.ui.theme.SurfaceRaised
 import dev.pvps.ui.theme.Success
@@ -312,7 +315,19 @@ fun ChatScreen(
             total == 0 || (info.visibleItemsInfo.lastOrNull()?.index ?: 0) >= total - 2
         }
     }
-    LaunchedEffect(conversation.size, chat.messages.lastOrNull()?.text?.length) {
+    val latestConversationIndex by rememberUpdatedState(conversation.lastIndex)
+    val stayPinned by rememberUpdatedState(atBottom)
+    // Follow the stream at a human interval instead of restarting a scroll
+    // animation on every token. New turns still animate once.
+    LaunchedEffect(chat.busy) {
+        while (chat.busy) {
+            if (stayPinned && latestConversationIndex >= 0) {
+                runCatching { listState.scrollToItem(latestConversationIndex) }
+            }
+            delay(200)
+        }
+    }
+    LaunchedEffect(conversation.size) {
         if (conversation.isNotEmpty() && atBottom) {
             runCatching { listState.animateScrollToItem(conversation.lastIndex) }
         }
@@ -383,10 +398,17 @@ fun ChatScreen(
                 onStats = { showStats = true },
                 onCollapse = { expanded = emptySet() },
                 canCollapse = expanded.isNotEmpty(),
-                onSessions = { showSessions = true },
+                onSessions = {
+                    showSessions = true
+                    scope.launch { runCatching { viewModel.container.openCode.refreshProjects() } }
+                },
                 sessionsEnabled = chat.connected,
                 onNewSession = {
-                    scope.launch { viewModel.container.openCode.newSession() }
+                    scope.launch {
+                        viewModel.container.openCode.newSession(
+                            session?.location?.directory ?: host?.openCodeDirectory
+                        )
+                    }
                 },
                 newSessionEnabled = chat.connected && !chat.connecting
             )
@@ -514,7 +536,7 @@ fun ChatScreen(
                         },
                         actionLabel = if (session == null) "New session" else null,
                         onAction = if (session == null) {
-                            { scope.launch { viewModel.container.openCode.newSession() } }
+                            { scope.launch { viewModel.container.openCode.newSession(host?.openCodeDirectory) } }
                         } else null
                     )
                 } else {
@@ -582,7 +604,7 @@ fun ChatScreen(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(14.dp),
-                        color = SurfaceHigh.copy(alpha = 0.94f),
+                        color = SurfaceHigh,
                         shape = RoundedCornerShape(50),
                         border = BorderStroke(1.dp, Accent.copy(alpha = 0.30f))
                     ) {
@@ -738,9 +760,13 @@ fun ChatScreen(
                 showSessions = false
                 scope.launch { viewModel.container.openCode.selectSession(id) }
             },
-            onNew = {
+            onNew = { directory ->
                 showSessions = false
-                scope.launch { viewModel.container.openCode.newSession() }
+                scope.launch {
+                    viewModel.container.openCode.newSession(
+                        directory ?: session?.location?.directory ?: host?.openCodeDirectory
+                    )
+                }
             },
             onDismiss = { showSessions = false }
         )
@@ -805,7 +831,7 @@ private fun ChatTopBar(
                 .padding(start = 6.dp, end = 6.dp, top = 8.dp, bottom = 9.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
+            IconButton(onClick = onBack, modifier = Modifier.size(44.dp)) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Back",
@@ -890,7 +916,7 @@ private fun ChatTopBar(
             IconButton(
                 onClick = onCollapse,
                 enabled = canCollapse,
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier.size(40.dp)
             ) {
                 Icon(
                     Icons.Default.UnfoldLess,
@@ -902,7 +928,7 @@ private fun ChatTopBar(
             IconButton(
                 onClick = onSessions,
                 enabled = sessionsEnabled,
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier.size(40.dp)
             ) {
                 Icon(
                     Icons.Default.List,
@@ -914,7 +940,7 @@ private fun ChatTopBar(
             IconButton(
                 onClick = onNewSession,
                 enabled = newSessionEnabled,
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier.size(40.dp)
             ) {
                 Icon(
                     Icons.Default.Add,
@@ -1298,7 +1324,7 @@ private fun ActivityGroup(
     }
     Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
         Row(
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp))
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
                 .clickable { onToggle(groupKey) }
                 .padding(horizontal = 6.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -1382,7 +1408,7 @@ private fun ActivityGroup(
                     .padding(14.dp)
                     .heightIn(max = 680.dp),
                 color = SurfaceHigh,
-                shape = RoundedCornerShape(22.dp),
+                shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, OutlineDark)
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
@@ -1461,7 +1487,7 @@ private fun ActivityPartView(
 private fun ReasoningBlock(text: String, expanded: Boolean, onToggle: () -> Unit) {
     if (text.isBlank()) return
     Surface(
-        color = SurfaceRaised.copy(alpha = 0.40f),
+        color = SurfaceRaised,
         shape = RoundedCornerShape(10.dp),
         border = BorderStroke(1.dp, OutlineDark.copy(alpha = 0.7f)),
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
@@ -1513,7 +1539,7 @@ private fun ToolCard(
         tool.name.contains("subagent", ignoreCase = true) ||
         childSession != null
     Surface(
-        color = SurfaceRaised.copy(alpha = 0.36f),
+        color = SurfaceRaised,
         shape = RoundedCornerShape(10.dp),
         border = BorderStroke(1.dp, if (isSubagent) Violet.copy(alpha = 0.24f) else OutlineDark.copy(alpha = 0.65f)),
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
@@ -1562,7 +1588,7 @@ private fun ToolCard(
                 Row(
                     modifier = Modifier
                         .padding(top = 7.dp)
-                        .clip(RoundedCornerShape(7.dp))
+                        .clip(RoundedCornerShape(8.dp))
                         .clickable { onOpenSubagent(childSession) }
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -1840,55 +1866,29 @@ private fun Composer(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Row(
-                    modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TinyAction(compactModelLabel, Modifier.weight(1.15f)) {
+                    TinyAction(compactModelLabel) {
                         keyboard?.hide()
                         pendingModel = null
                         panel = if (panel == ComposerPanel.Model) ComposerPanel.None else ComposerPanel.Model
                     }
                     if (efforts.isNotEmpty()) {
-                        TinyAction(effortLabel, Modifier.weight(0.8f)) {
+                        TinyAction(effortLabel) {
                             keyboard?.hide()
                             pendingModel = null
                             panel = ComposerPanel.Model
                         }
                     }
-                    TinyAction(agentLabel, Modifier.weight(0.85f)) {
+                    TinyAction(agentLabel) {
                         keyboard?.hide()
                         panel = if (panel == ComposerPanel.Agent) ComposerPanel.None else ComposerPanel.Agent
                     }
                 }
-                Spacer(Modifier.width(2.dp))
-                StatusDot(
-                    when {
-                        sending -> Accent
-                        busy -> Warning
-                        connected -> Success
-                        else -> TextFaint
-                    },
-                    6
-                )
-                Spacer(Modifier.width(5.dp))
-                Text(
-                    when {
-                        sending -> "SENDING"
-                        busy -> "WORKING"
-                        connected -> "READY"
-                        else -> "OFFLINE"
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = when {
-                        sending -> Accent
-                        busy -> Warning
-                        connected -> Success
-                        else -> TextFaint
-                    },
-                    maxLines = 1,
-                    softWrap = false
-                )
             }
 
             if (attachments.isNotEmpty() || attachmentError != null) {
@@ -1902,7 +1902,7 @@ private fun Composer(
                     ) {
                         attachments.forEach { item ->
                             Surface(
-                                color = SurfaceRaised.copy(alpha = 0.72f),
+                                color = SurfaceRaised,
                                 shape = RoundedCornerShape(50),
                                 border = BorderStroke(1.dp, OutlineDark)
                             ) {
@@ -1965,7 +1965,7 @@ private fun Composer(
                 Spacer(Modifier.height(7.dp))
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    color = SurfaceRaised.copy(alpha = 0.82f),
+                    color = SurfaceRaised,
                     shape = RoundedCornerShape(14.dp),
                     border = BorderStroke(1.dp, OutlineDark)
                 ) {
@@ -2005,7 +2005,7 @@ private fun Composer(
                 Spacer(Modifier.height(7.dp))
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    color = SurfaceRaised.copy(alpha = 0.72f),
+                    color = SurfaceRaised,
                     shape = RoundedCornerShape(16.dp),
                     border = BorderStroke(1.dp, OutlineDark)
                 ) {
@@ -2055,8 +2055,8 @@ private fun Composer(
                                     colors = OutlinedTextFieldDefaults.colors(
                                         focusedBorderColor = Accent.copy(alpha = 0.28f),
                                         unfocusedBorderColor = OutlineDark,
-                                        focusedContainerColor = SurfaceHigh.copy(alpha = 0.30f),
-                                        unfocusedContainerColor = SurfaceHigh.copy(alpha = 0.18f),
+                                        focusedContainerColor = SurfaceHigh,
+                                        unfocusedContainerColor = SurfaceHigh,
                                         cursorColor = Accent,
                                         focusedTextColor = TextPrimary,
                                         unfocusedTextColor = TextPrimary
@@ -2309,12 +2309,12 @@ private fun Composer(
                             }
                         }
                     },
-                    shape = RoundedCornerShape(18.dp),
+                    shape = RoundedCornerShape(14.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Accent.copy(alpha = 0.30f),
-                        unfocusedBorderColor = Color.Transparent,
-                        focusedContainerColor = SurfaceRaised.copy(alpha = 0.40f),
-                        unfocusedContainerColor = SurfaceRaised.copy(alpha = 0.34f),
+                        focusedBorderColor = Accent.copy(alpha = 0.55f),
+                        unfocusedBorderColor = OutlineDark,
+                        focusedContainerColor = SurfaceDark,
+                        unfocusedContainerColor = SurfaceDark,
                         cursorColor = Accent,
                         focusedTextColor = TextPrimary,
                         unfocusedTextColor = TextPrimary
@@ -2337,7 +2337,7 @@ private fun Composer(
                     icon = Icons.Default.Send,
                     description = if (busy) "Queue message" else "Send",
                     background = if (sendEnabled) Accent else OutlineDark,
-                    tint = if (sendEnabled) Void else TextFaint,
+                    tint = if (sendEnabled) OnAccent else TextFaint,
                     enabled = sendEnabled,
                     onClick = onSend
                 )
@@ -2414,15 +2414,15 @@ private fun ComposerChoice(label: String, selected: Boolean, onClick: () -> Unit
         modifier = Modifier
             .clip(RoundedCornerShape(50))
             .clickable(onClick = onClick),
-        color = if (selected) Accent else SurfaceRaised.copy(alpha = 0.7f),
+        color = if (selected) Accent else SurfaceRaised,
         shape = RoundedCornerShape(50),
         border = BorderStroke(1.dp, if (selected) Accent else OutlineDark)
     ) {
         Text(
-            label.uppercase(),
-            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
-            style = MaterialTheme.typography.labelSmall,
-            color = if (selected) Void else TextPrimary,
+            label,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = if (selected) OnAccent else TextPrimary,
             maxLines = 1
         )
     }
@@ -2513,8 +2513,8 @@ private fun FormWizard(
         } else {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                color = SurfaceRaised.copy(alpha = 0.52f),
-                shape = RoundedCornerShape(20.dp),
+                color = SurfaceRaised,
+                shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, Violet.copy(alpha = 0.24f))
             ) {
                 Column(
@@ -2785,8 +2785,8 @@ private fun FormChoice(option: FormOption, active: Boolean, onClick: () -> Unit)
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(9.dp))
-            .background(if (active) Violet.copy(alpha = 0.14f) else SurfaceRaised.copy(alpha = 0.35f))
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (active) Violet.copy(alpha = 0.14f) else SurfaceRaised)
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 8.dp)
     ) {
@@ -2826,6 +2826,79 @@ private fun fieldVisible(field: FormField, answers: Map<String, JsonElement>): B
     }
 }
 
+private data class ProjectGroup(
+    val key: String,
+    val name: String,
+    val path: String,
+    val project: dev.pvps.opencode.ProjectInfo?,
+    val sessions: List<SessionInfo>
+)
+
+private fun normalisePath(path: String?): String =
+    path.orEmpty().trim().trimEnd('/').ifBlank { "global" }
+
+private fun projectGroups(
+    sessions: List<SessionInfo>,
+    projects: List<dev.pvps.opencode.ProjectInfo>
+): Pair<List<ProjectGroup>, Map<String, String>> {
+    val pathToProject = HashMap<String, dev.pvps.opencode.ProjectInfo>()
+    projects.forEach { project ->
+        normalisePath(project.canonical).takeIf { it != "global" }?.let {
+            pathToProject[it] = project
+        }
+        project.sandboxes.forEach { sandbox ->
+            normalisePath(sandbox).takeIf { it != "global" }?.let { pathToProject[it] = project }
+        }
+    }
+    val byId = projects.associateBy { it.id }
+    fun resolve(session: SessionInfo): dev.pvps.opencode.ProjectInfo? {
+        byId[session.projectID]?.let { return it }
+        val directory = normalisePath(session.location?.directory)
+        if (directory == "global") return null
+        pathToProject[directory]?.let { return it }
+        // Subpath / worktree sessions live under a project canonical path.
+        return pathToProject.entries
+            .filter { (path, _) -> directory.startsWith("$path/") }
+            .maxByOrNull { (path, _) -> path.length }
+            ?.value
+    }
+    val sessionProject = sessions.associateWith { resolve(it) }
+    val grouped = LinkedHashMap<String, MutableList<SessionInfo>>()
+    projects.forEach { project ->
+        // Projects with no sessions remain first-class so the user can start a
+        // session in them; this was impossible before and made /api/project
+        // effectively decorative.
+        grouped["p:${project.id}"] = mutableListOf()
+    }
+    sessions.forEach { session ->
+        val project = sessionProject[session]
+        val key = project?.let { "p:${it.id}" }
+            ?: "d:${normalisePath(session.location?.directory)}"
+        grouped.getOrPut(key) { mutableListOf() }.add(session)
+    }
+    val groups = grouped.map { (key, list) ->
+        val project = if (key.startsWith("p:")) projects.firstOrNull { "p:${it.id}" == key } else null
+        val path = project?.canonical
+            ?: list.firstOrNull()?.location?.directory
+            ?: "global"
+        ProjectGroup(
+            key = key,
+            name = project?.displayName
+                ?: path.trimEnd('/').substringAfterLast('/').ifBlank { "Global" },
+            path = path,
+            project = project,
+            sessions = list.sortedByDescending { it.time.updated }
+        )
+    }.sortedWith(
+        compareByDescending<ProjectGroup> { it.sessions.maxOfOrNull { s -> s.time.updated } ?: 0L }
+            .thenBy { it.name.lowercase() }
+    )
+    val keyBySessionId = sessions.associate { session ->
+        session.id to (sessionProject[session]?.let { "p:${it.id}" } ?: "")
+    }
+    return groups to keyBySessionId
+}
+
 @Composable
 private fun SessionDialog(
     sessions: List<SessionInfo>,
@@ -2833,39 +2906,37 @@ private fun SessionDialog(
     activeSession: SessionInfo?,
     activeId: String?,
     onSelect: (String) -> Unit,
-    onNew: () -> Unit,
+    onNew: (String?) -> Unit,
     onDismiss: () -> Unit
 ) {
     var query by remember { mutableStateOf("") }
     var showAll by remember { mutableStateOf(false) }
-    val projectByID = remember(projects) { projects.associateBy { it.id } }
-    fun projectDirectory(session: SessionInfo): String =
-        session.location?.directory?.takeIf { it.isNotBlank() }
-            ?: projectByID[session.projectID]?.canonical
-            ?: "global"
-    fun projectName(session: SessionInfo): String {
-        val project = projectByID[session.projectID]
-        return project?.displayName
-            ?: projectDirectory(session).trimEnd('/').substringAfterLast('/').ifBlank { "Global" }
+    var collapsed by remember { mutableStateOf(emptySet<String>()) }
+    val (groups, keyBySession) = remember(sessions, projects) {
+        projectGroups(sessions, projects)
     }
-    val currentDirectory = activeSession?.let { projectDirectory(it) }
-    val scoped = remember(sessions, showAll, currentDirectory) {
-        if (showAll || currentDirectory == null) sessions
-        else sessions.filter { projectDirectory(it) == currentDirectory }
-    }
-    val filtered = remember(scoped, query) {
-        val needle = query.trim().lowercase()
-        if (needle.isBlank()) scoped else scoped.filter {
-            it.displayTitle.lowercase().contains(needle) ||
-                (it.agent ?: "").contains(needle, true) ||
-                projectName(it).lowercase().contains(needle)
+    val activeProjectKey = activeSession?.id?.let { keyBySession[it] }.orEmpty()
+    val needle = query.trim().lowercase()
+    fun matches(session: SessionInfo, group: ProjectGroup): Boolean =
+        needle.isBlank() ||
+            session.displayTitle.lowercase().contains(needle) ||
+            (session.agent ?: "").contains(needle, true) ||
+            group.name.lowercase().contains(needle) ||
+            group.path.lowercase().contains(needle)
+
+    val visibleGroups = groups.mapNotNull { group ->
+        val scoped = if (showAll || activeProjectKey.isBlank()) group
+            .copy(sessions = group.sessions.filter { matches(it, group) })
+        else if (group.key == activeProjectKey) group.copy(sessions = group.sessions.filter { matches(it, group) })
+        else return@mapNotNull null
+        // Empty projects are useful only while browsing, not while searching.
+        if (scoped.sessions.isEmpty() && needle.isNotBlank()) {
+            return@mapNotNull null
         }
+        scoped
     }
-    val grouped = remember(filtered, projectByID) {
-        filtered.groupBy { projectDirectory(it) }
-            .toList()
-            .sortedByDescending { (_, list) -> list.maxOfOrNull { it.time.updated } ?: 0L }
-    }
+    val visibleCount = visibleGroups.sumOf { it.sessions.size }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -2881,7 +2952,7 @@ private fun SessionDialog(
                     Column(Modifier.weight(1f)) {
                         Text("Sessions", style = MaterialTheme.typography.headlineSmall, color = TextPrimary)
                         Text(
-                            "${sessions.size} sessions · ${sessions.count { it.isRunning }} running",
+                            "$visibleCount shown · ${sessions.count { it.isRunning }} running · ${projects.size} projects",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )
@@ -2891,16 +2962,16 @@ private fun SessionDialog(
                         shape = RoundedCornerShape(50),
                         modifier = Modifier
                             .clip(RoundedCornerShape(50))
-                            .clickable(onClick = onNew)
+                            .clickable { onNew(activeSession?.location?.directory) }
                     ) {
                         Text(
-                            "NEW",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = Void,
-                            modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp)
+                            "New",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = OnAccent,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
                         )
                     }
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(6.dp))
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
                     }
@@ -2911,23 +2982,32 @@ private fun SessionDialog(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     placeholder = { Text("Search sessions or projects", color = TextFaint) },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextFaint) },
+                    trailingIcon = if (query.isNotEmpty()) {
+                        {
+                            IconButton(onClick = { query = "" }) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear search", tint = TextFaint)
+                            }
+                        }
+                    } else null,
                     singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Accent.copy(alpha = 0.55f),
+                        focusedBorderColor = Accent.copy(alpha = 0.7f),
                         unfocusedBorderColor = OutlineDark,
                         focusedTextColor = TextPrimary,
                         unfocusedTextColor = TextPrimary,
-                        cursorColor = Accent
+                        cursorColor = Accent,
+                        focusedContainerColor = SurfaceDark,
+                        unfocusedContainerColor = SurfaceDark
                     )
                 )
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 9.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     ComposerChoice(
-                        label = activeSession?.let { projectName(it) } ?: "Current project",
+                        label = groups.firstOrNull { it.key == activeProjectKey }?.name ?: "Current project",
                         selected = !showAll,
                         onClick = { showAll = false }
                     )
@@ -2944,41 +3024,92 @@ private fun SessionDialog(
                     ),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    grouped.forEach { (directory, list) ->
-                        val label = projectByID[list.first().projectID]?.displayName
-                            ?: directory.trimEnd('/').substringAfterLast('/').ifBlank { "Global" }
-                        item(key = "project-$directory") {
+                    visibleGroups.forEach { group ->
+                        val isCollapsed = group.key in collapsed
+                        item(key = "project-${group.key}") {
                             Row(
-                                modifier = Modifier.fillMaxWidth().padding(start = 4.dp, top = 8.dp, bottom = 2.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        collapsed = if (isCollapsed) collapsed - group.key
+                                        else collapsed + group.key
+                                    }
+                                    .padding(start = 4.dp, end = 2.dp, top = 8.dp, bottom = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
                                     Icons.Default.Folder,
                                     contentDescription = null,
-                                    tint = Accent.copy(alpha = 0.8f),
-                                    modifier = Modifier.size(14.dp)
+                                    tint = if (group.key == activeProjectKey) Accent else TextSecondary,
+                                    modifier = Modifier.size(15.dp)
                                 )
-                                Spacer(Modifier.width(6.dp))
+                                Spacer(Modifier.width(7.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        group.name,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = TextPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (group.path.isNotBlank() && group.path != "global") {
+                                        Text(
+                                            group.path,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = TextFaint,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
                                 Text(
-                                    label.uppercase(),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = TextSecondary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(Modifier.weight(1f))
-                                Text(
-                                    "${list.size}",
-                                    style = MaterialTheme.typography.labelSmall,
+                                    "${group.sessions.size}",
+                                    style = MaterialTheme.typography.labelMedium,
                                     color = TextFaint
                                 )
+                                IconButton(
+                                    onClick = { onNew(group.project?.canonical ?: group.path) },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Add,
+                                        contentDescription = "New session in ${group.name}",
+                                        tint = Accent,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
                         }
-                        items(list, key = { it.id }) { session ->
-                            SessionRow(
-                                session = session,
-                                active = session.id == activeId,
-                                onClick = { onSelect(session.id) }
+                        if (!isCollapsed) {
+                            if (group.sessions.isEmpty()) {
+                                item(key = "empty-${group.key}") {
+                                    Text(
+                                        "No sessions in this project yet.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextFaint,
+                                        modifier = Modifier.padding(start = 30.dp, top = 2.dp, bottom = 8.dp)
+                                    )
+                                }
+                            } else {
+                                items(group.sessions, key = { it.id }) { session ->
+                                    SessionRow(
+                                        session = session,
+                                        active = session.id == activeId,
+                                        onClick = { onSelect(session.id) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (visibleGroups.isEmpty()) {
+                        item {
+                            Text(
+                                if (needle.isNotBlank()) "No matching sessions."
+                                else "No sessions yet. Use New to start one.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextSecondary,
+                                modifier = Modifier.padding(24.dp)
                             )
                         }
                     }
@@ -2997,7 +3128,7 @@ private fun SessionRow(
     Surface(
         color = when {
             active -> Accent.copy(alpha = 0.075f)
-            else -> SurfaceRaised.copy(alpha = 0.34f)
+            else -> SurfaceRaised
         },
         shape = RoundedCornerShape(16.dp),
         border = BorderStroke(
@@ -3019,7 +3150,7 @@ private fun SessionRow(
             Box(
                 modifier = Modifier
                     .size(28.dp)
-                    .clip(RoundedCornerShape(9.dp))
+                    .clip(RoundedCornerShape(8.dp))
                     .background(
                         when {
                             session.isRunning -> Warning.copy(alpha = 0.13f)
